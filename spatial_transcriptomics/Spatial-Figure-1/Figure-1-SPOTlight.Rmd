@@ -1,0 +1,282 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+title: "Figure 1 - SC Mapping SPOTlight deconvolution`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+This script is set to map the annotated SC dataset on to the spatial transcriptomics Visium slide.
+In this script we use the Visium data coming from *03-Clustering/03-clustering* and the SC data comming from */scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/results/R_objects/final_clusters/tonsil_atlas_all_cells_20210930.rds*.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(Matrix)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig1}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig1}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+clust_vr <- "annotation_figure_1"
+```
+
+## Load data
+
+We have 8 different datasets that we have integrated in previous scripts - *03-clustering/03-clustering_integration.Rmds*.
+We are going to analyze the integrated dataset all together since the regions are shared across all
+
+```{r}
+# Load Tonsils integrated
+sp_obj <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Load single-cell dataset
+sc_obj <- "misc/{robj_dir}/20220215_tonsil_atlas_rna_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+
+Look at cell types
+```{r}
+flextable::flextable(data.frame(table(sc_obj@meta.data[, clust_vr])))
+```
+
+### Combine cycling
+```{r}
+sc_obj@meta.data <- sc_obj@meta.data %>%
+    dplyr::mutate(
+      annotation_figure_1 = dplyr::case_when(
+        # Join all B cells
+        annotation_figure_1 %in% c("cycling FDC", "Cycling", "cycling T", "cycling myeloid") ~ "Cycling",
+        TRUE ~ annotation_figure_1))
+```
+
+### Get markers
+First of all we need to compute the markers for the cell types using `Seurat's` funtion `FindAllMarkers`. For the high level annotation we will compute the markers using the function `FindAllMarkers`.
+```{r}
+Seurat::Idents(sc_obj) <- sc_obj@meta.data[, clust_vr]
+
+sc_markers <- Seurat::FindAllMarkers(
+  object = sc_obj,
+  assay = "RNA",
+  slot = "data",
+  only.pos = TRUE,
+  max.cells.per.ident = 500)
+
+"{fig1}/{robj_dir}/sc_markers_fig1.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+    saveRDS(object = sc_markers, file = .)
+```
+
+Filter markers and look 
+```{r}
+sc_markers <- "{fig1}/{robj_dir}/sc_markers_fig1.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+    readRDS(file = .)
+
+# sc_markers <- sc_markers %>%
+#   dplyr::filter(avg_log2FC >= 0.5)
+
+
+DT::datatable(sc_markers, filter = "top")
+```
+
+Make sure all the cell types have marker genes post filtering
+```{r}
+count_df <- dplyr::count(sc_markers, cluster)
+flextable::flextable(count_df)
+unique(sc_obj@meta.data[, clust_vr]) %in% count_df$cluster
+```
+
+Subset SC object so all the cells from the same cell type to come from the same batch
+```{r}
+# subset most representative sample(s)
+ns <- with(sc_obj@meta.data, table(gem_id, annotation_figure_1))
+ns <- as.matrix(unclass(ns))
+m <- 100 # Max cells per cell type
+# Extract cell barcodes
+meta <- sc_obj@meta.data
+
+id <- lapply(colnames(ns), function(nm) {
+    x <- ns[, nm]
+    # Initialize variables
+    n <- 0    # N of cells
+    s <- c()  # Gem IDs
+    b <- c()  # Cell barcodes
+    while (n < m & length(x) > 0) {
+        # select gem id with the most cells
+        i <- which.max(x)
+        # Add gem id to vector s
+        s <- c(s, names(i))
+        # Add number of cells per cell type to n
+        n <- n + x[i]
+        # Remove gem id from x to move on to the next
+        x <- x[-i]
+        # extract barcode
+        barcode <- rownames(meta[meta[, "gem_id"] == names(i) &
+                            meta[, "annotation_figure_1"] == nm, ])
+        # make sure it adds up to m
+        # print(barcode)
+        if (length(b) + length(barcode) > m) {
+          barcode <- sample(x = barcode, size = m - length(b), replace = FALSE)
+        }
+        b <- c(b, barcode)  # Cell barcodes
+        # print(b)
+        
+    }
+    return(b)
+})
+
+sc_sub <- sc_obj[, unlist(id)]
+```
+
+### Pre-deconv checks
+
+Remove empty genes
+```{r}
+table(Matrix::rowSums(sp_obj@assays$Spatial@counts) == 0)
+table(Matrix::rowSums(sc_sub@assays$RNA@counts) == 0)
+
+sc_sub <- sc_sub[Matrix::rowSums(sc_sub@assays$RNA@counts) != 0, ]
+
+sp_obj <- sp_obj[Matrix::rowSums(sp_obj@assays$Spatial@counts) != 0, ]
+```
+
+### Deconvolution
+Run deconvolution using the scRNAseq and the spatial transcriptomics data
+```{r message=FALSE, results="hide"}
+decon_mtrx_ls <- SPOTlight::spotlight_deconvolution(
+  se_sc = sc_obj,
+  counts_spatial = sp_obj@assays$Spatial@counts,
+  clust_vr = clust_vr,
+  cluster_markers = sc_markers,
+  cl_n = 50,
+  hvg = 3000,
+  ntop = NULL,
+  transf = "uv",
+  method = "nsNMF",
+  min_cont = 0,
+  assay = "RNA",
+  slot = "counts")
+```
+
+Change names to remove . by original name
+```{r}
+# names_df <- data.frame(
+#   plt_name = unique(sc_obj@meta.data[, clust_vr]),
+#   ct_name = stringr::str_replace_all(
+#     string = unique(sc_obj@meta.data[, clust_vr]),
+#     pattern = "[:punct:]|[:blank:]|[+]", "."))
+# 
+# 
+# cnames <- colnames(decon_mtrx_ls[[2]])
+# new_names <- data.frame("ct_name" = cnames) %>%
+#   dplyr::left_join(names_df, by = "ct_name") %>%
+#   dplyr::pull("plt_name")
+
+# colnames(decon_mtrx_ls[[2]]) <- new_names
+```
+
+### Save deconvolution
+```{r}
+"{fig1}/{robj_dir}/decon_mtrx_{clust_vr}.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = decon_mtrx_ls,
+    file = .)
+```
+
+### Assess deconvolution
+Before even looking at the decomposed spots we can gain insight on how well the model performed by looking at the topic profiles for the cell types.
+
+```{r}
+nmf_mod <- decon_mtrx_ls[[1]]
+decon_mtrx <- decon_mtrx_ls[[2]]
+
+rownames(decon_mtrx) <- colnames(sp_obj)
+```
+
+The first thing we can do is look at how specific the topic profiles are for each cell type.
+```{r fig.width=10, fig.height=8}
+h <- NMF::coef(nmf_mod[[1]])
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod[[2]])
+
+topic_profile_plts[[2]] + 
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(angle = 90), 
+    axis.text = ggplot2::element_text(size = 12))
+```
+
+Next we can take a look at the how the individual topic profiles of each cell within each cell-type behave. Here we expect that all the cells from the same cell type show a similar topic profile distribution, if not there might be a bit more substructure in that cluster and we may only be capturing one or the other.
+
+```{r fig.width=25, fig.height=25}
+topic_profile_plts[[1]] +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(angle = 90), 
+    axis.text = ggplot2::element_text(size = 12))
+```
+
+Lastly we can take a look at which genes are the most important for each topic and therefore get an insight into which genes are driving them.
+```{r}
+basis_spotlight <- data.frame(NMF::basis(nmf_mod[[1]]))
+
+colnames(basis_spotlight) <- glue::glue("Topic {1:length(unique(nmf_mod[[2]]))}")
+
+DT::datatable(round(basis_spotlight, 5),
+              filter = "top")
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

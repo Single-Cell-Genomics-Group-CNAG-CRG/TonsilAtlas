@@ -1,0 +1,45 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2020/04/10"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Scrublet: ", gem_id, sep = "")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+In this notebook, we summarize the doublet detection results obtained after running [Scrublet](https://www.sciencedirect.com/science/article/pii/S2405471218304745). In particular, we run scrublet for each expression matrix derived from individual 10X Chip Channels, as recommended in the best practices of the tutorial.
+
+# Histograms
+
+We start by plotting the doublet score histograms for observed transcriptomes and simulated doublets. Importantly, we should visualize a bimodal distribution in the simulated doublets that allows to set an accurate theshold:
+
+`r path_to_image <- paste(path_to_knit, "scRNA-seq/2-QC/2-doublet_detection/tmp/histograms/scrublet_doublet_prediction_histograms-", subproject, "-", gem_id, ".png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+# UMAPs
+
+As described in the best practices "Visualize the doublet predictions in a 2-D embedding (e.g., UMAP or t-SNE). Predicted doublets should mostly co-localize (possibly in multiple clusters). If they do not, you may need to adjust the doublet score threshold, or change the pre-processing parameters to better resolve the cell states present in your data".
+
+`r path_to_image <- paste(path_to_knit, "scRNA-seq/2-QC/2-doublet_detection/tmp/umaps/scrublet_doublet_prediction_umaps-", subproject, "-", gem_id, ".png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

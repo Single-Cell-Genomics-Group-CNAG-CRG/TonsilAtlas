@@ -1,0 +1,9 @@
+library_id,fastq_path,read,pair_id,type
+155140,/scratch/project/production/fastq/HJNFJDRXX/1/fastq/HJNFJDRXX_1_SI-GA-G9_1.fastq.gz,R1,P1,not_hashed
+155140,/scratch/project/production/fastq/HJNFJDRXX/2/fastq/HJNFJDRXX_2_SI-GA-G9_1.fastq.gz,R1,P2,not_hashed
+155140,/scratch/project/production/fastq/HKJ5JDRXX/1/fastq/HKJ5JDRXX_1_SI-GA-G9_1.fastq.gz,R1,P3,not_hashed
+155140,/scratch/project/production/fastq/HKJ5JDRXX/2/fastq/HKJ5JDRXX_2_SI-GA-G9_1.fastq.gz,R1,P4,not_hashed
+155140,/scratch/project/production/fastq/HJNFJDRXX/1/fastq/HJNFJDRXX_1_SI-GA-G9_2.fastq.gz,R2,P1,not_hashed
+155140,/scratch/project/production/fastq/HJNFJDRXX/2/fastq/HJNFJDRXX_2_SI-GA-G9_2.fastq.gz,R2,P2,not_hashed
+155140,/scratch/project/production/fastq/HKJ5JDRXX/1/fastq/HKJ5JDRXX_1_SI-GA-G9_2.fastq.gz,R2,P3,not_hashed
+155140,/scratch/project/production/fastq/HKJ5JDRXX/2/fastq/HKJ5JDRXX_2_SI-GA-G9_2.fastq.gz,R2,P4,not_hashed

@@ -1,0 +1,179 @@
+---
+title: "Epithelial: Level 3"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will include the annotation of the epithelial cells (level 4).
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_3/epithelial/epithelial_clustered_level_3_with_pre_freeze.rds"
+path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/epithelial/epithelial_annotated_level_4.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette)
+```
+
+
+# Annotation
+
+```{r}
+seurat$annotation_level_3 <- case_when(
+  seurat$seurat_clusters == "0" ~ "Surface epithelium",
+  seurat$seurat_clusters == "1" ~ "Basal cells",
+  seurat$seurat_clusters == "2" ~ "FDCSP epithelium",
+  seurat$seurat_clusters == "3" ~ "Crypt",
+  seurat$seurat_clusters == "4" ~ "Crypt",
+  seurat$seurat_clusters == "5" ~ "VEGFA+",
+  seurat$seurat_clusters == "6" ~ "Crypt",
+  seurat$seurat_clusters == "7" ~ "Outer surface"
+)
+DimPlot(seurat, cols = color_palette, group.by = "annotation_level_3")
+```
+
+# Subset cluster FDCSP epithelium
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "FDCSP epithelium",
+  graph.name = "RNA_snn",
+  subcluster.name = "fdcsp_epithelium",
+  resolution = 0.15
+)
+Idents(seurat) <- "fdcsp_epithelium"
+DimPlot(seurat, cols = color_palette)
+markers_fdcsp_epi <- FindMarkers(
+  seurat,
+  ident.1 = "FDCSP epithelium_0",
+  ident.2 = "FDCSP epithelium_1",
+  only.pos = FALSE,
+  logfc.threshold = 0.5
+)
+DT::datatable(markers_fdcsp_epi)
+FeaturePlot(seurat, c("KRT4", "KRT13"))
+```
+
+No significant markers, so we can remove FDCSP epithelium_2:
+
+```{r}
+seurat <- subset(seurat, fdcsp_epithelium != "FDCSP epithelium_1")
+```
+
+
+# GSEA cluster 5
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+set.seed(1234)
+df <- FindMarkers(
+  seurat,
+  ident.1 = "VEGFA+",
+  only.pos = FALSE,
+  logfc.threshold = 0.2
+)
+df <- df %>%
+  rownames_to_column("gene") %>%
+  filter(p_val_adj < 0.001) %>% 
+  arrange(desc(avg_log2FC))
+gene_list <- df$avg_log2FC
+names(gene_list) <- df$gene
+gsea_results <- gseGO(
+  gene_list,
+  ont = "BP",
+  OrgDb = org.Hs.eg.db,
+  keyType = "SYMBOL",
+  minGSSize = 10,
+  maxGSSize = 300,
+  seed = TRUE
+)
+gsea_results@result
+DT::datatable(gsea_results@result)
+```
+
+
+# Save
+
+```{r}
+umap_level_3 <- DimPlot(seurat, cols = color_palette, pt.size = 1)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/epithelial/tmp/epithelial_umap_level_4.png",
+  plot = umap_level_3,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+saveRDS(seurat, path_to_save)
+
+
+# Shiny app
+input_shiny <- seurat2shiny(seurat, slot = "data", reduction = "umap")
+saveRDS(
+  input_shiny$expression,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/epithelial/epithelial_expression_to_shiny_app_level_3.rds")
+saveRDS(
+  input_shiny$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/epithelial/epithelial_metadata_to_shiny_app_level_3.rds")
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+

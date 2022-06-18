@@ -1,0 +1,144 @@
+---
+title: "Dimensionality reduction and integration: scATAC-seq"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+TODO: have to include new reductions (lsi, atacUMAP) when saving the object 
+
+
+# Introduction
+
+Here, we will perform dimensionality reduction for scATAC-seq data of our MCL cases. We will follow [this](https://satijalab.org/signac/articles/pbmc_vignette.html) vignette from Signac.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+path_to_102 <- here::here("MCL/results/R_objects/3.seurat_merged_rna_atac_102.rds")
+path_to_413 <- here::here("MCL/results/R_objects/3.seurat_merged_rna_atac_413.rds")
+path_to_save_102 <- here::here("MCL/results/R_objects/4.seurat_merged_rna_unprocessed_atac_processed_102.rds")
+path_to_save_413 <- here::here("MCL/results/R_objects/4.seurat_merged_rna_unprocessed_atac_processed_413.rds")
+```
+
+
+## Gene annotation
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+
+## Read data
+
+```{r}
+seurat_102 <- readRDS(path_to_102)
+DefaultAssay(seurat_102) <- "ATAC"
+seurat_102[["RNA"]] <- NULL
+seurat_413 <- readRDS(path_to_413)
+DefaultAssay(seurat_413) <- "ATAC"
+seurat_413[["RNA"]] <- NULL
+seurat_list <- list("102" = seurat_102, "413" = seurat_413)
+rm(seurat_102, seurat_413)
+```
+
+
+# Normalization and linear dimensionality reduction
+
+```{r}
+seurat_list <- map(seurat_list, RunTFIDF)
+seurat_list <- map(seurat_list, FindTopFeatures, min.cutoff = "q25")
+seurat_list <- map(seurat_list, RunSVD)
+```
+
+Let us check if, as expected, the first LSI component captures sequencing depth:
+
+```{r}
+map(seurat_list, DepthCor)
+```
+
+
+# Non-linear dimensionality reduction (UMAP)
+
+```{r}
+seurat_list <- map(
+  seurat_list,
+  RunUMAP,
+  reduction = "lsi",
+  dims = 2:30,
+  reduction.key = "atacUMAP_",
+  reduction.name = "atacUMAP"
+)
+map(
+  seurat_list,
+  DimPlot,
+  reduction = "atacUMAP",
+  group.by = "library_name",
+  split.by = "library_name"
+)
+```
+
+Of note, we see a good mixability across samples, so we will no perform any batch effect correction method.
+
+
+# Add new ChromatinAssay
+
+## 102
+
+```{r}
+seurat_102 <- readRDS(path_to_102)
+seurat_102[["ATAC"]] <- NULL
+seurat_102[["ATAC"]] <- seurat_list$`102`[["ATAC"]]
+seurat_102@reductions$lsi <- seurat_list$`102`@reductions$lsi
+seurat_102@reductions$atacUMAP <- seurat_list$`102`@reductions$atacUMAP
+saveRDS(seurat_102, path_to_save_102)
+rm(seurat_102)
+```
+
+
+## 413
+
+```{r}
+seurat_413 <- readRDS(path_to_413)
+seurat_413[["ATAC"]] <- NULL
+seurat_413[["ATAC"]] <- seurat_list$`413`[["ATAC"]]
+seurat_413@reductions$lsi <- seurat_list$`413`@reductions$lsi
+seurat_413@reductions$atacUMAP <- seurat_list$`413`@reductions$atacUMAP
+saveRDS(seurat_413, path_to_save_413)
+rm(seurat_413)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,199 @@
+---
+title: 'Exclude Doublets'
+author: "Ramon Massoni-Badosa"
+date: "1/28/2021"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The objectives of this notebook are:
+
+1. Include the scores computed in the previous notebook to the metadata of the Seurat object.
+2. Project such scores and annotations in the UMAP to get a sense of where our predicted doublets are located.
+3. Exclude the doublets and save the object.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(Seurat)
+library(Matrix)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/seurat_integrated_with_doublets.rds")
+path_to_doubl_annot <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/1-doublet_exclusion/tmp/doublet_final_annotations_and_pDNN.rds")
+path_to_save <- here::here("scRNA-seq/results/R_objects/seurat_without_doublets_missing_reintegration.rds")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+doublet_annot <- readRDS(path_to_doubl_annot)
+```
+
+
+# Add metadata
+
+```{r}
+if (all(rownames(doublet_annot) == colnames(tonsil))) {
+  tonsil$pDNN_hashing <- doublet_annot$pDNN_hashing
+  tonsil$pDNN_scrublet <- doublet_annot$pDNN_scrublet
+  tonsil$pDNN_union <- doublet_annot$pDNN_union
+} else {
+  warning("barcodes are not equal")
+}
+```
+
+
+# Visualize
+
+## Proportion of doublet nearest neighbors (pDNN)
+
+```{r fig.wide=TRUE}
+pDNN_vars <- c("pDNN_hashing", "pDNN_scrublet", "pDNN_union")
+pDNN_ggs <- purrr::map(pDNN_vars, function(x) {
+  p <- feature_plot_doublets(seurat_obj = tonsil, feature = x)
+  p
+})
+names(pDNN_ggs) <- pDNN_vars
+pDNN_ggs
+```
+
+
+## Doublet annotations
+
+```{r fig.wide=TRUE}
+doublet_vars <- c("HTO_classification.global", "scrublet_predicted_doublet",
+                  "has_high_lib_size")
+doublet_ggs <- purrr::map(doublet_vars, function(x) {
+  p <- DimPlot(tonsil, group.by = x, pt.size = 0.3) +
+    ggtitle(x) +
+    theme(
+      plot.title = element_text(size = 14, hjust = 0.5),
+      axis.title = element_text(size = 13),
+      axis.text = element_text(size = 11),
+      legend.text = element_text(size = 11)
+    )
+  p
+})
+names(doublet_ggs) <- doublet_vars
+doublet_ggs
+
+
+# Zoom in for cell hashing
+umap_hashing <- tonsil@reductions$umap@cell.embeddings %>%
+  as.data.frame() %>%
+  mutate(HTO_classification.global = tonsil$HTO_classification.global) %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = HTO_classification.global)) +
+    geom_point(size = 0.01, alpha = 0.5) +
+    facet_wrap(~HTO_classification.global) +
+    theme_classic()
+umap_hashing
+```
+
+
+## Canonical markers
+
+```{r}
+canonical_markers <- c("CD79A", "CD79B", "CD3D", "CD3E", "NKG7", "LYZ", "FDCSP")
+canonical_markers_gg <- purrr::map(canonical_markers, function(x) {
+  p <- feature_plot_doublets(seurat_obj = tonsil, feature = x)
+  p
+})
+names(canonical_markers_gg) <- canonical_markers
+canonical_markers_gg
+```
+
+
+## pre-Plasmablast and tingible-body macrophages
+
+We want to be particularly careful with two cell types: pre-plasmablasts and [tingible-body macrophages](https://en.wikipedia.org/wiki/Tingible_body_macrophage), since they might be confused by doublets (specially using scrublet). Thus, we will visualize a [prePB](https://immunology.sciencemag.org/content/6/56/eabe6291) and apoptosis signature:
+
+```{r fig.wide=TRUE}
+# Define signatures
+apoptosis_signature <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = "GO:0006915",
+  keytype = "GO",
+  columns = "SYMBOL"
+)$SYMBOL
+apoptosis_signature <- unique(apoptosis_signature)
+prePB_signature <- c("RASSF6", "FRZB", "HOPX", "BRNL9", "FGFR1")
+signatures_list <- list(
+  prePB_signature = prePB_signature,
+  apoptosis_signature = apoptosis_signature
+)
+
+
+# Compute score
+tonsil <- AddModuleScore(
+  tonsil,
+  features = signatures_list,
+  name = c("prePB_signature", "apoptosis_signature")
+)
+
+
+# Visualize
+prePB_gg <- feature_plot_doublets(
+  seurat_obj = tonsil,
+  feature = "prePB_signature1"
+)
+apopotosis_gg <- feature_plot_doublets(
+  seurat_obj = tonsil,
+  feature = "apoptosis_signature2"
+)
+prePB_gg
+apopotosis_gg
+```
+
+
+# Exclude doublets
+
+```{r}
+tonsil
+table(tonsil$HTO_classification.global)
+tonsil <- subset(tonsil, subset = HTO_classification.global != "Doublet")
+tonsil
+```
+
+
+# Save
+
+```{r}
+saveRDS(tonsil, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

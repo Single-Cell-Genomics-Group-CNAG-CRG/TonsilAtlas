@@ -1,0 +1,146 @@
+---
+title: "Calling Peaks"
+author: "Paula Soler-Vila & Sergio Aguilar-Fernández"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+Looking at the scATAC-seq coverage plots, it's possible to vislumbrate that, as a consequence of the merging process, some peaks show a considerable increase in size. This can create a problem for certain analysis such as motif enrichment analysis. In order to solve it, we decided to do a new round of peak calling using MACS2 for each group of cells annotated helping to identify specifics peaks for rarer populations.  
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(GenomicRanges)
+library(EnsDb.Hsapiens.v86)
+library(stringr)
+```
+
+
+## Parameters
+
+```{r parameters}
+cell_type = "PC"
+
+# Path to PC samples
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+    "/02.",
+  cell_type,
+  "_annotated_MBC_GCBC_level_5.rds",
+  sep = ""
+)
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/03.",
+  cell_type,
+  "_peak_calling_level_5.rds",
+  sep = ""
+)
+```
+
+
+## Functions
+
+```{r functions}
+peaks_quantification <- function(seurat_filtered, new_peaks){ 
+    
+    annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+    #seqlevelsStyle(annotation) <- "UCSC"
+    ucsc.levels <- str_replace(string=paste("chr",seqlevels(annotation),sep=""), pattern="chrMT", replacement="chrM")
+    seqlevels(annotation) <- ucsc.levels
+    genome(annotation) <- "hg38"
+
+    macs2_counts <- FeatureMatrix(
+    fragments = Fragments(seurat_filtered),
+    features = new_peaks,
+    cells = colnames(seurat_filtered))
+    
+    seurat_filtered[["peaks_level_5"]] <- CreateChromatinAssay(
+      counts = macs2_counts, 
+    #  genome = "hg38",
+      fragments = Fragments(seurat_filtered),
+      annotation = annotation)
+    
+    return(seurat_filtered)
+}
+```
+
+# Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+```
+
+Here, we can see the main clusters annotated thanks to the scRNA-seq data from the same cells and for the KNN algorithm.
+
+```{r fig.wide=TRUE}
+seurat <- SetIdent(seurat, 
+                   value = seurat@meta.data$annotation_level_5)
+
+table(seurat$annotation_level_5)
+
+DimPlot(seurat,
+       cols =  c("#035F72","red","gray10","gray70","gold","#198c19",
+           "#FF8E7B","lightblue","#4A332D","darkgreen",
+           "pink","lightgreen",'#ffd8b1'),
+      pt.size = 0.5)
+```
+
+
+# New round of Peak Calling using MACS2 on each annotated cell type at level 5.
+
+```{r}
+peaks_level5 <- CallPeaks(
+  object = seurat,
+  group.by = "annotation_level_5",
+  macs2.path = "/Users/pauli/opt/anaconda3/envs/Tonsil_atlas/bin/macs2")
+```
+
+```{r}
+# remove peaks on nonstandard chromosomes and in genomic blacklist regions
+peaks_level5 <- keepStandardChromosomes(peaks_level5, pruning.mode = "coarse")
+peaks_level5 <- subsetByOverlaps(x = peaks_level5, 
+                         ranges = blacklist_hg38_unified, 
+                         invert = TRUE)
+```
+
+# Quantification of the new peak counts in the entire dataset
+
+```{r}
+seurat <- peaks_quantification(seurat, peaks_level5)
+```
+
+```{r}
+# remove the initial peaks annotation
+DefaultAssay(seurat) <- 'peaks_level_5'
+seurat[['peaks_macs']] <- NULL
+seurat
+
+saveRDS(seurat,path_to_save)
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

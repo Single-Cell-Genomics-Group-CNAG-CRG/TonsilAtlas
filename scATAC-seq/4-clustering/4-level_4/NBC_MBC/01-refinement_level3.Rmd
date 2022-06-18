@@ -1,0 +1,302 @@
+---
+title: 'NBC/MBC: scATAC annotation level 4'
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to refine the clustering annotation done at level 3. This refinement is the result of a manual curation carried out by specialists to remove poor quality cells, misclassified cells or clusters with very few cells.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+library(harmony)
+library(plotly)
+
+set.seed(1234)
+```
+
+
+## Parameters
+```{r}
+cell_type = "NBC_MBC"
+
+# Paths
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_3/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_integrated_level_3.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- str_c(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+    "/",
+  cell_type,
+  "_seu_obj_level_5_eta_DZnoproli.rds",
+  sep = ""
+)
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0", 
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", 
+                    "#FBE426", "#16FF32", "black", "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB",
+                    "#822E1C", "coral2", "#1CFFCE", "#1CBE4F",
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+path_to_level_4 <- here::here("scATAC-seq/results/R_objects/level_4/NBC_MBC/")
+path_to_save <- str_c(path_to_level_4, "NBC_MBC_integrated_level_4.rds")
+```
+
+# Load scATAC data
+
+## Load NBC/MBC data
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+```
+
+### Visualization of the data
+```{r fig.wide=TRUE}
+DimPlot(seurat,
+  pt.size = 0.1, split.by = "assay") 
+
+DimPlot(seurat,
+  pt.size = 0.1, split.by = "age_group") 
+
+p1 <- DimPlot(seurat,
+  pt.size = 0.1) + NoLegend()
+
+p2 <- DimPlot(seurat_RNA,
+  pt.size = 0.1,cols = color_palette)
+
+p1 + p2
+```
+
+
+# Spot potential doublets & poor-quality cells from Multiome experiment
+
+## From scRNA assay
+```{r}
+tonsil_RNA_annotation <- seurat_RNA@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode", "names_level_5_clusters_eta")
+```
+
+## From scATAC assay
+```{r}
+tonsil_ATAC_cell_barcode <- seurat@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode")
+```
+
+```{r}
+possible_doublets_ATAC <- setdiff(tonsil_ATAC_cell_barcode$cell_barcode,tonsil_RNA_annotation$cell_barcode)
+seurat$quality_cells <- ifelse(colnames(seurat) %in% possible_doublets_ATAC, "Poor-quality", "Good-quality")
+```
+
+###  Visualize the projection of the problematic cells onto the scATAC-seq UMAP
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat, 
+  split.by = "quality_cells")
+```
+
+
+## Scrublet prediction
+
+```{r}
+DimPlot(seurat,split.by = "scrublet_predicted_doublet_atac")
+table(seurat$scrublet_predicted_doublet_atac)
+```
+
+## QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_peaks",
+  "nFeature_peaks",
+  "nucleosome_signal",
+  "TSS.enrichment"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x, max.cutoff = "q95")
+  p
+})
+qc_gg
+```
+
+## Chromatin Signature
+
+```{r}
+qc_vars <- c("NBC.MBC", "GCBC", "PC", "CD4.T", "Cytotoxic")
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, feature = x, 
+                   max.cutoff = 4, min.cutoff = -4) + 
+    scale_color_viridis_c(option = "magma")
+  p
+})
+qc_gg
+```
+
+# Clustering 
+
+```{r}
+resolutions <- c(0.1, 0.12, 0.2, 0.3)
+seurat <- FindClusters(seurat, resolution = resolutions)
+vars <- str_c("peaks_macs_snn_res.", resolutions)
+umap_clusters <- purrr::map(vars, function(x) {
+  p <- DimPlot(seurat, group.by = x, cols = color_palette)
+  p
+})
+umap_clusters
+```
+
+## Proportion of doublets per cluster based on Scrublet
+
+```{r}
+doublet_clusters <- purrr::map(vars, function(x) {
+  df1 <- data.frame(table(seurat@meta.data[,x], seurat@meta.data$scrublet_predicted_doublet_atac))
+  colnames(df1) <- c("Cluster", "Scrublet","Cells")
+  p <- ggbarplot(df1, "Cluster", "Cells",
+  fill = "Scrublet", color = "Scrublet",
+  label = TRUE,
+  position = position_dodge(0.9))
+  p
+})
+doublet_clusters
+```
+
+## Proportion of doublets per cluster based on Multiome
+
+```{r}
+doublet_clusters <- purrr::map(vars, function(x) {
+  df1 <- data.frame(table(seurat@meta.data[,x], seurat$quality_cells))
+  colnames(df1) <- c("Cluster", "Quality","Cells")
+  p <- ggbarplot(df1, "Cluster", "Cells",
+  fill = "Quality",
+  label = TRUE,
+  position = position_dodge(0.9))
+  p
+})
+doublet_clusters
+```
+
+## UMAP level 1
+
+```{r}
+umap_clusters_level1 <- purrr::map(vars, function(x) {
+  p <- FeatureScatter(seurat, 
+                      "UMAP_1_level_1",
+                      "UMAP_2_level_1", group.by = x, cols = color_palette)
+  p
+})
+umap_clusters_level1
+```
+
+
+## UMAP level 1
+
+```{r}
+umap_level_1 <- FeatureScatter(
+  seurat,
+  "UMAP_1_level_1",
+  "UMAP_2_level_1",
+  group.by = "annotation_level_1"
+)
+umap_level_1 <- umap_level_1 +
+  theme(
+    #legend.position = "none",
+    plot.title = element_blank()
+  )
+umap_level_1
+```
+
+# Exclude problematic clusters and poor quality cells.
+
+```{r}
+seurat <- subset(seurat, 
+                 quality_cells == "Good-quality")
+
+seurat
+```
+
+# Integration
+
+```{r fig.wide=TRUE}
+seurat <- seurat %>%
+  RunTFIDF() %>%
+  FindTopFeatures(min.cutoff = "q5") %>%
+  RunSVD()
+
+#DepthCor(seurat_final)
+#seurat <- RunUMAP(object = seurat, reduction = 'lsi', dims = 2:30)
+#DimPlot(seurat)
+
+seurat <- RunHarmony(
+  object = seurat,
+  dims = 2:40,
+  group.by.vars = 'gem_id',
+  reduction = 'lsi',
+  assay.use = 'peaks_macs',
+  project.dim = FALSE,
+  max.iter.harmony = 20
+)
+
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 2:23)
+DimPlot(seurat,  split.by = "assay")
+DimPlot(seurat,  split.by = "age_group")
+```
+
+
+
+# Save
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

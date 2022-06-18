@@ -1,0 +1,75 @@
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	4	lims
+	15	make_cellranger
+	4	write_fastqs
+	24
+Select jobs to execute...
+
+[Wed Jan 20 14:48:14 2021]
+localrule lims:
+    output: projects/BCLLATLAS_38/info.txt
+    jobid: 20
+    wildcards: subproject=BCLLATLAS_38
+
+
+[Wed Jan 20 14:48:14 2021]
+localrule lims:
+    output: projects/BCLLATLAS_40/info.txt
+    jobid: 9
+    wildcards: subproject=BCLLATLAS_40
+
+
+[Wed Jan 20 14:48:14 2021]
+localrule lims:
+    output: projects/BCLLATLAS_33/info.txt
+    jobid: 6
+    wildcards: subproject=BCLLATLAS_33
+
+[Wed Jan 20 14:48:14 2021]
+Error in rule lims:
+    jobid: 20
+    output: projects/BCLLATLAS_38/info.txt
+    shell:
+        ./scripts/1-lims.sh BCLLATLAS_38
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 14:48:14 2021]
+
+[Wed Jan 20 14:48:14 2021]
+Error in rule lims:
+localrule lims:
+    output: projects/BCLLATLAS_46/info.txt
+    jobid: 3
+    wildcards: subproject=BCLLATLAS_46
+    jobid: 9
+
+    output: projects/BCLLATLAS_40/info.txt
+    shell:
+        ./scripts/1-lims.sh BCLLATLAS_40
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 14:48:14 2021]
+Error in rule lims:
+    jobid: 6
+    output: projects/BCLLATLAS_33/info.txt
+    shell:
+        ./scripts/1-lims.sh BCLLATLAS_33
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 14:48:14 2021]
+Error in rule lims:
+    jobid: 3
+    output: projects/BCLLATLAS_46/info.txt
+    shell:
+        ./scripts/1-lims.sh BCLLATLAS_46
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look above for error message
+Complete log: /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/.snakemake/log/2021-01-20T144813.607808.snakemake.log

@@ -1,0 +1,185 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 1 - Spatial Panels"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to create the spatial pannels necessary for Figure 1.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig1}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig1}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Panels
+
+### Panel 1
+Update labels
+```{r}
+merged_se@meta.data <- merged_se@meta.data %>%
+  mutate(
+    annot_fig1 = case_when(
+      annotation_20220215 %in% c("T:B Border", "Inter-Follicular Zone", "T cell zone") ~ "Inter-Follicular Zone",
+      annotation_20220215 %in% c("Germinal Center", "Proliferating Follicle") ~ "Follicle",
+      TRUE ~ annotation_20220215)
+  )
+```
+
+
+Look at the spatial compartments
+```{r fig.width=12, fig.height=9}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+
+# library(colorBlindness)
+# colorBlindness::displayAvailablePalette()
+# colorBlindness::paletteMartin
+palette <- c(
+  "Inter-Follicular Zone" = "#ff6db6",
+  "Epithelial-1" = "#db6d00",
+  "Epithelial-2" = "#924900",
+  "Follicle" = "#004949", 
+  "Muscle" = "#920000",
+  "Subepithelial" = "#490092")
+
+# (sp_plt <- SpatialDimPlot(
+#   object = se_sub,
+#   group.by = "annotation_20220215",
+#   cols = palette,
+#   image.alpha = 0,
+#   stroke = 0
+#   ) +
+#         theme(
+#         legend.box.background = element_blank(),
+#         legend.key=element_blank()) + 
+#         guides(fill = guide_legend(override.aes = list(size = 4))))
+
+(sp_plt <- ggplot() +
+    geom_point(aes(
+        x = se_sub@images$esvq52_nluss5@coordinates$imagecol,
+        y = se_sub@images$esvq52_nluss5@coordinates$imagerow,
+        color = se_sub$annot_fig1),
+        size = 1.25) +
+    labs(color = "") +
+    scale_y_reverse() +
+    scale_color_manual(values = palette) +
+    coord_fixed() +
+    theme_void() +
+    guides(color = guide_legend(override.aes = list(size = 4))))
+
+"{fig1}/{plt_dir}/spatial_stratification_plt.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = sp_plt,
+    base_height = 4,
+    base_width = 7)
+
+"{fig1}/{plt_dir}/spatial_stratification_plt.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = sp_plt,
+    file = .)
+```
+
+## Panel 2
+```{r}
+img <- "{fig1}/{plt_dir}/visium_stacked.png" %>%
+  glue::glue() %>%
+  here::here() %>%
+  png::readPNG(source = .)
+library(grid)
+x <- rasterGrob(img,
+            interpolate = FALSE,
+            width = unit(1, "npc"),
+            height = unit(1, "npc"))
+
+(img_gg <- ggplot() +
+  annotation_custom(
+    grob = x,
+    xmin = 0,
+    xmax = ncol(x$raster),
+    ymin = 0,
+    ymax = nrow(x$raster)
+    ) +
+  coord_fixed(
+    # ratio = 1
+    xlim = c(0, ncol(x$raster)),
+    ylim = c(0, nrow(x$raster))
+    ) +
+  theme_void())
+
+"{fig1}/{plt_dir}/visium_img_plt.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = img_gg,
+    base_height = 9,
+    base_width = 15)
+
+"{fig1}/{plt_dir}/visium_img_plt.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = img_gg,
+    file = .)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

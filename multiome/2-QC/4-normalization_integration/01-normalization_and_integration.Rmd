@@ -1,0 +1,261 @@
+---
+title: "Normalization and Batch Effect Correction: Multiome"
+author: "Paula Soler-Vila and Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Objective
+
+The objective of this notebook is to perform pre-processing and dimensional reduction on both assays independently, using standard approaches for RNA and ATAC-seq data. Then, we will follow the ["Joint RNA and ATAC analysis: 10x multiomic"](https://satijalab.org/signac/articles/pbmc_multiomic.html) vignette from Signac to obtain a joint visualization using both modalities.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(GenomicRanges)
+library(future)
+library(SeuratWrappers)
+library(harmony)
+library(EnsDb.Hsapiens.v86)
+library(stringr)
+library(dplyr)
+library(ggplot2)
+
+set.seed(173)
+```
+
+
+## Parameters
+
+```{r}
+path_to_obj <- here::here("multiome/results/R_objects/4.tonsil_multiome_filtered_combined_with_metadata.rds")
+path_to_save <- here::here("multiome/results/R_objects/5.tonsil_multiome_integrated_using_wnn.rds")
+```
+
+## Load Multiome filtered data
+
+```{r}
+tonsil_filtered <- readRDS(path_to_obj)
+tonsil_filtered
+```
+
+
+# Without Harmony integration
+
+## scATAC
+
+### Normalization and linear dimensional reduction
+
+```{r}
+DefaultAssay(tonsil_filtered) <- "peaks"
+tonsil_filtered <- RunTFIDF(tonsil_filtered)
+tonsil_filtered <- FindTopFeatures(tonsil_filtered, min.cutoff = "q0")
+tonsil_filtered <- RunSVD(tonsil_filtered)
+```
+
+```{r fig.wide=TRUE}
+DepthCor(tonsil_filtered)
+```
+
+
+### UMAP representation
+
+```{r fig.wide=TRUE}
+tonsil_filtered <- RunUMAP(
+  tonsil_filtered,
+  dims = 2:40,
+  reduction = "lsi",
+  reduction.name = "umap.atac",
+  reduction.key = "atacUMAP_"
+)
+DimPlot(
+  tonsil_filtered,
+  reduction = "umap.atac",
+  group.by = "library_name",
+  pt.size = 0.1
+) + NoLegend()
+```
+
+
+## scRNA
+
+### Normalization and linear dimensional reduction
+
+```{r}
+DefaultAssay(tonsil_filtered) <- "RNA"
+tonsil_filtered <- NormalizeData(
+  tonsil_filtered,
+  normalization.method = "LogNormalize",
+  scale.factor = 1e4
+)
+tonsil_filtered <- tonsil_filtered %>%
+  FindVariableFeatures(nfeatures = 3000) %>%
+  ScaleData() %>% 
+  RunPCA() 
+```
+
+
+### UMAP representation
+
+```{r}
+tonsil_filtered <- RunUMAP(
+  tonsil_filtered,
+  dims = 1:30,
+  reduction = "pca",
+  reduction.name = "umap.rna",
+  reduction.key = "rnaUMAP_"
+)
+DimPlot(
+  tonsil_filtered,
+  reduction = "umap.rna",
+  group.by = "library_name",
+  pt.size = 0.1
+) + NoLegend()
+```
+
+
+## Joint
+
+```{r}
+ #tonsil_filtered <- FindMultiModalNeighbors(
+  #  tonsil_filtered,
+  #  reduction.list = list("pca", "lsi"),
+  #  dims.list = list(1:30, 2:40)
+ #)
+#  tonsil_filtered <- RunUMAP(
+#    tonsil_filtered,
+#    nn.name = "weighted.nn",
+#    reduction.name = "wnn.umap",
+#    reduction.key = "wnnUMAP_"
+#  )
+#  DimPlot(
+ #   tonsil_filtered,
+#    reduction = "wnn.umap",
+#    group.by = "library_name",
+#    pt.size = 0.1
+#  ) + NoLegend()
+```
+
+
+# With Harmony integration
+
+## scATAC
+
+```{r}
+DefaultAssay(tonsil_filtered) <- "peaks"
+tonsil_filtered <- RunHarmony(
+  object = tonsil_filtered,
+  reduction = "lsi",
+  dims = 2:40,
+  group.by.vars = "gem_id",
+  assay.use = "peaks",
+  project.dim = FALSE,
+  reduction.save = "harmony_peaks"
+)
+```
+
+
+### UMAP representation
+
+```{r}
+tonsil_filtered <- RunUMAP(
+  tonsil_filtered,
+  dims = 2:40,
+  reduction = "harmony_peaks",
+  reduction.name = "umap.atac",
+  reduction.key = "atacUMAP_"
+)
+DimPlot(
+  tonsil_filtered,
+  reduction = "umap.atac",
+  group.by = "library_name",
+  pt.size = 0.1
+) + NoLegend()
+```
+
+
+## scRNA
+
+```{r}
+DefaultAssay(tonsil_filtered) <- "RNA"
+tonsil_filtered <- RunHarmony(
+  object = tonsil_filtered,
+  reduction = "pca",
+  dims = 1:30,
+  group.by.vars = "gem_id",
+  assay.use = "RNA",
+  project.dim = FALSE,
+  reduction.save = "harmony_RNA"
+)
+```
+
+
+```{r}
+tonsil_filtered <- RunUMAP(
+  tonsil_filtered,
+  dims = 1:30,
+  reduction = "harmony_RNA",
+  reduction.name = "umap.rna",
+  reduction.key = "rnaUMAP_"
+)
+DimPlot(
+  tonsil_filtered,
+  reduction = "umap.rna",
+  group.by = "library_name",
+  pt.size = 0.1
+) + NoLegend()
+```
+
+
+## Joint
+
+```{r}
+#  tonsil_filtered <- FindMultiModalNeighbors(
+#    tonsil_filtered,
+ #   reduction.list = list("harmony_peaks", "harmony_RNA"),
+#    dims.list = list(2:40, 1:30)
+#  )
+#  tonsil_filtered <- RunUMAP(
+#    tonsil_filtered,
+#    nn.name = "weighted.nn",
+#    reduction.name = "wnn.umap",
+#    reduction.key = "wnnUMAP_"
+#  )
+#  DimPlot(
+#    tonsil_filtered,
+#    reduction = "wnn.umap",
+#    group.by = "library_name",
+#    pt.size = 0.1
+#  ) + NoLegend()
+```
+
+
+# Save
+
+We will save the resulting object and use it in the following notebook to exclude doublets:
+
+```{r}
+saveRDS(tonsil_filtered, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

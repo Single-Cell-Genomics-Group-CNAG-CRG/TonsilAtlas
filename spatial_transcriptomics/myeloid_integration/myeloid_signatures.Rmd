@@ -1,0 +1,159 @@
+---
+title: "Make Myeloid signatures"
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to load the level-5 annotation of the myeloid cells and get gene signatures for each cell type. \
+
+## Libraries
+```{r}
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(dtplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(data.table)
+library(Matrix)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+source(here::here("utils/stereoseq_bin.R"))
+
+"{myeloid}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{myeloid}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+```{r}
+se_obj <- "{myeloid}/{robj_dir}/myeloid_annotated_level_5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+Lets take a quick look at the seurat object
+```{r}
+se_obj
+Seurat::Assays(se_obj)
+```
+
+Metadata...
+```{r}
+head(se_obj@meta.data)
+```
+
+### Marker genes
+Get marker genes for each cell type:
+```{r}
+# Set Idents
+Seurat::Idents(se_obj) <- se_obj@meta.data[, "annotation_level_4"]
+
+myeloid_markers <- Seurat::FindAllMarkers(
+  object = se_obj,
+  assay = "RNA",
+  slot = "data",
+  logfc.threshold = 0.75,
+  only.pos = TRUE)
+
+DT::datatable(myeloid_markers, filter = "top")
+```
+
+Select those genes that are unique for each cell type to avoid overlapping
+```{r}
+gene_unique <- myeloid_markers %>%
+  dplyr::count(gene) %>%
+  dplyr::filter(n == 1) %>%
+  dplyr::pull(gene)
+
+# Keep unique genes
+markers_unique <- myeloid_markers %>%
+  dplyr::filter(gene %in% gene_unique)
+
+# Check all the cell types have marker genes
+markers_unique %>%                 
+  dplyr::count(cluster)
+```
+
+Select the top genes to make the gene signatures according to logFC and pct.1
+```{r}
+markers_subset <- markers_unique %>%
+  dplyr::filter(pct.1 > 0.75 & avg_log2FC > 0.5)
+
+# Check all the cell types have marker genes
+markers_subset %>%
+  dplyr::count(cluster)
+```
+
+## Save Data
+
+Save as RDS object
+```{r}
+"{myeloid}/{robj_dir}/myeloid_markers_signature.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = markers_subset, file = .)
+```
+
+Save as spreadsheet for Marco and Juan
+```{r}
+out_xlsx <- "{myeloid}/{robj_dir}/myeloid_markers_signature.xlsx" %>%
+  glue::glue() %>%
+  here::here() 
+
+# Remove file in case it exists to overwrite it
+file.remove(out_xlsx)
+
+lapply(as.character(unique(markers_subset$cluster)), function(i) {
+  print(i)
+  # Extract information for the specific cell type
+  tmp_df <- markers_subset %>% dplyr::filter(cluster == i)
+  
+  if (nrow(tmp_df) > 0) {
+    xlsx::write.xlsx(
+      tmp_df,
+      file = out_xlsx,
+      row.names = FALSE,
+      sheetName = i,
+      append = file.exists(out_xlsx))
+      }
+  })
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

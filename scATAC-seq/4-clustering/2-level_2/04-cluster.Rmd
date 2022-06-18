@@ -1,0 +1,140 @@
+---
+author: "Paula Soler-Vila & Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+params:
+  cell_type: PC
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+cell_type <- "PC"
+title <- paste("Cluster (level 2):", params$cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+The objective of this notebook is to cluster cells at a low resolution that allows us to "fetch" the clusters that are potential doublets, so that we can easily exclude them.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(ggpubr)
+library(reshape2)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_2/"),
+  params$cell_type,
+  "/",
+  params$cell_type,
+  "_integrated_level_2.rds",
+  sep = ""
+)
+
+path_to_doublets <- here::here("scRNA-seq/3-clustering/2-level_2/tmp/doublets_multiome_df_all.rds")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "chocolate1", "coral2", "blueviolet",
+                   "brown1", "darkmagenta", "deepskyblue1", "dimgray",
+                   "deeppink1", "green", "lightgray", "hotpink1",
+                   "indianred4", "khaki", "mediumorchid2", "gold", "gray")
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Cluster
+
+```{r}
+resolutions <- c(0.01, 0.025, 0.05, 0.1)
+seurat <- FindClusters(seurat, resolution = resolutions)
+vars <- str_c("peaks_macs_snn_res.", resolutions)
+umap_clusters <- purrr::map(vars, function(x) {
+  p <- DimPlot(seurat, group.by = x, cols = color_palette)
+  p
+})
+umap_clusters
+```
+
+```{r}
+clusters_assay_specific <- purrr::map(vars, function(x) {
+  data <- table(seurat@meta.data[,x], seurat@meta.data$assay)
+  data.perc <- apply(data, 1, function(x){x/sum(x)})
+  data.perc_melt <- melt(data.perc)
+  data.perc_melt$Var2 <- as.factor(data.perc_melt$Var2)
+  data.perc_melt$value <- round(data.perc_melt$value,2)
+  
+  p <- ggbarplot(data.perc_melt, "Var2", "value",
+  fill = "Var1", color = "Var1", 
+  label = TRUE, lab.col = "white", lab.pos = "in")
+  p + scale_fill_manual(values=c("#E69F00", "#56B4E9"))
+})
+clusters_assay_specific
+```
+
+# Proportion of doublets per cluster based on Scrublet
+
+```{r}
+doublet_clusters <- purrr::map(vars, function(x) {
+  df1 <- data.frame(table(seurat@meta.data[,x], seurat@meta.data$scrublet_predicted_doublet_atac))
+  colnames(df1) <- c("Cluster", "Scrublet","Cells")
+  p <- ggbarplot(df1, "Cluster", "Cells",
+  fill = "Scrublet", color = "Scrublet",
+  label = TRUE,
+  position = position_dodge(0.9))
+  p
+})
+doublet_clusters
+```
+
+
+## UMAP level 1
+
+```{r}
+umap_clusters_level1 <- purrr::map(vars, function(x) {
+  p <- FeatureScatter(seurat, 
+                      "UMAP_1_level_1",
+                      "UMAP_2_level_1", group.by = x, cols = color_palette)
+  p
+})
+umap_clusters_level1
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

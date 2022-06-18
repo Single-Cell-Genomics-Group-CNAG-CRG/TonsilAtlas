@@ -1,0 +1,239 @@
+---
+title: "1. Finding co-accessible modules in CD4-T using Cicero"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Objective
+
+The objective of this notebook is to use [Cicero][https://cole-trapnell-lab.github.io/cicero-release/docs_m3/#constructing-cis-regulatory-networks] to build a genome-wide cis-regulatory map.
+
+# Pre-processing
+
+## Load packages
+
+```{r comment=FALSE}
+library(Signac)
+library(Seurat)
+library(SeuratWrappers)
+library(ggplot2)
+library(patchwork)
+library(cicero)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(lattice)
+library(tidyr)
+library(MASS)
+library(factoextra)
+library(plyr)
+library(reshape2)
+library(pheatmap)
+library(stringr)
+```
+
+## Parameters
+```{r parameters}
+cell_type <- "CD4_T"
+
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+color_palette<- c("black", "gray", "red", "yellow", "violet", "green4",
+                  "blue", "chocolate1", "coral2", "blueviolet",
+                  "brown1", "darkmagenta", "deepskyblue1", "dimgray",
+                  "deeppink1", "green", "lightgray", "hotpink1",
+                  "indianred4", "khaki", "mediumorchid2")
+
+path_to_save <- str_c(
+  here::here("scATAC-seq/results/Cicero/"),
+  cell_type,"/",
+  sep = ""
+)
+```
+
+## Load data
+Cicero uses the normalized scATAC data integrated by Harmony. 
+We are going to start the analysis by visualizing the main clusters defined in level 4 thanks to the scRNAseq that will become our idents.
+
+```{r fig.wide=TRUE}
+seurat <- readRDS(path_to_obj)
+seurat
+
+Idents(seurat) <- seurat$annotation_paper
+
+DimPlot(
+  seurat, 
+  cols = color_palette,
+  pt.size = 0.1
+)
+```
+
+
+# Get annotations
+
+First, we need to extract the lenght of the chromosomes (be aware that we are using from EnsDb the hg38 as the reference human assembly)
+
+```{r}
+annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotations) <- "UCSC"
+genome(annotations) <- "hg38"
+
+# get the chromosome sizes from the Seurat object
+genome <- seqlengths(annotations)
+
+# convert chromosome sizes to a dataframe
+genome.df <- data.frame("chr" = names(genome), "length" = genome)
+
+# Removing the chrM
+genome.df <- genome.df[1:nrow(genome.df)-1,]
+genome.df
+```
+
+# CICERO
+
+## Convert to CellDataSet format and make the cicero object.
+```{r}
+seurat.cds <- as.cell_data_set(x = seurat)
+seurat.cds
+
+seurat.cicero <- make_cicero_cds(seurat.cds, reduced_coordinates = reducedDims(seurat.cds)$HARMONY)
+seurat.cicero
+```
+
+## Run main function 
+The run_cicero function is a wrapper that runs the primary functions of the Cicero pipeline with default parameters such as:
+
+1. estimate_distance_parameter. This function calculates the distance penalty parameter based on small random windows of the genome.
+2. generate_cicero_models. This function uses the distance parameter determined above and uses graphical LASSO to calculate the co-accessibility scores of overlapping windows of the genome using a distance-based penalty.
+3. assemble_connections. This function takes as input the output of generate_cicero_models and reconciles the overlapping models to create the final list of co-accessibility scores.
+
+```{r}
+conns <- run_cicero(seurat.cicero, 
+                    genomic_coords = genome.df, 
+                    sample_num = 100)
+
+write.table(x = conns, 
+            file = paste0(path_to_save, 
+                          "level_5_conns.tsv"),
+            row.names = F, quote = F)
+```
+
+## Find co-accessible networks
+Now that we’ve found pairwise co-accessibility scores for each peak, we can now group these pairwise connections (using Louvain-based clustering algorithm) into larger co-accessible networks using the generate_ccans() function from Cicero. CCANS are modules of sites that are highly co-accessible with one another.
+
+```{r}
+ccans <- generate_ccans(conns)
+print(paste("Number of chromatin networks:",max(ccans$CCAN)))
+
+ccans_sorted <- ccans[order(-ccans$CCAN),] 
+head(ccans_sorted)
+
+write.table(x = ccans_sorted, 
+file = paste0(path_to_save, "level_5_ccans.tsv"),
+row.names = F, quote = F)
+```
+
+## Add links to a Seurat object
+```{r}
+conns <- read.table(paste0(path_to_save,"level_5_conns.tsv"), 
+                              header = T)
+ccans <- read.table(paste0(path_to_save,"level_5_ccans.tsv"),
+                              header = T)
+
+links <- ConnectionsToLinks(conns = conns, ccans = ccans)
+Links(seurat) <- links
+
+write.table(x = links, 
+file = paste0(path_to_save, "level_5_links.tsv"),
+row.names = F, quote = F)
+```
+
+```{r fig.wide=TRUE}
+CoveragePlot(
+object = seurat,
+region = "chr8-127322183-128417210")
+```
+
+# Relationship between CCANS and level 1 assigment.
+
+For each cluster, we are going to extract the normalized value of the cells that have a peak in each specific CCAN.
+We are going to calculate the mean value from all the cells to check if there is any bias toward a certain cell type.
+
+```{r}
+#ccans_split = ccans %>% separate(Peak, c("chr","start","end"))
+#ccans_split$end = as.numeric(ccans_split$end)
+#ccans_split$start = as.numeric(ccans_split$start)
+
+# For each module, we are going to extract the peaks tha conform it
+CCANS_sum = c()
+clusters = c()
+modules = c()
+
+for (module in unique(ccans_sorted$CCAN)){
+peaks <- ccans_sorted[ccans_sorted$CCAN == module,]$Peak
+
+for (clust in unique(seurat@meta.data$annotation_paper)){
+cells_cluster = row.names(seurat@meta.data[seurat@meta.data$annotation_paper == clust,])
+peaks_data_cluster <- seurat@assays$peaks@data[peaks,cells_cluster]
+CCANS_sum = c(CCANS_sum,mean(peaks_data_cluster))
+clusters = c(clusters,clust)
+modules = c(modules, rep(module,length(clust)))
+}
+}
+
+CCANS_per_cluster = data.frame(clusters,CCANS_sum,modules)
+colnames(CCANS_per_cluster) = c("clusters","CCANS_means","module")
+CCANS_per_cluster$module = as.factor(CCANS_per_cluster$module)
+CCANS_per_cluster$clusters = as.factor(CCANS_per_cluster$clusters)
+head(CCANS_per_cluster)
+
+#write.table(x = CCANS_per_cluster, 
+#file = paste0(path_to_save, "level_1_ccansxcluster.tsv"),
+#row.names = F, quote = F)
+```
+
+## Conversion into matrix and compute the PCA
+Now, we can visualize how the different cell types can be related or unrelated by looking at the co-accessible comunities defined by Cicero.
+
+```{r}
+CCANS_per_cluster_mat = acast(CCANS_per_cluster, clusters~module, value.var='CCANS_means')
+res.pca <- prcomp(CCANS_per_cluster_mat, scale = TRUE)
+```
+
+```{r fig.wide=TRUE}
+options(repr.plot.width=6, repr.plot.height=8)
+fviz_pca_ind(res.pca,
+repel = TRUE     # Avoid text overlapping
+)
+```
+
+```{r fig.wide=TRUE}
+options(repr.plot.width=15, repr.plot.height=6)
+out = pheatmap(scale(CCANS_per_cluster_mat),cutree_cols = 3, cutree_rows = 2,
+clustering_distance_rows = "euclidean",
+clustering_distance_cols = "euclidean",
+clustering_method = "ward.D2")
+```
+
+
+```{r}
+sessionInfo()
+```

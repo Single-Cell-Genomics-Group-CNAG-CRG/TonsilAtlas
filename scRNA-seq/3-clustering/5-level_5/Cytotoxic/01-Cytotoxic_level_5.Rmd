@@ -1,0 +1,118 @@
+---
+title: "Cytotoxic: Level 5"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will exclude and merge the clusters of level 4, as requested by the annotation team.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+path_to_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/CD8_T/CD8_T_clustered_level_4.rds"
+path_to_nk_ilc <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/ILC_NK/ILC_NK_clustered_level_4.rds"
+path_to_save_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/CD8_T/CD8_T_clustered_level_5.rds"
+path_to_save_nk_ilc <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/ILC_NK/ILC_NK_clustered_level_5.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+```
+
+
+## Read data
+
+```{r}
+cd8 <- readRDS(path_to_cd8)
+nk_ilc <- readRDS(path_to_nk_ilc)
+cd8
+nk_ilc
+```
+
+
+# CD8 T
+
+To do:
+
+* Merge clusters 9 and 12
+* Merge clusters 2 and 6
+
+```{r}
+cd8$annotation_level_4 <- as.character(cd8$seurat_clusters)
+cd8$annotation_level_4[cd8$annotation_level_4 %in% c("9", "12")] <- "9_12"
+cd8$annotation_level_4[cd8$annotation_level_4 %in% c("2", "6")] <- "2_6"
+cd8$annotation_level_4 <- factor(
+  cd8$annotation_level_4,
+  levels = c("0", "1", "2_6", "3", "4", "5", "7", "8", "9_12", "10", "11",
+             "13", "14")
+)
+Idents(cd8) <- cd8$annotation_level_4
+DimPlot(cd8, cols = color_palette)
+```
+
+
+# NK and ILC
+
+To do:
+
+* Remove cluster 1_1
+
+```{r}
+nk_ilc <- subset(nk_ilc, idents = c("0", "1_0", "2", "3", "4", "6"))
+nk_ilc$annotation_level_4 <- Idents(nk_ilc)
+DimPlot(nk_ilc, cols = color_palette)
+```
+
+
+# Save
+
+```{r}
+saveRDS(cd8, path_to_save_cd8)
+saveRDS(nk_ilc, path_to_save_nk_ilc)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+

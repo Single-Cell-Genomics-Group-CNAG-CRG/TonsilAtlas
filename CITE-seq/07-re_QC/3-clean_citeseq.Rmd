@@ -1,0 +1,161 @@
+---
+title: "Clean CITEseq dataset"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+setwd("/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/")
+```
+
+# Define Parameters
+
+## Load packages
+
+```{r } 
+library(Seurat)
+library(flexclust)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(harmony)
+```
+
+
+## Define variables and functions
+
+```{r}
+path_to_save_obj <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/results"
+path_to_citeseq_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_annotated.rds",
+  sep = "/"
+)
+path_to_filtered_bcell <- str_c(
+  path_to_save_obj,
+  "bcell_selected_cells.csv",
+  sep = "/"
+)
+path_to_filtered_tcell <- str_c(
+  path_to_save_obj,
+  "tcell_selected_cells.csv",
+  sep = "/"
+)
+path_to_filtered_citeseq_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_annotated_filtered.rds",
+  sep = "/"
+)
+# Color
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet")
+```
+
+## Load data
+
+```{r data}
+seurat_obj <- readRDS(path_to_citeseq_seurat_obj)
+filtered_tcell_subcluster <- read.csv(path_to_filtered_tcell)
+filtered_tcell <- filtered_tcell_subcluster$X
+filtered_bcell_subcluster <- read.csv(path_to_filtered_bcell)
+filtered_bcell <- filtered_bcell_subcluster$X
+```
+
+# filter_cells
+
+```{r}
+df <- seurat_obj@meta.data
+filtered_df <- df[((df$annotation %in% c("NBC_MBC","PC","GCBC") & rownames(df) %in% filtered_bcell) | (df$annotation %in% c("CD4_T","Cytotoxic") & rownames(df) %in% filtered_tcell) | (!(df$annotation %in% c("CD4_T","Cytotoxic", "NBC_MBC","PC","GCBC")) & !(df$repertoire_flag %in% c("BCR_TCR")))),]
+filtered_cells <- rownames(filtered_df)
+```
+
+```{r}
+filtered_obj = subset(seurat_obj,cells=filtered_cells)
+```
+
+# UMAP for filtered CITEseq
+
+```{r}
+filtered_obj@meta.data %>%
+  ggplot(aes(UMAP1, UMAP2, color = annotation)) +
+    geom_point(size = 0.75) +
+    scale_color_manual(values = color) +
+    labs(x = "UMAP1", y = "UMAP2", color = "") +
+    theme_classic()
+```
+
+# Citeseq cell frequency
+
+```{r}
+metadata <- filtered_obj@meta.data
+df = count(metadata,metadata$annotation)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+# cell with BCR and TCR info
+
+```{r}
+df = count(metadata,metadata$repertoire_flag)
+colnames(df) = c("Repertoire","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+```{r}
+df = table(metadata$annotation,metadata$repertoire_flag)
+colnames(df) = c("BCR","TCR")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+
+# UMAP with repertoire information 
+
+```{r}
+filtered_obj@meta.data %>%
+  ggplot(aes(UMAP1, UMAP2, color = repertoire_flag)) +
+    geom_point(size = 0.75) +
+    scale_color_manual(values = c("yellow", "violet", "green4")) +
+    labs(x = "UMAP1", y = "UMAP2", color = "") +
+    theme_classic()
+```
+
+
+
+
+# Save object
+
+```{r}
+saveRDS(filtered_obj, path_to_filtered_citeseq_seurat_obj)
+```
+
+
+# Session Information
+
+```{r session}
+sessionInfo()
+```

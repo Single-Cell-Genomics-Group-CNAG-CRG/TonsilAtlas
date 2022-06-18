@@ -1,0 +1,101 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+title: "BCLL-10-T T cell markers mapping"
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to look at marker genes identifying different CD4-related cell types from the tonsil.
+We aim to identify the different stages of CD4 T cells since they enter as naive until they make their way into the GC being Tfh.
+The main papers of reference for this analysisare i) [**T Follicular Helper Cell Biology: A Decade of Discovery and Diseases**](https://doi.org/10.1016/j.immuni.2019.04.011) and ii) [Bcl6-Mediated Transcriptional Regulation of Follicular Helper T cells (TFH)](https://doi.org/10.1016/j.it.2021.02.002).
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{cd4}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{cd4}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+sample_id <- params$sample_id
+# sample_id <- "esvq52_nluss5"
+donor_id <- id_sp_df[id_sp_df$gem_id == sample_id, ] %>% dplyr::pull(donor_id)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load MAGIC data from the script *MAGIC_denoising.Rmd*
+```{r}
+magic_df <- "{cd4}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store ADT information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df))
+
+# add this assay to the previously created Seurat object
+merged_se[["MAGIC_Spatial"]] <- magic_assay
+
+Seurat::DefaultAssay(merged_se) <- "MAGIC_Spatial"
+```
+
+subset object sample of interest
+```{r}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+```
+
+
+## Analysis
+
+
+## Session Info
+```{r}
+sessionInfo()
+```

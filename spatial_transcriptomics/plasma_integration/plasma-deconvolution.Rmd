@@ -1,0 +1,390 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+title: "Plasma cells SC mapping"
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+set.seed(123)
+```
+
+## Introduction
+In this script we are going to map  plasma cell subtypes onto the Visium slides.
+
+## Libraries
+```{r}
+library(Seurat)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{plasma}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{plasma}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+# sample_id <- params$sample_id
+sample_id <- "esvq52_nluss5"
+donor_id <- id_sp_df[id_sp_df$gem_id == sample_id, ] %>% dplyr::pull(donor_id)
+```
+
+## Load data
+We have 4 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering_integration.Rmd* while the sc data can be found in Ramon's scRNAseq analysis: **/scratch/devel/rmassoni/tonsil_atlas_private/2-DOWNSTREAM_PROCESSING/results/R_objects/processed_seurat_objects/processed_seurat_objects/tonsil_integrated_with_harmony_scrublet_annotated.rds**. \
+Plasma cell annotation comes from Sergio - **/scratch/devel/saguilar/PhD/PROJECTS/tonsil_atlas/tonsil_atlas_annotation/level_5/PC/data/delta/PC_seu_obj_level_5_delta.rds**
+```{r}
+sp_obj <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Single cell data
+sc_obj <- "{myeloid}/{robj_dir}/tonsil_atlas_all_cells_20210930.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Plasma cell annotation
+lvl5_obj <- "{plasma}/{robj_dir}/PC_seu_obj_level_5_delta.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+
+### Metadata
+We are going to use SPOTlight to deconvolute the spatial spots and map the cell types.
+
+We will start by adding the level5 definitive metadata labels to the full object.
+```{r}
+lvl5_metadata <- lvl5_obj@meta.data %>%
+  dplyr::rename(annotation_plasma = names_level_5_clusters_delta) %>%
+  dplyr::select(barcode, annotation_plasma)
+
+pc_mature <- c("PC Mature IgA+", "PC Mature IgG+", "MBC-derived IgA+", "MBC-derived IgG+")
+
+sc_obj@meta.data <- sc_obj@meta.data %>%
+  # tibble::rownames_to_column("barcode") %>%
+  dplyr::left_join(lvl5_metadata, by = "barcode") %>%
+  dplyr::mutate(
+    # Annotation for SPOTlight
+    annotation_deconv = dplyr::if_else(
+      is.na(annotation_plasma), annotation_level_1, annotation_plasma),
+    annotation_deconv = dplyr::if_else(
+      stringr::str_detect(
+        string = annotation_deconv,
+        # https://stackoverflow.com/questions/5671719/case-insensitive-search-of-a-list-in-r 
+        #  (?i) makes the regex case insensitive 
+        pattern = "(?i)prolif"),
+      "Cycling", annotation_deconv),
+    # Join populations of interest
+    annotation_deconv = dplyr::case_when(
+      stringr::str_detect(string = annotation_deconv, pattern = "LZ-derived early PC precursors") ~ "LZ-derived early PC precursors",
+      stringr::str_detect(string = annotation_deconv, pattern = "LZ-derived IgG. PC precursor") ~ "LZ-derived IgG+ PC precursor",
+      # stringr::str_detect(string = annotation_deconv, pattern = "PC Mature Ig") ~ "PC Mature IgG/A",
+      annotation_deconv %in% pc_mature ~ "PC Mature IgG/A",
+      # annotation_deconv %in% c("Early MBC-derived PC precursors", "MBC-derived PC precursors") ~ "(Early) MBC-derived PC precursors",
+      TRUE ~ annotation_deconv)
+    ) %>%
+  # Remove cell types not of interest
+  dplyr::filter(! annotation_deconv %in% c(
+    "PC", "unknown", # Remove PC cells not annotated in Level 5 since they have been removed in the process
+    "Short lived IgM PCs", "IGHV3-20/43 expressing PCs", "DZ migratory PC precursors ", # Remove very small populations
+    "preBC", "preTC", # Remove populations not relevant for this step
+    "GCBC"# Remove GCBC since we have LZ GCBC and DZ GCBC
+    )) %>%
+  # Remove cell types already present at level 5
+  tibble::column_to_rownames("barcode")
+
+table(sc_obj@meta.data$annotation_deconv)
+```
+
+### Marker calculation
+1st we need to determine the marker genes for each high-level cluster
+```{r}
+markers_lvl1_out <- "{plasma}/{robj_dir}/markers_lvl1_plasma.RDS" %>% 
+  glue::glue() %>% 
+  here::here()
+file.remove(markers_lvl1_out)
+if (file.exists(markers_lvl1_out)) {
+  
+  markers_lvl1 <- readRDS(file = markers_lvl1_out)
+  
+} else {
+  #### Extract marker genes from each cluster ####
+  Seurat::Idents(object = sc_obj) <- sc_obj@meta.data[, "annotation_level_1"]
+  markers_lvl1 <- Seurat::FindAllMarkers(
+    object = sc_obj, 
+    assay = "RNA",
+    slot = "data",
+    verbose = TRUE, 
+    only.pos = TRUE,
+    max.cells.per.ident = 200)
+  
+  saveRDS(object = markers_lvl1, file = markers_lvl1_out)
+}
+DT::datatable(markers_lvl1, filter = "top")
+```
+
+Now find the markers for plasma cells level 5 only between plasma cells
+```{r}
+markers_lvl5_out <- "{plasma}/{robj_dir}/markers_lvl5_plasma.RDS" %>% 
+  glue::glue() %>% 
+  here::here()
+file.remove(markers_lvl5_out)
+if (file.exists(markers_lvl5_out)) {
+  
+  markers_lvl5 <- readRDS(file = markers_lvl5_out)
+  
+} else {
+  # lvl4 plasma cells lvl5_metadata
+  lvl5_subs <- subset(
+    sc_obj,
+    # To level5 and consolidated cell types
+    subset = annotation_deconv %in% c(
+      unique(lvl5_metadata$annotation_plasma),  c("LZ-derived early PC precursors",
+        "LZ-derived IgG+ PC precursor", "PC Mature IgG/A"))) # "(Early) MBC-derived PC precursors"
+  #### Extract marker genes from each cluster ####
+  Seurat::Idents(object = lvl5_subs) <- lvl5_subs@meta.data[, "annotation_deconv"]
+  
+  markers_lvl5 <- Seurat::FindAllMarkers(
+    object = lvl5_subs, 
+    assay = "RNA",
+    slot = "data",
+    verbose = TRUE, 
+    only.pos = TRUE) 
+  
+  saveRDS(object = markers_lvl5, file = markers_lvl5_out)
+}
+```
+
+Join markers from both runs. Since we still want to keep the PC cells markers in the lower level markers we will add them to each one.
+```{r}
+# Keep markers for major cell types
+# gene_vec <- c("BCL6", "PRDM1", "FDCSP")
+markers_lvl1_sub <- markers_lvl1 %>% dplyr::filter(cluster != "PC") %>%
+    dplyr::filter( ( avg_log2FC > 1 | pct.1 - pct.2 > 0.75) &
+                   p_val_adj < 0.01 & pct.1 > 0.3) %>%
+    # Remove ribosomal genes
+    dplyr::filter(!stringr::str_detect(string = gene,
+                                      pattern = "^RPS|^RPL"))
+                   # | gene %in% gene_vec)
+
+# Keep markers for general PC T cells
+markers_lvl1_plasma <- markers_lvl1 %>%
+  dplyr::filter(cluster == "PC") %>%
+  # Filter to get PC specific markers
+  # We are keeping those genes with a logFC > 1 or a pct.1 - pct.2 > 0.75 which
+  # have a p_val_adj < 0.01 & pct.1 > 0.6 while keeping PC
+  dplyr::filter( ( avg_log2FC > 1 | pct.1 - pct.2 > 0.75) &
+                   p_val_adj < 0.01 & pct.1 > 0.6) %>%
+  # Remove ribosomal genes
+  dplyr::filter(!stringr::str_detect(string = gene, pattern = "^RPS|^RPL"))
+```
+
+Add general PC cell markers to the specific cell types
+```{r}
+markers_lvl5_update <- lapply(as.character(unique(markers_lvl5$cluster)), function (i) {
+  # Filter level 5 clusters
+  tmp <- markers_lvl5 %>%
+  #   dplyr::filter(avg_log2FC > 0.75 | pct.1 - pct.2 > 0.4) %>%
+    dplyr::filter(cluster == i) %>%
+    # Remove ribosomal genes
+    dplyr::filter(!stringr::str_detect(string = gene,
+                                      pattern = "^RPS|^RPL"))
+    
+  # Add general PC markers
+  tmp %>%
+    dplyr::bind_rows(markers_lvl1_plasma) %>%
+    dplyr::mutate(cluster = i)
+}) %>%
+  dplyr::bind_rows()
+```
+
+Combine level-1 and level-5 markers
+```{r}
+all_markers <- dplyr::bind_rows(markers_lvl1_sub, markers_lvl5_update) %>%
+  dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+  dplyr::group_by(cluster, gene) %>%
+  dplyr::filter(dplyr::row_number() == 1)
+```
+
+Subset SC object so all the cells from the same cell type to come from the same batch
+```{r}
+# subset most representative sample(s)
+ns <- with(sc_obj@meta.data, table(gem_id, annotation_deconv))
+ns <- as.matrix(unclass(ns))
+m <- 100 # Max cells per cell type
+# Extract cell barcodes
+meta <- sc_obj@meta.data
+
+id <- lapply(colnames(ns), function(nm) {
+    x <- ns[, nm]
+    # Initialize variables
+    n <- 0    # N of cells
+    s <- c()  # Gem IDs
+    b <- c()  # Cell barcodes
+    while (n < m & length(x) > 0) {
+        # select gem id with the most cells
+        i <- names(sort(x, decreasing = TRUE))[[1]]
+        # Add gem id to vector s
+        s <- c(s, i)
+        # Add number of cells per cell type to n
+        n <- n + x[[i]]
+        # Remove gem id from x to move on to the next
+        x <- x[names(x) != i]
+        # extract barcode
+        barcode <- rownames(meta[meta[, "gem_id"] == i &
+                            meta[, "annotation_deconv"] == nm, ])
+        # make sure it adds up to m
+        # print(barcode)
+        if ((length(b) + length(barcode)) > m) {
+          barcode <- sample(x = barcode, size = m - length(b), replace = FALSE)
+        }
+        b <- c(b, barcode)  # Cell barcodes
+    }
+    return(b)
+})
+
+sc_sub <- sc_obj[, unlist(id)]
+table(sc_sub@meta.data$annotation_deconv)
+```
+
+### SPOTlight deconvolution
+2nd run deconvolution
+```{r include = FALSE}
+Seurat::Idents(object = sc_sub) <- as.character(sc_sub@meta.data$annotation_deconv)
+
+spotlight_ls <- spotlight_deconvolution(
+  se_sc = sc_sub,
+  counts_spatial = sp_obj@assays$Spatial@counts,
+  clust_vr = "annotation_deconv",
+  cluster_markers = all_markers,
+  cl_n = 100,
+  hvg = 3000,
+  ntop = NULL,
+  transf = "uv",
+  method = "nsNMF",
+  min_cont = 0)
+```
+
+## Save data
+```{r}
+decon_fn <- "{plasma}/{robj_dir}/spotlight_ls_plasma.rds" %>%
+  glue::glue() %>% 
+  here::here()
+# if (! file.exists(decon_fn) ) {
+saveRDS(
+  object = spotlight_ls,
+  file = decon_fn)
+# } else {
+#   spotlight_ls <- readRDS(file = here::here(glue::glue("{plasma}/{robj_dir}/spotlight_ls_plasma.rds")))
+# }
+
+```
+
+3rd Check Topic profiles
+```{r fig.height=8, fig.width=8}
+nmf_mod_ls <- spotlight_ls[[1]]
+nmf_mod <- nmf_mod_ls[[1]]
+
+h <- NMF::coef(nmf_mod)
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod_ls[[2]])
+
+topic_profile_plts[[2]] +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90), 
+                 axis.text = ggplot2::element_text(size = 12))
+```
+
+## Visualize deconvolution results
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 1 % of the spot
+# decon_mtrx[decon_mtrx < 0.03] <- 0
+```
+
+Change column names
+```{r}
+nm_df <- data.frame(
+  mod_nm = stringr::str_replace_all(string = unique(all_markers$cluster),
+                                    pattern = "[[:punct:]]|\\s|\\+" ,
+                                    replacement = "."),
+  plt_nm = unique(all_markers$cluster)
+  )
+
+# Save nm_df
+"{plasma}/{robj_dir}/plasma_nm_df.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  saveRDS(
+    object = nm_df,
+    file = .)
+
+
+new_cn <- data.frame(mod_nm = colnames(decon_mtrx)) %>%
+  dplyr::left_join(nm_df, by = "mod_nm") %>%
+  # Central.Mem.PASK. fives some trouble because it only changes between + an -
+  # negative goes first and distinct solves it automatically
+  dplyr::distinct() %>%
+  dplyr::pull(plt_nm)
+
+colnames(decon_mtrx) <- new_cn
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+metadata <- cbind(sp_obj@meta.data, decon_mtrx)
+sp_obj@meta.data <- metadata
+```
+
+Look at cells topic profile
+```{r}
+basis_spotlight <- data.frame(NMF::basis(spotlight_ls[[1]][[1]]))
+
+train_labs <- spotlight_ls[[1]][[2]]
+colnames(basis_spotlight) <- unique(stringr::str_wrap(train_labs, width = 30))
+
+basis_spotlight[basis_spotlight < 0.0000001] <- 0
+
+DT::datatable(basis_spotlight, filter = "top")
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

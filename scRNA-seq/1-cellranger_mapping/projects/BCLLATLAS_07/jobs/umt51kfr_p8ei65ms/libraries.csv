@@ -1,0 +1,7 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/cDNA/lane2,umt51kfr_p8ei65ms,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/cDNA/lane4,umt51kfr_p8ei65ms,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/cDNA/lane1,umt51kfr_p8ei65ms,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/cDNA/lane3,umt51kfr_p8ei65ms,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/HTO/lane2,umt51kfr_p8ei65ms_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/umt51kfr_p8ei65ms/fastq/HTO/lane1,umt51kfr_p8ei65ms_HTO,Antibody Capture

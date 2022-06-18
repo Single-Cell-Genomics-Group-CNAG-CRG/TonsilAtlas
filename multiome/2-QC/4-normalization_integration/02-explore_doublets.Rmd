@@ -1,0 +1,219 @@
+---
+title: "Explore doublets: Multiome"
+author: "Paula Soler-Vila and Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook we will plot the scrublet doublet scores on the UMAPs computed in the previous notebook.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("multiome/results/R_objects/5.tonsil_multiome_integrated_using_wnn.rds")
+
+
+# Thresholds
+max_doublet_score_rna <- 0.3
+max_doublet_score_atac <- 0.3
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+```
+
+
+# Doublet score
+
+## Scrublet doublet score (ATAC)
+
+```{r fig.wide=TRUE}
+hist_atac <- tonsil@meta.data %>%
+  ggplot(aes(scrublet_doublet_scores_atac)) +
+    geom_histogram(bins = 30) +
+    geom_vline(
+      xintercept = max_doublet_score_atac,
+      linetype = "dashed",
+      color = "red"
+    ) +
+    xlab("Doublet Score (ATAC)") +
+    theme_bw() +
+    theme(
+      axis.title = element_text(size = 13),
+      axis.text = element_text(size = 11)
+    )
+hist_atac
+```
+
+
+## Scrublet doublet score (RNA)
+
+```{r fig.wide=TRUE}
+hist_rna <- tonsil@meta.data %>%
+  ggplot(aes(scrublet_doublet_scores)) +
+    geom_histogram(bins = 30) +
+    geom_vline(
+      xintercept = max_doublet_score_rna,
+      linetype = "dashed",
+      color = "red"
+    ) +
+    xlab("Doublet Score (RNA)") +
+    theme_bw() +
+    theme(
+      axis.title = element_text(size = 13),
+      axis.text = element_text(size = 11)
+    )
+hist_rna
+```
+
+
+## Correlation
+
+```{r fig.wide=TRUE}
+scatter_plot <- tonsil@meta.data %>%
+  ggplot(aes(scrublet_doublet_scores, scrublet_doublet_scores_atac)) +
+    geom_point(size = 0.01, alpha = 0.75) +
+    geom_vline(xintercept = max_doublet_score_rna, linetype = "dashed", color = "red") +
+    geom_hline(yintercept = max_doublet_score_atac, linetype = "dashed", color = "red") +
+    labs(x = "Doublet Score (RNA)", y = "Doublet Score (ATAC)") +
+    theme_bw() +
+    theme(
+      axis.title = element_text(size = 13),
+      axis.text = element_text(size = 11)
+    )
+scatter_plot
+```
+
+
+## Projection
+
+### ATAC-driven UMAP
+
+```{r}
+# Define doublets
+doublets_comparison <- 
+  tonsil$scrublet_doublet_scores > max_doublet_score_rna |
+  tonsil$scrublet_doublet_scores_atac > max_doublet_score_atac
+tonsil$is_doublet <- doublets_comparison
+
+
+# Plot
+feat_plot1 <- FeaturePlot(
+  tonsil,
+  features = "scrublet_doublet_scores",
+  reduction = "umap.atac",
+  pt.size = 0.1
+)
+feat_plot2 <- FeaturePlot(
+  tonsil,
+  features = "scrublet_doublet_scores_atac",
+  reduction = "umap.atac",
+  pt.size = 0.1
+)
+dim_plot1 <- DimPlot(
+  tonsil,
+  group.by = "is_doublet",
+  reduction = "umap.atac",
+  pt.size = 0.1
+)
+```
+
+
+```{r fig.wide=TRUE}
+feat_plot1
+```
+```{r fig.wide=TRUE}
+feat_plot2
+```
+```{r fig.wide=TRUE}
+dim_plot1
+```
+
+
+### RNA-driven UMAP
+
+```{r}
+feat_plot3 <- FeaturePlot(
+  tonsil,
+  features = "scrublet_doublet_scores",
+  reduction = "umap.rna",
+  pt.size = 0.1
+)
+feat_plot4 <- FeaturePlot(
+  tonsil,
+  features = "scrublet_doublet_scores_atac",
+  reduction = "umap.rna",
+  pt.size = 0.1
+)
+dim_plot2 <- DimPlot(
+  tonsil,
+  group.by = "is_doublet",
+  reduction = "umap.rna",
+  pt.size = 0.1
+)
+```
+
+```{r fig.wide=TRUE}
+feat_plot3
+```
+```{r fig.wide=TRUE}
+feat_plot4
+```
+```{r fig.wide=TRUE}
+dim_plot2
+```
+
+Canonical markers:
+
+```{r fig.wide=TRUE}
+canonical_markers <- c("CD3D", "CD79B", "NKG7", "LYZ", "FDCSP")
+canonical_markers_gg <- purrr::map(canonical_markers, function(x) {
+  p <- FeaturePlot(
+    tonsil,
+    features = x,
+    reduction = "umap.rna",
+    pt.size = 0.1
+  )
+  p
+})
+canonical_markers_gg
+```
+
+
+As we can see, there are clearly two clusters of cells that are B-T cell clusters. In the next notebook we will overcluster to discard those.
+
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

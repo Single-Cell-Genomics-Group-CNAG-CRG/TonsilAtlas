@@ -1,0 +1,216 @@
+---
+title: "Merge and integrate all B cells"
+author: "Ramon Massoni-Badosa & Paula Soler-Vila"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The purpose of this notebook is to integrate all B cells into a single Seurat object. 
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+path_to_obj_general <- here::here("scATAC-seq/results/R_objects/8.3.tonsil_peakcalling_annotation_level1_signature.rds")
+
+path_to_NBC_MBC <- here::here("scATAC-seq/results/R_objects/level_3/NBC_MBC/NBC_MBC_integrated_level_3.rds")
+path_to_GCBC <- here::here("scATAC-seq/results/R_objects/level_3/GCBC/GCBC_integrated_level_3.rds")
+path_to_PC <- here::here("scATAC-seq/results/R_objects/level_3/PC/PC_integrated_level_3.rds")
+
+path_to_NBC_MBC_RNA <- here::here("scRNA-seq/3-clustering/3-level_3/NBC_MBC_clustered_level_3_with_pre_freeze.rds")
+path_to_GCBC_RNA <- here::here("scRNA-seq/3-clustering/3-level_3/GCBC_clustered_level_3_with_pre_freeze.rds")
+path_to_PC_RNA <- here::here("scRNA-seq/3-clustering/3-level_3/PC_clustered_level_3_with_pre_freeze.rds")
+
+path_to_save <- here::here("scATAC-seq/results/R_objects/B_cells_integrated.rds")
+```
+
+## Load data
+```{r}
+NBC_MBC_RNA <- readRDS(path_to_NBC_MBC_RNA)
+NBC_MBC_RNA
+
+GCBC_RNA <- readRDS(path_to_GCBC_RNA)
+GCBC_RNA
+
+PC_RNA <- readRDS(path_to_PC_RNA)
+PC_RNA
+
+tonsil <- readRDS(path_to_obj_general)
+tonsil
+
+B_cell_lineage <- subset(tonsil, annotation_level_1 == "NBC_MBC" |
+                          annotation_level_1 == "GCBC" |
+                          annotation_level_1 == "PC" )
+B_cell_lineage
+
+DimPlot(
+  B_cell_lineage,
+  pt.size = 0.2,
+  group.by = "annotation_level_1"
+)
+
+nbc_mbc <- readRDS(path_to_NBC_MBC)
+gcbc <- readRDS(path_to_GCBC)
+pc <- readRDS(path_to_PC)
+```
+
+## Clean the data taking into account the level 3
+We exclude the clusters of doublets or poor-quality cells detected at level 3.
+
+```{r}
+selected_cells <- c(colnames(nbc_mbc),colnames(gcbc),colnames(pc))
+
+B_cell_lineage_clean <- subset(B_cell_lineage, 
+                               cells = selected_cells)
+B_cell_lineage_clean
+
+DimPlot(
+  B_cell_lineage_clean,
+  pt.size = 0.2,
+  group.by = "annotation_level_1"
+)
+```
+
+# Integration of the B-cell lineage data.
+
+## Normalization, dimensionality reduction 
+```{r}
+B_cell_lineage_clean <-  RunTFIDF(B_cell_lineage_clean) %>% 
+FindTopFeatures(min.cutoff = 10) %>% RunSVD()  
+
+DepthCor(B_cell_lineage_clean)
+
+B_cell_lineage_clean <- RunUMAP(object = B_cell_lineage_clean, 
+                                reduction = 'lsi', 
+                                dims = 2:40)
+DimPlot(B_cell_lineage_clean, 
+        group.by ="assay")
+```
+
+## Batch correction
+```{r}
+B_cell_lineage_clean <- RunHarmony(
+  object = B_cell_lineage_clean,
+  dims = 2:40,
+  group.by.vars = 'gem_id',
+  reduction = 'lsi',
+  assay.use = 'peaks_macs',
+  project.dim = FALSE,
+  max.iter.harmony = 20
+)
+
+# Non-linear dimension reduction and clustering
+B_cell_lineage_clean <- RunUMAP(B_cell_lineage_clean, 
+                    dims = 2:40, 
+                    reduction = 'harmony') 
+
+B_cell_lineage_clean <- FindNeighbors(object = B_cell_lineage_clean, 
+                                      reduction = 'harmony', 
+                                      dims = 2:40)
+B_cell_lineage_clean <- FindClusters(object = B_cell_lineage_clean, 
+                                     verbose = FALSE,
+                                     resolution = 0.18)
+DimPlot(object = B_cell_lineage_clean, label = TRUE) + NoLegend()
+```
+
+
+# Annotation
+We used the clusters defined at level 3 in the scRNA-seq data. 
+```{r}
+cluster_Naive  <- colnames(NBC_MBC_RNA)[NBC_MBC_RNA$seurat_clusters == 0 | NBC_MBC_RNA$seurat_clusters == 2]
+
+DimPlot(B_cell_lineage_clean, 
+  cols.highlight = "darkred", cols= "grey",
+  cells.highlight= c(cluster_Naive),
+  pt.size = 0.1
+)
+```
+
+```{r}
+cluster_Memory_cs  <- colnames(NBC_MBC_RNA)[NBC_MBC_RNA$seurat_clusters == 1]
+cluster_Memory_ncs  <- colnames(NBC_MBC_RNA)[NBC_MBC_RNA$seurat_clusters == 3]
+
+DimPlot(B_cell_lineage_clean, 
+  cols.highlight = "brown1", cols= "grey",
+  cells.highlight= c(cluster_Memory_cs),
+  pt.size = 0.1
+)
+
+DimPlot(B_cell_lineage_clean, 
+  cols.highlight = "brown4", cols= "grey",
+  cells.highlight= c(cluster_Memory_ncs),
+  pt.size = 0.1
+)
+```
+
+```{r}
+cluster_Plasma <- colnames(PC_RNA)
+
+DimPlot(B_cell_lineage_clean, 
+  cols.highlight = "cyan4", cols= "grey",
+  cells.highlight= c(cluster_Plasma),
+  pt.size = 0.1
+)
+```
+
+```{r}
+cluster_Germinal <- colnames(GCBC_RNA)
+
+cluster_Germinal_DZ <- colnames(GCBC_RNA)[GCBC_RNA$seurat_clusters == 5 | 
+                                                    GCBC_RNA$seurat_clusters == 1 | 
+                                                    GCBC_RNA$seurat_clusters == 3]
+
+cluster_Germinal_LZ  <- colnames(GCBC_RNA)[GCBC_RNA$seurat_clusters == 4 |
+                                             GCBC_RNA$seurat_clusters == 0 |
+                                             GCBC_RNA$seurat_clusters == 6]
+
+DimPlot(B_cell_lineage_clean, 
+  cols.highlight = "green4", cols= "grey",
+  cells.highlight= c(cluster_Germinal_DZ),
+  pt.size = 0.1
+)
+
+DimPlot(B_cell_lineage_clean,
+  cols.highlight = "green3", cols= "grey",
+  cells.highlight= c(cluster_Germinal_LZ),
+  pt.size = 0.1
+)
+
+```
+
+# Save
+
+```{r}
+saveRDS(B_cell_lineage_clean, path_to_save)
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,191 @@
+---
+title: "Compute QC metrics (MCL)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here we will compute the quality control metrics of the multiome MCL samples.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(ggpubr)
+library(tidyverse)
+library(patchwork)
+library(ggpubr)
+library(reshape2)
+library(data.table)
+library(GenomicRanges)
+library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+library(hdf5r)
+set.seed(173)
+```
+
+
+## Define parameters
+
+```{r}
+# Paths
+<<<<<<< HEAD:MCL/2-QC/2-filtering/01-compute_qc_metrics_mcl.Rmd
+# path_to_data <- "~/Desktop/data_MCL/"
+path_to_data <- here::here("MCL/1-cellranger_mapping/projects/experiment_1/jobs/")
+=======
+path_to_data <- here::here("MCL/1-cellranger_mapping/projects/experiment_1/jobs")
+>>>>>>> 7e95492ed2e5dd99176703ac6d538265b13fca8f:MCL/2-QC/2-filtering/deprecated/01-compute_qc_metrics_mcl.Rmd
+paths_to_files <- list.files(
+  path_to_data,
+  pattern = "filtered_feature_bc_matrix.h5",
+  recursive = TRUE,
+  full.names = TRUE
+)
+paths_to_fragments <- list.files(
+  path_to_data,
+  pattern = "atac_fragments.tsv.gz$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+gem_ids <- list.dirs(path_to_data, full.names = FALSE, recursive = FALSE)
+names(paths_to_files) <- gem_ids
+names(paths_to_fragments) <- gem_ids
+path_to_macs <- "/home/rmassonix/miniconda3/bin/macs3"
+path_to_sequencing_metadata <- here::here("MCL/1-cellranger_mapping/data/sequencing_metadata.csv")
+<<<<<<< HEAD:MCL/2-QC/2-filtering/01-compute_qc_metrics_mcl.Rmd
+# path_to_sequencing_metadata <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/MCL/1-cellranger_mapping/data/sequencing_metadata.csv"
+=======
+>>>>>>> 7e95492ed2e5dd99176703ac6d538265b13fca8f:MCL/2-QC/2-filtering/deprecated/01-compute_qc_metrics_mcl.Rmd
+
+
+# Functions
+nbp <- function(seurat_object) {
+  DefaultAssay(seurat_object) <- "ATAC"
+  f <- FragmentHistogram(object = seurat_object)
+
+  NFR <- length(which(f$data$length < 147)) / nrow(f$data) * 100
+  MONO <- length(which(f$data$length > 147 & f$data$length < 294)) / nrow(f$data) * 100
+  DI <- length(which(f$data$length > 294)) / nrow(f$data) * 100
+
+  min.threshold <- 147
+  max.threshold <- 294
+
+  # options(repr.plot.width=7, repr.plot.height=2)
+  options(repr.plot.width = 17, repr.plot.height = 8)
+  p <- ggplot(f$data, aes(length)) + ggtitle(unique(seurat_object$library_name)) +
+    geom_histogram(binwidth = 1, alpha = .5, fill = "blue") +
+    geom_density(aes(y = ..count..), bw = 1, alpha = 0, col = "black", lwd = 1) +
+    scale_x_continuous(limits = c(0, 500)) +
+    geom_vline(xintercept = c(min.threshold, max.threshold)) +
+    theme_minimal() +
+    geom_vline(xintercept = 39, color = "red") +
+    geom_text(x = 80, y = 20, label = round(NFR, 2), size = 8) +
+    geom_text(x = 200, y = 20, label = round(MONO, 2), size = 8) +
+    geom_text(x = 350, y = 20, label = round(DI, 2), size = 8)
+  p
+}
+```
+
+
+## Gene annotation
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+
+# Load data and create Seurat object
+
+Signac uses information from three related input files (created using CellRanger ARC):
+
+1. Count matrix in h5 format 
+2. ATAC Fragment file
+3. ATAC Fragment file index
+
+
+```{r}
+# Read data
+counts <- purrr::map(paths_to_files, Seurat::Read10X_h5)
+
+
+# Create a Seurat object containing the scRNA data
+seurat_list <- purrr::map(counts, function(l) {
+  seurat_obj <- Seurat::CreateSeuratObject(
+    counts = l$`Gene Expression`,
+    assay = "RNA"
+  )
+  seurat_obj
+})
+
+
+# Create a Seurat object containing the scATAC adata
+seurat_list <- purrr::map(gem_ids, function(x) {
+  seurat_obj <- seurat_list[[x]]
+  seurat_obj[["ATAC"]] <- Signac::CreateChromatinAssay(
+    counts = counts[[x]]$Peaks,
+    sep = c(":", "-"),
+    genome = "hg38",
+    fragments = paths_to_fragments[x],
+    annotation = annotation
+  )
+  seurat_obj$gem_id <- x
+  seurat_obj
+})
+names(seurat_list) <- gem_ids
+
+
+# Read sequencing metadata
+sequencing_metadata <- read_csv(path_to_sequencing_metadata)
+DT::datatable(sequencing_metadata)
+```
+
+
+#  Calculate QC metrics
+
+```{r}
+seurat_list <- purrr::map(seurat_list, function(seurat_obj) {
+  DefaultAssay(seurat_obj) <- "ATAC"
+  seurat_obj <- NucleosomeSignal(seurat_obj)
+  seurat_obj <- TSSEnrichment(seurat_obj, fast = TRUE)
+  DefaultAssay(seurat_obj) <- "RNA"
+  seurat_obj$pct_mt <- PercentageFeatureSet(
+    seurat_obj,
+    pattern = "^MT-"
+  )
+  seurat_obj
+})
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat_list, here::here("MCL/results/R_objects/seurat_list_prefiltered_MCL.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

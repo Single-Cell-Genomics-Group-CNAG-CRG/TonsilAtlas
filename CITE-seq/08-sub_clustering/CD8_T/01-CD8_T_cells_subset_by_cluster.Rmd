@@ -1,0 +1,92 @@
+---
+title: "CD8+ T cell clusters"
+author: "Sonal Rashmi"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  html_document:
+    toc: yes
+    df_print: paged
+  BiocStyle::html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+setwd("/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/")
+```
+
+# Define parameters
+
+## Load packages
+
+```{r } 
+library(Seurat)
+library(flexclust)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(harmony)
+```
+
+
+## Define variables and functions
+
+```{r}
+path_to_save_obj <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/results"
+path_to_save_citeseq_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_annotated_filtered.rds",
+  sep = "/"
+)
+path_to_save_seurat_obj <- str_c(
+  "objects/seurat_object_cite_seq_cd8_positive_object.rds",
+  sep = "/"
+)
+```
+
+## Load data
+
+```{r data}
+seurat_obj <- readRDS(path_to_save_citeseq_seurat_obj)
+```
+
+## get metadata
+
+```{r get metadata}
+metadata <- seurat_obj@meta.data 
+```
+
+# CD8+ cells
+
+```{r}
+CD8pos_clusters_obj = subset(seurat_obj,idents = c("6", "7"))
+```
+
+
+# QC of CD8+ enriched clusters
+
+```{r}
+DimPlot(CD8pos_clusters_obj)
+```
+
+```{r}
+FeaturePlot(CD8pos_clusters_obj, features = c("CD8","CD3","CD4.1"), ncol = 2)
+```
+
+
+# Save the seurat object 
+
+```{r}
+saveRDS(CD8pos_clusters_obj, file = path_to_save_seurat_obj)
+```
+
+# Session Information
+
+```{r session}
+sessionInfo()
+```

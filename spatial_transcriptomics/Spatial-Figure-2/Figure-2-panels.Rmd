@@ -1,0 +1,265 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 2 - Spatial Panels"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to create the spatial pannels necessary for Figure 2.
+
+To do this we will load the MAGIC-denoised data to better visualize genes and ease with the annotation when using specific marker genes.
+The MAGIC denoised data was generated in the script **spatial_transcriptomics/CD4-analysis/MAGIC_denoising.Rmd**.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig2}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig2}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Load SPOTlight data
+spotlight_ls <- "{cd4}/{robj_dir}/spotlight_ls_cd4_new.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+
+# Load SPOTlight data
+nm_df <- "{cd4}/{robj_dir}/cd4_nm_df.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+```
+
+### Preprocess data
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 3 % of the spot
+decon_mtrx[decon_mtrx < 0.03] <- 0
+```
+
+Change column names
+```{r}
+new_cn <- data.frame(mod_nm = colnames(decon_mtrx)) %>%
+  dplyr::left_join(nm_df, by = "mod_nm") %>%
+  dplyr::mutate(plt_nm = dplyr::if_else(is.na(plt_nm), mod_nm, plt_nm)) %>%
+  dplyr::distinct() %>%
+  dplyr::pull(plt_nm)
+
+colnames(decon_mtrx) <- new_cn
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+merged_se@meta.data <- cbind(merged_se@meta.data, decon_mtrx)
+```
+
+Subset sample of interest
+```{r}
+sample_id <- "esvq52_nluss5"
+sp_sub <- merged_se[, merged_se@meta.data$gem_id == sample_id]
+sp_sub@images <- sp_sub@images[Seurat::Images(sp_sub) == sample_id]
+```
+
+
+## Panels
+
+### Cell types interest
+Look at the location of each cell type in each slice separately
+```{r fig.height=25, fig.width=25}
+# Iterate over cell types
+ct_int <- c("Naive", "GC-Tfh-0X40", "GC-Tfh-SAP", "Tfh-LZ-GC")
+
+nm_donor <- id_sp_df %>% dplyr::filter(gem_id == sample_id) %>% dplyr::pull(donor_id)
+# Iterate over cell types
+ct_plt_ls <- lapply(ct_int, function(i) {
+  tmp_plt <- Seurat::SpatialFeaturePlot(
+    object = merged_se,
+    features = i,
+    alpha = c(0, 1),
+    images = sample_id,
+    image.alpha = 1) +
+    ggplot2::scale_fill_gradientn(
+      colors = heat.colors(10, rev = TRUE)) +
+    ggplot2::scale_alpha(range = c(0, 1)) +
+    ggplot2::labs(title = stringr::str_wrap(string = i,
+                                   width = 25),
+         fill = "") +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(
+        hjust = 0.5,
+        size = 20,
+        face = "bold"))
+
+  return(tmp_plt)
+})
+
+(plt_arr <- cowplot::plot_grid(
+  plotlist = ct_plt_ls,
+  axis = "trbl",
+  align = "hv",
+  nrow = 2,
+  ncol = 2))
+
+"{fig2}/{plt_dir}/Figure-2i_cd4_deconv_{nm_donor}.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = plt_arr,
+    base_height = 10,
+    base_width = 10)
+```
+
+
+## Associated supplementary
+
+Check Topic profiles
+```{r fig.height=8, fig.width=8}
+nmf_mod_ls <- spotlight_ls[[1]]
+nmf_mod <- nmf_mod_ls[[1]]
+
+h <- NMF::coef(nmf_mod)
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod_ls[[2]])
+
+(topic_diag <- topic_profile_plts[[2]] +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90), 
+                 axis.text = ggplot2::element_text(size = 12)))
+
+"{fig2}/{plt_dir}/supplementary_cd4_topic_diagonal.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = topic_diag,
+    base_height = 8,
+    base_width = 8)
+```
+
+Look at all cells profiles
+```{r fig.height=20, fig.width=20}
+(topics_all <- topic_profile_plts[[1]] +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank(),
+    axis.text.x = ggplot2::element_blank(),
+    axis.title = ggplot2::element_blank()))
+
+"{fig2}/{plt_dir}/supplementary_cd4_topic_all_cells.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = topics_all,
+    base_height = 20,
+    base_width = 20)
+```
+
+### All cell types
+Look at the location of each cell type in each slice separately
+```{r fig.height=25, fig.width=25}
+# Iterate over cell types
+ct <- colnames(decon_mtrx)
+
+# Iterate over images
+lapply(names(merged_se@images), function(nm) {
+  print(nm)
+  nm_donor <- id_sp_df %>% dplyr::filter(gem_id == nm) %>% dplyr::pull(donor_id)
+  # Iterate over cell types
+  ct_plt_ls <- lapply(ct, function(i) {
+    tmp_plt <- Seurat::SpatialFeaturePlot(
+      object = merged_se,
+      features = i,
+      alpha = c(0, 1),
+      images = nm,
+      image.alpha = 0) +
+      ggplot2::scale_fill_gradientn(
+        colors = heat.colors(10, rev = TRUE)) +
+      ggplot2::scale_alpha(range = c(0, 1)) +
+      ggplot2::labs(title = stringr::str_wrap(string = i,
+                                     width = 25),
+           fill = "") +
+      ggplot2::theme(
+        plot.title = ggplot2::element_text(
+          hjust = 0.5,
+          size = 20,
+          face = "bold"))
+    
+    if (sum(sp_sub@meta.data[, i]) == 0) {
+      tmp_plt <- suppressMessages(tmp_plt + ggplot2::scale_alpha(range = c(0,0)))
+    }
+    
+    return(tmp_plt)
+  })
+  
+  (plt_arr <- cowplot::plot_grid(
+    plotlist = ct_plt_ls,
+    axis = "trbl",
+    align = "hv",
+    nrow = 5,
+    ncol = 5))
+  
+  "{fig2}/{plt_dir}/Supplementary_cell_type_location_cd4_{nm_donor}_new.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = plt_arr,
+      base_height = 25,
+      base_width = 25)
+  })
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

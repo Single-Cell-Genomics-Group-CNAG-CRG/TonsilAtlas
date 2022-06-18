@@ -1,0 +1,184 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "`r sprintf('%s Integrating Regulon Information', params$donor_id)`"
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+title: `r params$donor_id`
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to get the most informative genes for each regulon as obtained by the SCENIC pipeline for each cell type and map them on the tissue.
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+dir.create(path = here::here(sprintf("%s/%s", regulon_32, plt_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+
+dir.create(path =here::here(sprintf("%s/%s", regulon_32, robj_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+sample_id <- params$sample_id
+# sample_id <- "esvq52_nluss5"
+donor_id <- id_df[id_df$gem_id == sample_id, "BCLL_ID"]
+```
+
+## Load data
+We have 4 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering.Rmd*. 
+Gene signatures for the regulons come from Sergio Aguilar's analysis and can be found in the following path: */scratch/devel/saguilar/PhD/GeneRegulatoryNetworks/projects/downsampling_0.75/results/FDC_top10regs_with_top15genes.rds*. I made soft links to this data so they are in *06-regulon_integration/SCENIC_signatures*.
+**col_df_l1** contains the color for each cell-type and the relations between modified and unmodified names, this is generated in *misc/col_df_l1.Rmd*.
+```{r}
+se_obj <- readRDS(file = here::here(glue::glue("{clust_32}/{robj_dir}/clust_se_{sample_id}.RDS")))
+
+col_df_l1 <- readRDS(file = here::here("misc/col_df_l1.rds"))
+ct <- col_df_l1$cell_type
+```
+
+Read regulon signatures
+```{r}
+fn_ls <- list.files(here::here(glue::glue("{regulon_32}/SCENIC_signatures")),
+           full.names = TRUE)
+
+names_ls <- stringr::str_split(
+  string = fn_ls,
+  pattern = "/|_") %>%
+  purrr::map(., 17) %>%
+  unlist()
+
+sign_df_ls <- lapply(fn_ls, function(pth) readRDS(pth))
+names(sign_df_ls) <- names_ls
+```
+
+## Analysis
+Show the data
+```{r}
+lapply(names(sign_df_ls), function(i){
+  tmp_df <- sign_df_ls[[i]]
+  tmp_df$`Cell Type` <- i
+  return(tmp_df)
+}) %>%
+  dplyr::bind_rows(.) %>%
+  DT::datatable(
+    data = .,
+    filter = "top")
+```
+
+We are going to compute the gene expression scores for each regulon gene signature
+```{r}
+# Iterate over the cell types
+for (ct in names(sign_df_ls)) {
+  print(ct)
+  tmp_df <- sign_df_ls[[ct]] %>%
+    dplyr::mutate(
+      TF = as.character(TF),
+      target = as.character(target), 
+    )
+    
+  # Iterate over regulons
+  for (tf in unique(tmp_df$TF)) {
+    print(tf)
+    reg_targets <- tmp_df %>%
+      dplyr::filter(TF == tf) %>%
+      dplyr::pull(target)
+    # print(reg_targets)
+    
+    # Subset genes present
+    reg_targets <- reg_targets[reg_targets %in% rownames(se_obj)]
+    
+    se_obj <- Seurat::AddModuleScore(
+      object = se_obj,
+      features = list(reg_targets),
+      name = glue::glue("{ct}_{tf}_signature")
+      # search = TRUE
+      )
+  }
+}
+
+colnames(se_obj@meta.data)
+```
+
+Get signature genes
+```{r}
+sign_mask <- stringr::str_detect(
+  string = colnames(se_obj@meta.data),
+  pattern = "signature")
+
+sign_feat <- colnames(se_obj@meta.data)[sign_mask]
+
+# saveRDS(
+#   object = se_obj@meta.data[, sign_feat],
+#   file = here::here(glue::glue("{regulon_32}/{robj_dir}/regulon_scores_{sample_id}.rds")))
+```
+
+Plot activity modules on the tissue
+```{r}
+cell_types <- stringr::str_split(
+  string = sign_feat,
+  pattern = "_") %>%
+  purrr:::map(., 1) %>%
+  unique() %>%
+  unlist()
+
+lapply(cell_types, function(ct) {
+  
+  sign_feat_mask <- stringr::str_detect(
+    string = sign_feat,
+    pattern = glue::glue("{ct}_"))
+  
+  sing_plt <- Seurat::SpatialFeaturePlot(
+    object = se_obj,
+    features = sign_feat[sign_feat_mask])
+  
+  print(sing_plt)
+  
+  cowplot::save_plot(
+    filename = here::here(glue::glue("{regulon_32}/{plt_dir}/{ct}_regulon_signatures.pdf")),
+    plot = sing_plt,
+    base_height = 15,
+    base_width = 15)
+
+})
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

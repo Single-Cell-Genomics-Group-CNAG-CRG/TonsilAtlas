@@ -1,0 +1,243 @@
+---
+title: "Seurat harmony and WNN assess mixibility (ADT+GEX)"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(tidyverse)
+library(harmony)
+```
+
+# Define Parameters
+
+```{r}
+# Paths
+path_to_save_obj <- "../results"
+path_to_saved_post_QC_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_seurat_doublets_excluded.rds",
+  sep = "/"
+)
+path_to_save_seurat_wnn_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_seurat_wnn.rds",
+  sep = "/"
+)
+saved_cell_cycle_obj <- str_c(
+  "../data/cycle.rda",
+  sep = "/"
+)
+```
+
+## Read saved seurat object post QC
+
+```{r}
+filtered_bcll.combined <- readRDS(path_to_saved_post_QC_obj)
+```
+
+# ADT and RNA multimodal analysis
+
+```{r}
+DefaultAssay(filtered_bcll.combined) <- 'RNA'
+filtered_bcll.combined <- NormalizeData(filtered_bcll.combined) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()  %>%
+  RunHarmony(reduction = "pca",dims = 1:30,group.by.vars = "gemid",assay.use = "RNA",reduction.save = "harmony_RNA")
+```
+
+# Check for Cell cycle stages variability between clusters
+
+```{r}
+load(saved_cell_cycle_obj)
+filtered_bcll.combined <- CellCycleScoring(filtered_bcll.combined, 
+                                 g2m.features = g2m_genes, 
+                                 s.features = s_genes)
+```
+
+
+```{r}
+DefaultAssay(filtered_bcll.combined) <- 'ADT'
+# we will use all ADT features for dimensional reduction
+# we set a dimensional reduction name to avoid overwriting the 
+VariableFeatures(filtered_bcll.combined) <- rownames(filtered_bcll.combined[["ADT"]])
+filtered_bcll.combined <- NormalizeData(filtered_bcll.combined, normalization.method = 'CLR', margin = 2) %>% 
+  ScaleData() %>% RunPCA(reduction.name = 'apca') %>%
+  RunHarmony(reduction = "apca",dims = 1:20, group.by.vars = "gemid", assay.use = "ADT", reduction.save = "harmony_protein")
+```
+
+# Multimodal Neighbor Identification
+
+```{r}
+# Identify multimodal neighbors. These will be stored in the neighbors slot, 
+# and can be accessed using filtered_bcll.combined[['weighted.nn']]
+# The WNN graph can be accessed at filtered_bcll.combined[["wknn"]], 
+# and the SNN graph used for clustering at filtered_bcll.combined[["wsnn"]]
+# Cell-specific modality weights can be accessed at filtered_bcll.combined$RNA.weight
+filtered_bcll.combined <- FindMultiModalNeighbors(
+  filtered_bcll.combined, reduction.list = list("harmony_RNA", "harmony_protein"),
+  dims.list = list(1:30, 1:20), modality.weight.name = "RNA.weight"
+)
+```
+
+
+# UMAP visualisation
+
+```{r}
+feat_clust <- c(0.1,0.5,1,1.5,2)
+filtered_bcll.combined <- RunUMAP(filtered_bcll.combined, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnnUMAP_")
+filtered_bcll.combined <- FindClusters(filtered_bcll.combined, graph.name = "wsnn", algorithm = 3, resolution = feat_clust, verbose = FALSE)
+```
+
+```{r}
+Seurat::DimPlot(filtered_bcll.combined, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = c("wsnn_res.0.1","wsnn_res.0.5","wsnn_res.1","wsnn_res.1.5","wsnn_res.2")) + NoLegend()  & Seurat::NoLegend()
+```
+
+```{r}
+filtered_bcll.combined <- FindClusters(filtered_bcll.combined, graph.name = "wsnn", algorithm = 3, resolution = 0.1, verbose = FALSE)
+filtered_bcll.combined <- RunUMAP(filtered_bcll.combined, reduction = 'pca', dims = 1:30, assay = 'RNA', 
+              reduction.name = 'rna.umap', reduction.key = 'rnaUMAP_')
+filtered_bcll.combined <- RunUMAP(filtered_bcll.combined, reduction = 'apca', dims = 1:18, assay = 'ADT', 
+              reduction.name = 'adt.umap', reduction.key = 'adtUMAP_')
+
+```
+
+
+```{r}
+p1 <- DimPlot(filtered_bcll.combined, reduction = 'rna.umap', label = TRUE, 
+              repel = TRUE, label.size = 2.5) + NoLegend()
+p2 <- DimPlot(filtered_bcll.combined, reduction = 'adt.umap', label = TRUE, 
+              repel = TRUE, label.size = 2.5) + NoLegend()
+```
+
+```{r}
+p1
+```
+
+
+```{r}
+p2
+```
+
+```{r}
+Seurat::DimPlot(filtered_bcll.combined, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = "wsnn_res.0.1")
+```
+
+```{r}
+metadata <- filtered_bcll.combined@meta.data
+df = count(metadata,metadata$wsnn_res.0.1)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+# Check Batch effect 
+
+## Check for subproject variability
+
+```{r}
+DimPlot(filtered_bcll.combined, reduction = "wnn.umap", group.by = 'subproject')
+```
+
+## Cell Cycle 
+
+```{r}
+# Plot the PCA colored by cell cycle phase
+DimPlot(filtered_bcll.combined,
+        reduction = "pca",
+        group.by= "Phase",
+        split.by = "Phase")
+```
+
+```{r}
+DimPlot(filtered_bcll.combined, reduction = "wnn.umap", group.by = 'Phase')
+```
+
+
+## Scrublet Doublets
+
+```{r}
+DimPlot(filtered_bcll.combined, reduction = "wnn.umap", group.by = 'scrublet_predicted_doublet')
+```
+
+
+```{r}
+FeaturePlot(filtered_bcll.combined, features = "scrublet_doublet_scores")
+```
+
+## Check vireo doublets
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "genotype_based_doublet_flag", pt.size = 0.1)
+```
+
+## Unassigned to any donor 
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "genotype_based_unassigned_flag", pt.size = 0.1)
+```
+
+## Plot UMAP with respect to TCR
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "tcr_flag", pt.size = 0.1)
+```
+
+## Plot UMAP with respect to BCR
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "bcr_flag", pt.size = 0.1)
+```
+
+
+## Plot MAIT cells
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "mait_evidence", pt.size = 0.1)
+```
+
+## Plot iNKT cells
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "inkt_evidence", pt.size = 0.1)
+```
+
+# RNA and ADT weight per cluster
+
+## Violin plot to check the RNA weight
+
+```{r}
+Seurat::VlnPlot(filtered_bcll.combined, features = "RNA.weight", sort = TRUE, pt.size = 0.1) & Seurat::NoLegend()
+```
+
+## Violin plot to check the ADT weight
+
+```{r}
+Seurat::VlnPlot(filtered_bcll.combined, features = "ADT.weight", sort = TRUE, pt.size = 0.1) & Seurat::NoLegend()
+```
+
+
+## Save the seurat object 
+
+```{r}
+saveRDS(filtered_bcll.combined, file = path_to_save_seurat_wnn_obj)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,166 @@
+---
+title: "Calling Peaks"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+Looking at the scATAC-seq coverage plots, it's possible to vislumbrate that, as a consequence of the merging process, some peaks show a considerable increase in size. This can create a problem for certain analysis such as motif enrichment analysis. In order to solve it, we decided to do a new round of peak calling using MACS2 for each group of cells annotated at level 1, helping to identify specifics peaks for rarer populations.  
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(GenomicRanges)
+library(EnsDb.Hsapiens.v86)
+library(stringr)
+library(plotly)
+```
+
+## Parameters
+
+```{r parameters}
+cell_type = "NBC_MBC"
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_annotated_level_4.rds",
+  sep = ""
+)
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_annotated_peak_calling_level_4.rds",
+  sep = ""
+)
+
+cols_nbc <- c(
+  "NBC" = "#dcf0f4",
+  "NBC early activation" = "#95d1de", 
+  "NBC IFN-activated" = "#52828D",
+  "NBC CD229+" = "#8C76B0", 
+  "DZ-early S phase" = "#006FC4", 
+  
+  "Early GC-commited NBC" = "#75a5b0",
+  "GC-commited NBC" = "#71ccb7",  
+  
+  "preGC" = "#69c291",
+  "Proliferative NBC" = "#205b67",
+  "GC DZ Noproli"  = "#588e1a", 
+
+  "Early MBC" = "#eae2c6", 
+  "ncsMBC" = "#dbcc9b", 
+  "ncsMBC FCRL4+/FCRL5+" = "#bca146",
+  "csMBC" = "#72663f",  
+  "csMBC FCRL4+/FCRL5+" = "#a3925a", 
+  "MBC FCRL5+" = "#352f1d"
+)
+```
+
+## Functions
+
+```{r functions}
+peaks_quantification <- function(seurat_filtered, new_peaks){ 
+    
+    annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+    #seqlevelsStyle(annotation) <- "UCSC"
+    ucsc.levels <- str_replace(string=paste("chr",seqlevels(annotation),sep=""), pattern="chrMT", replacement="chrM")
+    seqlevels(annotation) <- ucsc.levels
+    genome(annotation) <- "hg38"
+
+    macs2_counts <- FeatureMatrix(
+    fragments = Fragments(seurat_filtered),
+    features = new_peaks,
+    cells = colnames(seurat_filtered))
+    
+    seurat_filtered[["peaks_redefined"]] <- CreateChromatinAssay(
+      counts = macs2_counts, 
+     # genome = "hg38",
+      fragments = Fragments(seurat_filtered),
+      annotation = annotation)
+    
+    return(seurat_filtered)
+}
+```
+
+# Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+
+DimPlot(
+  seurat,
+  cols = cols_nbc,
+  label = F,
+  group.by = "names_level_5_clusters_eta",
+  pt.size = 0.1)
+```
+
+
+# New round of Peak Calling using MACS2 on each annotated cell type at level 5.
+
+```{r}
+peaks_level5 <- CallPeaks(
+  object = seurat,
+  group.by = "names_level_5_clusters_eta",
+  macs2.path = "/Users/pauli/opt/anaconda3/envs/Tonsil_atlas/bin/macs2")
+```
+
+```{r}
+# remove peaks on nonstandard chromosomes and in genomic blacklist regions
+peaks_level5 <- keepStandardChromosomes(peaks_level5, pruning.mode = "coarse")
+peaks_level5 <- subsetByOverlaps(x = peaks_level5, 
+                         ranges = blacklist_hg38_unified, 
+                         invert = TRUE)
+```
+
+# Quantification of the new peak counts in the entire dataset
+
+```{r}
+seurat <- peaks_quantification(seurat, peaks_level5)
+```
+
+```{r}
+# remove the initial peaks annotation
+DefaultAssay(seurat) <- 'peaks_redefined'
+seurat[['peaks_macs']] <- NULL
+seurat
+
+saveRDS(seurat,path_to_save)
+```
+
+# Coverage plot
+```{r}
+CoveragePlot(seurat, 
+             ranges = peaks_level5,
+             region = "chr8-127736231-127742951")
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

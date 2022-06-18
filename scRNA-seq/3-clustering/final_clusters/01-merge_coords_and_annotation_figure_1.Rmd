@@ -1,0 +1,478 @@
+---
+title: "Merge coordinates and annotation for figure 1"
+author: "Ramon Massoni-Badosa"
+date: "2021/08/01"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+
+# Introduction
+
+The purpose of this notebook is to define a dataframe with two column (cell barcodes and annotation) of all cells and clusters that we will include in the final dataset (cluster freeze). The cells to include come from three different sources:
+
+1. Cells profiled with scRNA-seq or multiome cells from the objects in advanced levels of the analysis for overrepresented cell types (T, B).
+2. Cells profiled with scRNA-seq from the objects in advanced levels of the analysis for underrepresented cell types (non-lymphoid). Remember that for these cells, the integration between multiome and RNA was masking biological heterogeneity, so we decided to just focus on scRNA-seq for the annotation and transfer the labels later on.
+3. Cells profiled with multiome from the objects in initial levels of the analysis for underrepresented cell types (non-lymphoid).
+
+We will fetch the UMAP coords and annotation for (1) and (2) from the Seurat objects we saved in the previous notebook (00-harmonize_seurat_objects.Rmd). For the third case, we will upload intermediate Seurat objects and early levels of the analysis.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+library(tidyverse)
+library(here)
+```
+
+
+## Define parameters
+
+All the parameters (paths, colors, variables) are encoded in the file "utils_final_clusters.R":
+
+```{r}
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+```
+
+
+# Non-lymphoid
+
+
+## Myeloid
+
+
+```{r}
+# Read
+myeloid <- readRDS(path_to_save_myeloid)
+myeloid_multi <- readRDS(path_to_multiome_myeloid)
+DimPlot(myeloid, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(myeloid, group.by = "annotation_figure_1", cols = color_palette)
+table(myeloid_multi$assay)
+DimPlot(myeloid_multi, cols = color_palette, split.by = "assay")
+
+
+# Set up dataframe to plot figure 1
+myeloid_multi <- subset(myeloid_multi, assay == "multiome")
+myeloid_multi$barcode <- colnames(myeloid_multi)
+myeloid_multi$annotation_figure_1 <- NA
+myeloid_multi$annotation_20220215 <- "myeloid_multiome"
+myeloid_multi$UMAP_1_20220215 <- NA
+myeloid_multi$UMAP_2_20220215 <- NA
+fig1_df <- myeloid@meta.data
+condition1 <- all(selected_cols %in% colnames(myeloid_multi@meta.data))
+condition2 <- all(myeloid_multi$assay == "multiome")
+if (condition1 & condition2) {
+  fig1_df <- bind_rows(fig1_df, myeloid_multi@meta.data[, selected_cols])
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(myeloid, myeloid_multi)
+```
+
+
+## Epithelial
+
+```{r}
+# Read
+epithelial <- readRDS(path_to_save_epithelial)
+epithelial_multi <- readRDS(path_to_multiome_epithelial)
+DimPlot(epithelial, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(epithelial, group.by = "annotation_figure_1", cols = color_palette)
+table(epithelial_multi$assay)
+DimPlot(epithelial_multi, cols = color_palette, split.by = "assay")
+
+
+# Set up dataframe to plot figure 1
+epithelial_multi <- subset(epithelial_multi, assay == "multiome")
+epithelial_multi$barcode <- colnames(epithelial_multi)
+epithelial_multi$annotation_figure_1 <- "epithelial"
+epithelial_multi$annotation_20220215 <- "epithelial_multiome"
+epithelial_multi$UMAP_1_20220215 <- NA
+epithelial_multi$UMAP_2_20220215 <- NA
+condition1 <- all(selected_cols %in% colnames(epithelial_multi@meta.data))
+condition2 <- all(epithelial_multi$assay == "multiome")
+if (condition1 & condition2) {
+  fig1_df <- bind_rows(
+    fig1_df,
+    epithelial@meta.data,
+    epithelial_multi@meta.data[, selected_cols]
+  )
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(epithelial, epithelial_multi)
+```
+
+
+## PDC
+
+```{r}
+# Read
+pdc <- readRDS(path_to_save_pdc)
+pdc_multi <- readRDS(path_to_multiome_pdc)
+DimPlot(pdc, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(pdc, group.by = "annotation_figure_1", cols = color_palette)
+DimPlot(pdc_multi, cols = color_palette, split.by = "assay")
+table(pdc$hospital)
+table(pdc_multi$hospital)
+pdc <- subset(pdc, hospital != "Royal London")
+pdc_multi <- subset(pdc_multi, hospital != "Royal London")
+
+
+# Set up dataframe to plot figure 1
+pdc_multi <- subset(pdc_multi, assay == "multiome")
+pdc_multi$barcode <- colnames(pdc_multi)
+pdc_multi$annotation_figure_1 <- "PDC"
+pdc_multi$annotation_20220215 <- "PDC_multiome"
+pdc_multi$UMAP_1_20220215 <- NA
+pdc_multi$UMAP_2_20220215 <- NA
+condition1 <- all(selected_cols %in% colnames(pdc_multi@meta.data))
+condition2 <- all(pdc_multi$assay == "multiome")
+if (condition1 & condition2) {
+  fig1_df <- bind_rows(
+    fig1_df,
+    pdc@meta.data,
+    pdc_multi@meta.data[, selected_cols]
+  )
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(pdc, pdc_multi)
+```
+
+
+## FDC
+
+```{r}
+# Read
+fdc <- readRDS(path_to_save_fdc)
+fdc_multi <- readRDS(path_to_multiome_fdc)
+fdc_proliferative <- readRDS(path_to_fdc_proliferative)
+DimPlot(fdc, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(fdc, group.by = "annotation_figure_1", cols = color_palette)
+table(fdc_multi$assay)
+DimPlot(fdc_multi, cols = color_palette, split.by = "assay")
+table(fdc_proliferative$assay)
+table(fdc$hospital)
+fdc <- subset(fdc, hospital != "Royal London")
+
+
+# Set up dataframe to plot figure 1
+fdc_multi <- subset(fdc_multi, assay == "multiome")
+fdc_multi$barcode <- colnames(fdc_multi)
+fdc_multi$annotation_figure_1 <- "FDC"
+fdc_multi$annotation_20220215 <- "FDC_multiome"
+fdc_proliferative$annotation_figure_1 <- "cycling FDC"
+fdc_proliferative$annotation_20220215 <- "cycling FDC"
+fdc_multi$UMAP_1_20220215 <- NA
+fdc_multi$UMAP_2_20220215 <- NA
+fdc_proliferative$UMAP_1_20220215 <- NA
+fdc_proliferative$UMAP_2_20220215 <- NA
+condition1 <- all(selected_cols %in% colnames(fdc_multi@meta.data))
+condition2 <- all(fdc_multi$assay == "multiome")
+condition3 <- all(selected_cols %in% colnames(fdc_proliferative@meta.data))
+if (condition1 & condition2 & condition3) {
+  fig1_df <- bind_rows(
+    fig1_df,
+    fdc@meta.data,
+    fdc_multi@meta.data[, selected_cols],
+    fdc_proliferative@meta.data[, selected_cols],
+  )
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(fdc, fdc_multi, fdc_proliferative)
+```
+
+
+# Precursor lymphocytes
+
+## preB
+
+Note that, because we have very few preB cells, we couldn't stritify them into meaningful clusters. Thus, all of them are labeled as "preB":
+
+```{r}
+# Read
+preB <- readRDS(path_to_save_preB)
+DimPlot(preB, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(preB, group.by = "annotation_figure_1", cols = color_palette)
+table(preB$assay)
+table(preB$hospital)
+DimPlot(preB, cols = color_palette, split.by = "hospital")
+preB <- subset(preB, hospital != "Royal London")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(preB@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, preB@meta.data[, selected_cols])
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(preB)
+```
+
+
+## preT
+
+```{r}
+# Read
+preT <- readRDS(path_to_save_preT)
+DimPlot(preT, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(preT, group.by = "annotation_figure_1", cols = color_palette)
+table(preT$assay)
+table(preT$hospital)
+DimPlot(preT, cols = color_palette, split.by = "hospital")
+preT <- subset(preT, hospital != "Royal London")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(preT@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, preT@meta.data[, selected_cols])
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(preT)
+```
+
+
+# NK/ILC
+
+All the cell types hereafter included multiome cells, so we only load the last object with all cells.
+
+```{r}
+# Read
+ilc_nk <- readRDS(path_to_save_ilc_nk)
+DimPlot(ilc_nk, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(ilc_nk, group.by = "annotation_figure_1", cols = color_palette)
+table(ilc_nk$assay)
+table(ilc_nk$hospital)
+DimPlot(ilc_nk, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(ilc_nk@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, ilc_nk@meta.data[, selected_cols])
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(ilc_nk)
+```
+
+
+# CD8 T cells
+
+```{r}
+# Read
+cd8 <- readRDS(path_to_save_cd8)
+DimPlot(cd8, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(cd8, group.by = "annotation_figure_1", cols = color_palette)
+table(cd8$assay)
+table(cd8$hospital)
+DimPlot(cd8, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(cd8@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, cd8@meta.data[, selected_cols])
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(cd8)
+```
+
+
+# CD4 T cells
+
+```{r}
+# Read
+cd4 <- readRDS(path_to_save_cd4)
+cd4_proli <- readRDS(path_to_proliferative_cd4_t)
+DimPlot(cd4, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(cd4, group.by = "annotation_figure_1", cols = color_palette)
+table(cd4$assay)
+table(cd4$hospital)
+DimPlot(cd4, cols = color_palette, split.by = "hospital")
+table(cd4_proli$assay)
+table(cd4_proli$hospital)
+DimPlot(cd4_proli, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+cd4_proli$annotation_figure_1 <- "cycling T"
+cd4_proli$annotation_20220215 <- "cycling T"
+cd4_proli$UMAP_1_20220215 <- NA
+cd4_proli$UMAP_2_20220215 <- NA
+condition1 <- all(selected_cols %in% colnames(cd4@meta.data))
+condition2 <- all(selected_cols %in% colnames(cd4_proli@meta.data))
+if (condition1 & condition2) {
+  fig1_df <- bind_rows(
+    fig1_df,
+    cd4@meta.data,
+    cd4_proli@meta.data[, selected_cols]
+  )
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(cd4, cd4_proli)
+```
+
+
+# Plasma cells (PC)
+
+The challenge with all the Seurat objects coming from the B cell lineage is that it also includes cells that belong to other cell types/states. For instance in the PC object, we have cells from GCBC and NBC/MBC. Hence, we will subset them to avoid duplication:
+
+
+```{r}
+# Read
+pc <- readRDS(path_to_save_pc)
+DimPlot(pc, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(pc, group.by = "annotation_figure_1", cols = color_palette)
+pc <- subset(pc, annotation_figure_1 == "PC")
+table(pc$assay)
+table(pc$hospital)
+DimPlot(pc, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(pc@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, pc@meta.data)
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(pc)
+```
+
+
+# NBC/MBC
+
+```{r}
+# Read
+nbc_mbc <- readRDS(path_to_save_nbc_mbc)
+DimPlot(nbc_mbc, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(nbc_mbc, group.by = "annotation_figure_1", cols = color_palette)
+nbc_mbc <- subset(nbc_mbc, annotation_level_1 == "NBC_MBC")
+table(nbc_mbc$assay)
+table(nbc_mbc$hospital)
+DimPlot(nbc_mbc, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(nbc_mbc@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, nbc_mbc@meta.data)
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(nbc_mbc)
+```
+
+
+# GCBC
+
+```{r}
+# Read
+gcbc <- readRDS(path_to_save_gcbc)
+DimPlot(gcbc, group.by = "annotation_20220215", cols = color_palette)
+DimPlot(gcbc, group.by = "annotation_figure_1", cols = color_palette)
+table(gcbc$assay)
+table(gcbc$hospital)
+DimPlot(gcbc, cols = color_palette, split.by = "hospital")
+
+
+# Set up dataframe to plot figure 1
+condition1 <- all(selected_cols %in% colnames(gcbc@meta.data))
+if (condition1) {
+  fig1_df <- bind_rows(fig1_df, gcbc@meta.data)
+} else {
+  stop("Conditions not met!")
+}
+
+
+# Remove
+rm(gcbc)
+```
+
+
+# Sanity checks
+
+```{r}
+# Duplicated cells?
+any(duplicated(fig1_df$barcode))
+
+
+# Lingering cells from King et al.?
+any(fig1_df$hospital == "Royal London")
+```
+
+
+# Save
+
+```{r}
+saveRDS(fig1_df, path_to_save_umap_df_rds)
+write_delim(
+  fig1_df,
+  file = path_to_save_umap_df_csv,
+  delim = ";",
+  col_names = TRUE
+)
+```
+
+
+# Session information
+
+```{r}
+sessionInfo()
+```
+

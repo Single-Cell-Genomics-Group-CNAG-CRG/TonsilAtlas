@@ -1,0 +1,90 @@
+---
+title: "Plot Local Inverse Simpson Index (LISI)"
+author: "Ramon Massoni-Badosa & Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In previous notebooks we have visualized to which extent [Harmony](https://www.nature.com/articles/s41592-019-0619-0) was able to correct for batch effects. However, UMAPs represent a 2D visual representation of the data, which is probabilistic, non-linear and largely overplotted. Thus, it is important to quantify the success of the batch effect correction using the latent space (PCA). 
+
+To achieve it, we will leverage the Local Inverse Simpson Index (LISI), which measures the batch diversity in the neighborhood of each cell. More precisely, [the LISI is the number of cells that can be drawn from a neighbor list before one batch is observed twice. Thus, LISI scores range from 1 to N, where N is the total number of batches in the dataset](https://www.biorxiv.org/content/10.1101/2020.05.22.111161v2.full.pdf). We choose LISI over other metrics such as [kBET](https://www.nature.com/articles/s41592-018-0254-1) for two main reasons:
+
+- It is extremely easy to use with a [stand-alone package](https://github.com/immunogenomics/LISI).
+- It is implemented in C++ and scales well to hundreds of thousands of cells.
+- The contribution of each neighbor is weighted.
+
+LISI scores were computed in the previous notebook. Here, we will plot the results.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(ggridges)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_lisi_scores <- here::here("scATAC-seq/2-QC/5-batch_effect_correction/2-data_integration_multiome/tmp/lisi_scores.rds")
+path_to_confounders_df <- here::here("scATAC-seq/2-QC/5-batch_effect_correction/2-data_integration_multiome/tmp/confounders_df.rds")
+```
+
+
+## Load data
+
+```{r}
+lisi_scores <- readRDS(path_to_lisi_scores)
+confounders_df <- readRDS(path_to_confounders_df)
+```
+
+
+# Plot
+
+```{r}
+confounders <- c("library_name", "sex", "age_group", "assay", "hospital")
+plot_titles <- c("Library", "Sex", "Age group", "Assay", "Hospital")
+lisi_scores$is_integrated <- factor(lisi_scores$is_integrated, levels = c("unintegrated", "integrated"))
+lisi_scores_ggs <- purrr::map2(confounders, plot_titles, function(x, title) {
+  p <- lisi_scores %>%
+    ggplot(aes_string("is_integrated", x, color = "is_integrated")) +
+      geom_violin(fill = NA) +
+      stat_summary(fun = median, geom = "point", size = 1.25, color= "black") +
+      scale_color_manual(values = c("gray60", "limegreen")) +
+      labs(title = title, x = "", y = "LISI") +
+      theme_classic() +
+      theme(
+        legend.position = "none",
+        plot.title = element_text(size = 13, hjust = 0.5),
+        strip.text = element_text(color = "black", size = 12),
+        axis.title.x = element_text(color = "black", size = 13),
+        axis.text.y = element_text(color = "black", size = 12),
+        axis.text.x = element_text(size = 11)
+      )
+  p
+})
+names(lisi_scores_ggs) <- confounders
+lisi_scores_ggs
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

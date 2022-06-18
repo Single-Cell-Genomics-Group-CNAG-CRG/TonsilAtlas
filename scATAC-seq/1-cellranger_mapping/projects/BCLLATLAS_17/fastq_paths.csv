@@ -1,0 +1,7 @@
+library_id,fastq_path,read,pair_id
+155165,/scratch/project/production/fastq/HK7YLDRXX/1/fastq/HK7YLDRXX_1_SI-NA-A3_1.fastq.gz,R1,P1
+155165,/scratch/project/production/fastq/HK7YLDRXX/1/fastq/HK7YLDRXX_1_SI-NA-A3_UMI2.fastq.gz,R2,P1
+155165,/scratch/project/production/fastq/HK7YLDRXX/1/fastq/HK7YLDRXX_1_SI-NA-A3_2.fastq.gz,R3,P1
+155165,/scratch/project/production/fastq/HK7YLDRXX/2/fastq/HK7YLDRXX_2_SI-NA-A3_1.fastq.gz,R1,P2
+155165,/scratch/project/production/fastq/HK7YLDRXX/2/fastq/HK7YLDRXX_2_SI-NA-A3_UMI2.fastq.gz,R2,P2
+155165,/scratch/project/production/fastq/HK7YLDRXX/2/fastq/HK7YLDRXX_2_SI-NA-A3_2.fastq.gz,R3,P2

@@ -1,0 +1,602 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "MAGIC trajectories and markers"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to load the MAGIC-denoised data to better visualize genes and ease with the annotation when using specific marker genes.
+[MAGIC](https://magic.readthedocs.io/en/stable/) was developed by Smita Krishnaswamy's lab to try to fill in the drop out reads in the spots. `MAGIC` is a Markov Affinity-based Graph Imputation of Cells used for denoising high-dimensional data most commonly applied to single-cell RNA sequencing data. MAGIC learns the manifold data, using the resultant graph to smooth the features and restore the structure of the data based on their k-nearest neighbors. 
+
+## Libraries
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+```
+
+## Parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{cd4}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{cd4}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+```{r}
+scatterplot <- function(x, y, color) {
+  df <- data.frame(
+    feat1 = se_sub@assays$MAGIC_Spatial@data[x, ],
+    feat2 = se_sub@assays$MAGIC_Spatial@data[y, ],
+    color = se_sub@meta.data[, color]
+  )
+  
+  ggplot2::ggplot(df,
+                  ggplot2::aes(x = feat1,
+                               y = feat2,
+                               color = color)) +
+    ggplot2::geom_point() +
+    ggplot2::theme_classic() +
+    ggplot2::labs(
+      x = x,
+      y = y,
+      color = color)
+}
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load MAGIC data from the script *MAGIC_denoising.Rmd*
+```{r}
+magic_df <- "{cd4}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store ADT information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df))
+
+# add this assay to the previously created Seurat object
+merged_se[["MAGIC_Spatial"]] <- magic_assay
+```
+
+## Analysis
+The markers denoised and used here come from 2 papers published on Tfh differentiation \
+- [T Follicular Helper Cell Biology: A Decade of Discovery and Diseases](https://doi.org/10.1016/j.immuni.2019.04.011) \
+- [Bcl6-Mediated Transcriptional Regulation of Follicular Helper T cells (Tfh)](https://doi.org/10.1016/j.it.2021.02.002)
+
+- **CCR7** Gene exrpressed by DC and naive T cells that allows the migration and homing to the lymphoid organs. Also expressed by B cells so that they can migrate towards the T:B cell border. \
+- **CD40** Gene expressed by cognate B cells to interact with Tfh and introduce them into the follicle \
+- **IL6** Interleukin-6 (IL-6), secreted by murine monocytes and B cells, and the costimulatory molecule ICOSL are early factors involved in Tfh differentiation \
+- **ICOSL** Interleukin-6 (IL-6) and the costimulatory molecule ICOSL are early factors involved in Tfh differentiation. Expressed by B cells. \
+- **IL2** IL-2 is the most potent inhibitor of Tfh differentiation because it induces Blimp-1.  \
+- **CD80** MHC-II Costimulatory molecule expressed by B cells to make the APC more potent \
+- **CD86** MHC-II Costimulatory molecule expressed by B cells to make the APC more potent \
+- **CXCR5** Receptor of CXCL13 that leads Tfh and B cells towards the follicle structure where it will meet the B cell. \
+- **CXCL13** Secreted by FDC ti attract CXCR5 exoression cells. \
+- **ICOS** Expressed by Tfh and binds with ICOSL from the B cell to make the MHC-II presentation stronger. ICOS is particularly fascinating, as it functions as both a costimulatory molecule and a migration receptor for Tfh \
+- **SELPLG** gene name for *PSGL1* -  migration of Tfh cell into GCs is facilitated by repression of the migration-associated receptor PSGL1 and the chemoattractant receptor Ebi2 \
+- **GPR183** gene name for *Ebi2* - migration of Tfh cell into GCs is facilitated by repression of the migration-associated receptor PSGL1 and the chemoattractant receptor Ebi2 \
+- **TCF7** gene name for TCF1 - TCF1 and LEF1 are involved in induction of Bcl6, as are STAT3 and STAT1 \
+- **LEF1** TCF1 and LEF1 are involved in induction of Bcl6, as are STAT3 and STAT1 \
+- **STAT3** TCF1 and LEF1 are involved in induction of Bcl6, as are STAT3 and STAT1 \
+- **STAT1** TCF1 and LEF1 are involved in induction of Bcl6, as are STAT3 and STAT1 \
+- **CD200** is expressed in GC Tfh \
+- **BTLA** is expressed in GC Tfh \
+- **PDCD1** is expressed in GC Tfh \
+- **IL12** IL-12 is the most potent human cytokine at inducing IL-21-expressing CD4 + T cells, and IL-12 signals through different STATs than IL-6 \
+- **IL10** L-10 also appears to have species-specific functions. IL-10 is made by some human GC-Tfh cells, and IL-10 has long been known as a PC differentiation factor for human B cells \
+- **IL21** Tfh cells provide IL-21 and CD40L signals required for B cell proliferation and differentiation toward both GC and extrafollicular fates \
+- **CD40LG** Tfh cells provide IL-21 and CD40L signals required for B cell proliferation and differentiation toward both GC and extrafollicular fates \
+- **IL4** IL-4 expression by Tfh cells is only acquired later, upon full differentiation to GC-Tfh cells \
+- **PSGL1 (SELPLG), GPR183** The migration of Tfh cell into GCs is ages, facilitated by repression of the migration-associated receptor PSGL1 and the chemoattractant receptor Ebi2, and changes in the expression of S1P receptors, SLAM family and integrins (Meli et al., 2016; Vinuesa et al., 2016). \
+
+[A Spatially Resolved Dark- versus Light-Zone Microenvironment Signature Subdivides Germinal Center-Related Aggressive B Cell Lymphomas](10.1016/j.isci.2020.101562)
+- **Dark Zone**: OAZ1, AICDA, H3, MKI67, POLH
+- **Light Zone**: LAG3, ITGB8, PDCD1, TIGIT, BCL2, PECAM1, LY6E, B7-H3 (CD276), HLA-DRB1, PSMB10, TNF, ARG1, HLA-E, STAT1
+
+```{r}
+"{cd4}/gene_dict.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+
+gene_vec <- gene_vec[gene_vec %in% rownames(merged_se)]
+```
+
+Add gene signatures for LZ and DZ, these signatures are calculated with the lognorm expression.
+```{r}
+merged_se <- Seurat::AddModuleScore(
+  object = merged_se,
+  features = list(gene_dict[["LZ"]]),
+  name = "LZ_signature")
+
+merged_se <- Seurat::AddModuleScore(
+  object = merged_se,
+  features = list(gene_dict[["DZ"]]),
+  name = "DZ_signature")
+```
+
+Look at signatures
+```{r fig.width=12, fig.height=5}
+Seurat::SpatialPlot(
+  object = merged_se,
+  features = c("LZ_signature1", "DZ_signature1"),
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  ncol = 2)
+```
+
+Add annotation to the slides
+```{r}
+merged_se[["annotation"]] <- dplyr::case_when(
+  merged_se@meta.data$Spatial_snn_res.0.3 == 0 ~ "Inter-follicular zone 1",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 1 ~ "T cell zone",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 2 ~ "Follicle",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 3 ~ "Epithelial 1",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 4 ~ "Follicle Proliferating",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 5 ~ "Epithelial 2",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 6 ~ "Inter-follicular zone 2",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 7 ~ "Muscle",
+)
+```
+
+### Marker gene location
+Look at the location where the marker genes are expressed along with the cell types
+```{r fig.width=20, fig.height=30}
+Seurat::DefaultAssay(merged_se) <- "MAGIC_Spatial"
+
+gene_plt <- Seurat::SpatialFeaturePlot(object = merged_se,
+                                      features = gene_vec,
+                                      alpha = c(0, 1),
+                                      ncol = 5,
+                                      images = "esvq52_nluss5")
+
+"{cd4}/{plt_dir}/magic_tfh_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = gene_plt,
+    base_height = 35,
+    base_width = 25)
+```
+
+Tfh markers
+```{r fig.width=20, fig.height=8}
+Seurat::SpatialFeaturePlot(object = merged_se,
+                          features = gene_dict[["CD4-Tfh"]],
+                          alpha = c(0, 1),
+                          ncol = 5,
+                          image = "esvq52_nluss5")
+```
+
+### Correlation matrix
+Since we are working with sample esvq52_nluss5 in this example we will limit the correlation plot to this slide.
+```{r fig.height=9, fig.width=10}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+
+(cor_mtrx <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = as.character(unique(unlist(gene_dict))),
+  assay = "MAGIC_Spatial",
+  slot = "data"))
+
+"{cd4}/{plt_dir}/magic_cor-mtrx_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx,
+    base_height = 9,
+    base_width = 10)
+
+# Correlation with lognorm expression
+SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = as.character(unique(unlist(gene_dict))),
+  assay = "Spatial",
+  slot = "data")
+```
+
+### Integrated correlation matrix
+
+Before we run the gene-correlation matrix on the integrated seurat object we want to make sure that the behavior across all slides is consistent.
+
+```{r}
+lapply(id_sp_df$gem_id, function(id) {
+  
+  tmp_sub <- subset(merged_se, subset = gem_id == id)
+  tmp_sub@images <- tmp_sub@images[Seurat::Images(tmp_sub) == id]
+  
+  (cor_mtrx_genes <- SCrafty::correlation_heatmap( 
+    se = tmp_sub,
+    genes = as.character(unique(unlist(gene_dict))),
+    assay = "MAGIC_Spatial",
+    slot = "data") +
+     ggplot2::labs(
+       title = glue::glue("{id} - gene correlation matrix")))
+  
+  "{cd4}/{plt_dir}/magic_cor-mtrx_markers_{id}.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = cor_mtrx_genes,
+      base_height = 9,
+      base_width = 10)
+  
+})
+
+```
+
+After cheking all the slides seem to be consistent across the gene clusters observed:
+```{r}
+(cor_mtrx_int <- SCrafty::correlation_heatmap( 
+  se = merged_se,
+  genes = as.character(unique(unlist(gene_dict))),
+  assay = "MAGIC_Spatial",
+  slot = "data") +
+   ggplot2::labs(
+     title = "Integrated gene correlation matrix"))
+
+"{cd4}/{plt_dir}/magic_cor-mtrx_markers_integrated.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx_int,
+    base_height = 9,
+    base_width = 10)
+```
+
+### Trajectory
+We are going to look at how the genes change in a manually set path. To do this we use the SPATA2 package, vignette can be found [here](https://themilolab.github.io/SPATA2/articles/spata-v2-trajectory-analysis.html)
+
+We start by subsetting and converting to a SPATA object
+```{r}
+# se_sub <- Seurat::RunTSNE(object = se_sub)
+spata_sub <- SPATA2::transformSeuratToSpata(
+  seurat_object = se_sub,
+  sample_name = "esvq52_nluss5",
+  image_name = "esvq52_nluss5",
+  assay_name = "MAGIC_Spatial",
+  assay_slot = "data",
+  method = "spatial",
+  coords_from = "umap",
+  verbose = TRUE)
+
+```
+
+#### Draw trajectories
+Spatial trajectories of a sample in a given spata-object can be drawn interactively using the function `createTrajectories()` as shown in the example below. `createTrajectories()` opens a mini-shiny application. This app allows one the one hand to investigate the sample with regards to spatial gene expression like `plotSurfaceInteractive()` does and on the other hand to draw trajectories through the areas of interest in four easy steps.
+```{r eval=FALSE}
+# open interactive application
+spata_sub <- SPATA2::createTrajectories(
+  object = spata_sub)
+
+# Check that the trajectory has been determined correctly
+names(spata_sub@trajectories$esvq52_nluss5)
+
+"{anot}/{robj_dir}/spata-esvq52_nluss5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = spata_sub, file = .)
+```
+
+Load drawn trajectories
+```{r}
+spata_sub <- "{anot}/{robj_dir}/spata-esvq52_nluss5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+#### Visualization
+Look at the trajectory
+```{r fig.width=9, fig.height=7}
+plt1 <- SPATA2::plotTrajectory(
+  object = spata_sub, 
+  trajectory_name = "Tfh-migration",
+  color_by = "annotation",
+  pt_clrp = "npg",
+  pt_size = 2,
+  pt_alpha = 0.75, # reduce alpha to highlight the trajectory's course
+  display_image = FALSE) +
+  SPATA2::legendTop() +
+  ggplot2::scale_y_reverse()
+
+plt2 <- SPATA2::plotTrajectory(
+  object = spata_sub, 
+  trajectory_name = "Tfh-migration-quiescent",
+  color_by = "annotation",
+  pt_clrp = "npg",
+  pt_size = 2,
+  pt_alpha = 0.75, # reduce alpha to highlight the trajectory's course
+  display_image = FALSE) +
+  SPATA2::legendTop() +
+  ggplot2::scale_y_reverse()
+
+plt1 + plt2
+
+"{cd4}/{plt_dir}/magic_trajectories_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = plt1 + plt2,
+    base_height = 9,
+    base_width = 10)
+```
+
+Specify the genes or gene-sets of interest by using the respective functions and arguments.
+```{r fig.width=12, fig.height=8}
+# gene-set names
+genes_of_interest <- c("CCR7", "CXCR5", "BCL6", "CD40", "MKI67", "PDCD1")
+  
+# plot lineplot
+grad1 <- SPATA2::plotTrajectoryGenes(object = spata_sub,
+                    trajectory_name = "Tfh-migration", 
+                    genes = genes_of_interest,
+                    smooth_span = 0.2,
+                    smooth_se = TRUE, 
+                    display_facets = TRUE, # use facet_wrap() to split the plot in four parts
+                    nrow = 2 # align the sub plots in two rows 
+                    )
+
+grad2 <- SPATA2::plotTrajectoryGenes(object = spata_sub,
+                    trajectory_name = "Tfh-migration-quiescent", 
+                    genes = genes_of_interest,
+                    smooth_span = 0.2,
+                    smooth_se = TRUE, 
+                    display_facets = TRUE, # use facet_wrap() to split the plot in four parts
+                    nrow = 2 # align the sub plots in two rows 
+                    )
+
+grad1 / grad2
+```
+
+Look at all the genes in gene vec in the heat map
+```{r fig.width=20, fig.height=15}
+rm_genes <- c("IL6", "PROX1", "CD3E", "CD8A", "CD8B")
+hm_colors <- viridis::inferno(n = 100)
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration",
+  variables = gene_vec,
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = gene_vec[!gene_vec %in% rm_genes],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+### Step-by-step heatmap
+
+#### Step 1 - Entry and DC interaction
+
+*Tfh differentiation usually starts with interaction of a naive CD4 + T cell with a myeloid professional antigen-presenting cell (APC) such as a dendritic cell (DC).*
+
+*DCs predominantly localize to T cell zones and thus have the greatest opportunity to prime CD4 + T cells.* \
+*Upon priming by DCs, CD4 + T cells receiving Tfh cell-inductive signals upregulate Bcl6*
+```{r fig.width=15, fig.height=10}
+step1 <- c(unlist(gene_dict[c("DC", "CD4-naive", "Lymph Endothelial", "T cells")]), "BCL6")
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = step1[!step1 %in% rm_genes],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+#### Step 2 - Migration to T:B border
+*The migration of Tfh cell into GCs is facilitated by repression of the migration-associated receptor PSGL1 and the chemoattractant receptor Ebi2, and changes in the expression of S1P receptors, SLAM family receptors, and integrins. ICOS is particularly fascinating, as it functions as both a costimulatory molecule and a migration receptor for Tfh cells*
+
+```{r fig.width=15, fig.height=10}
+step2 <- c(unlist(gene_dict[c("CD4-Tfh", "T cells")]), "BCL6", "CCR7", "CD4")
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = step2[!step2 %in% c(rm_genes, "IL6R")],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+#### Step 3 - T:B border
+*Tfh cells provide IL-21 and CD40L signals required for B cell proliferation and differentiation toward both GC and extrafollicular fates (Lee et al., 2011) (Figure 3A). IL-4 expression by Tfh cells is only acquired later, upon full differentiation to GC-Tfh cells (Weinstein et al., 2016; Yusuf et al., 2010). B cells compete for Tfh help at the T-B border based on the amount of p:MHCII presented by the B cell to the Tfh cell (Schwickert et al., 2011; Yeh et al., 2018). The success of B cells competing for early Tfh help depends on the frequency of the B cells and their antigen affinity (Abbott et al., 2018; Schwickert et al., 2011). Rare B cells with low affinity may be excluded from immune responses at this early Tfh cell checkpoint, which has implications for vaccines because neutralizing epitope-specific B cells against some pathogens may be quite rare and low affinity (Havenar-Daughton et al., 2017).*
+
+```{r fig.width=15, fig.height=10}
+step3 <- c(unlist(gene_dict[c("CD4-Tfh", "B cells", "Proliferation")]),
+           "BCL6", "CCR7", "IL12", "HLA-DRA")
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = step3[!step3 %in% c(rm_genes, "IL6R")],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+#### Step 4 - GC Tfh
+
+*The help provided by GC-Tfh cells to B GC cells classically consists of IL-21, IL-4, CD40L, and CXCL13, in addition to production of more widely expressed cytokines such as IL-2 and TNF. The combination of IL-21 and IL-4 expression by GC-Tfh cells maximally supports B GC cells (Weinstein et al. 2016), in addition to CD40L. While GC-Tfh cells express substantial amounts of IL-21 and IL-4 RNA, GC-Tfh cells secrete infinitesimal quanta of IL-21 and IL-4 protein, consistent with GC-Tfh cells constraining GCs as a resource limited environment*
+
+*Dopamine secretion by human GC-Tfh cells enhances rapid ICOSL surface expression by human B GC cells, resulting in a feedforward help loop between the interacting GC-Tfh and B GC cells*
+
+*L-10 also appears to have species-specific functions. IL-10 is made by some human GC-Tfh cells, and IL-10 has long been known as a PC differentiation factor for human B cells*
+```{r fig.width=15, fig.height=10}
+step4 <- c(unlist(gene_dict[c("CD4-GC-Tfh", "B cells", "Proliferation", "Chemokines")]),
+           "BCL6", "CCR7", "HLA-DRA", "IL4", "ICOS", "CD40LG", "CXCL13", "IL10")
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = step4[!step4 %in% c(rm_genes, "IL6R")],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+```{r eval=FALSE, echo=FALSE}
+Seurat::DefaultAssay(merged_se) <- "Spatial"
+
+ICOS_lognorm <- Seurat::SpatialFeaturePlot(object = merged_se,
+                          features = "ICOS",
+                          alpha = c(0, 1),
+                          # ncol = 5,
+                          image = "esvq52_nluss5",
+                          slot = "counts")
+
+Seurat::DefaultAssay(merged_se) <- "MAGIC_Spatial"
+
+ICOS_magic <- Seurat::SpatialFeaturePlot(object = merged_se,
+                          features = "ICOS",
+                          alpha = c(0, 1),
+                          # ncol = 5,
+                          image = "esvq52_nluss5",
+                          slot = "counts")
+
+ICOS_lognorm + ICOS_magic
+```
+
+#### Step 5 - Non-Tfh
+```{r fig.width=15, fig.height=10}
+step2 <- c(unlist(gene_dict[c("CD4-non-Tfh", "Chemokines")]), "BCL6", "CCR7")
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = step2[!step2 %in% c(rm_genes, "IL6R")],
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+### Marker visualization
+Plot comparing expression of TCF7 & BCL6
+```{r fig.width=10, fig.height=10}
+feat_plt <- Seurat::SpatialFeaturePlot(
+  object = se_sub,
+  features = c("BCL6", "TCF7"),
+  alpha = c(0, 1))
+
+se_sub[["Spatial_snn_res.0.3"]] <- as.character(se_sub@meta.data[, "Spatial_snn_res.0.3"])
+
+sctr_plt <- scatterplot(x = "BCL6", y = "TCF7", color = "annotation")
+
+dim_plt <- Seurat::SpatialPlot(
+  object = se_sub,
+  group.by = "annotation") +
+  Seurat::NoLegend()
+
+bot <- (sctr_plt + dim_plt) +
+  patchwork::plot_layout(guides = "collect")
+
+(fig_arr <- feat_plt / bot)
+
+"{cd4}/{plt_dir}/arr_bcl6_tcf7.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = fig_arr,
+    base_height = 10,
+    base_width = 10)
+```
+
+Plot comparing expression of PRDM1 & BCL6
+```{r fig.width=10, fig.height=10}
+feat_plt <- Seurat::SpatialFeaturePlot(
+  object = se_sub,
+  features = c("BCL6", "PRDM1"),
+  alpha = c(0, 1))
+
+sctr_plt <- scatterplot(x = "BCL6", y = "PRDM1", color = "annotation")
+
+dim_plt <- Seurat::SpatialPlot(
+  object = se_sub,
+  group.by = "annotation") +
+  Seurat::NoLegend()
+
+bot <- (sctr_plt + dim_plt) +
+  patchwork::plot_layout(guides = "collect")
+
+(fig_arr <- feat_plt / bot)
+
+"{cd4}/{plt_dir}/arr_bcl6_prdm1.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = fig_arr,
+    base_height = 10,
+    base_width = 10)
+```
+
+
+## Session Info
+```{r}
+sessionInfo()
+```

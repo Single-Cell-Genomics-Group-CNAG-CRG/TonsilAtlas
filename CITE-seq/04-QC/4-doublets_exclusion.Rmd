@@ -1,0 +1,142 @@
+---
+title: "Doublet exclusion based on the Scrublet and Genotype flag"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(Seurat)
+library(stringr)
+library(dplyr)
+library(ggplot2)
+```
+
+# Define Parameters
+
+```{r}
+# Paths
+path_to_save_obj <- "../results"
+path_to_saved_post_QC_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_postQC.rds",
+  sep = "/"
+)
+path_to_save_seurat_assess_doublets_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_seurat_doublets_excluded.rds",
+  sep = "/"
+)
+```
+
+## Read saved seurat object post QC
+
+```{r}
+bcll.combined <- readRDS(path_to_saved_post_QC_obj)
+```
+
+
+# Filtering based on the scrubblet score and genotype flag
+
+```{r }
+# Filter out low quality reads using selected thresholds - these will change with experiment
+
+  filtered_bcll.combined_cells <- rownames(subset(bcll.combined@meta.data,  bcll.combined@meta.data$scrublet_predicted_doublet == "False" & bcll.combined@meta.data$genotype_based_doublet_flag == "F" & bcll.combined@meta.data$genotype_based_unassigned_flag == "F"))
+filtered_bcll.combined = subset(bcll.combined,cells=filtered_bcll.combined_cells)
+```
+
+# Create clean metadata
+
+```{r}
+# Save filtered subset to new metadata
+metadata_clean <- filtered_bcll.combined@meta.data
+
+Re_QC_summary <- filtered_bcll.combined@meta.data %>% group_by(orig.ident) %>% summarise(Total_cells = n(), Mean_RNA_count= mean(nCount_RNA), Mean_feature_count = mean(nFeature_RNA), Mean_mito_percent = mean(percent.mt), Mean_log10GenesPerUMI = mean(log10GenesPerUMI), Number_of_scrublet_doublet = sum(scrublet_predicted_doublet == "True"), Number_of_genotype_doublet = sum(genotype_based_doublet_flag == "T") , Number_of_genotype_unassigned = sum(genotype_based_unassigned_flag == "T"), Number_of_TCR = sum(tcr_flag == "T", na.rm = T) , Number_of_BCR = sum(bcr_flag == "T", na.rm = T) , Number_of_mait_cells = sum(mait_evidence %in% c("TRB:gene","TRA:gene+junction;TRB:gene","TRA:gene","TRA:gene;TRB:gene","TRA:junction;TRB:gene","TRA:junction","TRA:gene+junction"), na.rm = T), Number_of_inkt_cells =sum(inkt_evidence %in% c("TRB:gene","TRA:gene;TRB:gene","TRA:gene"), na.rm = T) , .groups = 'drop')
+library(knitr)
+library(kableExtra)
+kable(Re_QC_summary) %>%
+  kable_styling("striped", full_width = T)
+```
+
+# Visualisation
+
+## UMI counts (transcripts) per cell
+
+```{r}
+
+# Visualize the number Feature per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=nFeature_RNA, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = 2500)
+
+```
+
+
+## Gene detected per cell
+
+
+```{r}
+
+# Visualize the number Gene per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=nCount_RNA, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = 200)
+
+```
+
+## Mitochondrial Counts Ratio
+
+```{r}
+# Visualize the distribution of mitochondrial gene expression detected per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=percent.mt, fill=sample)) + 
+  	geom_density(alpha = 15) + 
+  	theme_classic() +
+  	geom_vline(xintercept = 20)
+
+```
+
+## Genotype and scrublet
+
+Cross table to check the doublet called by scrublet and by the genotype package
+
+```{r}
+table(metadata_clean$donor_id, metadata_clean$scrublet_predicted_doublet)
+```
+
+# Summarise number of cells
+
+```{r}
+sprintf("Total Cells: %i", length(rownames(metadata_clean)))
+sprintf("T Cells (containing TCR): %i", length(rownames(subset(metadata_clean, metadata_clean$tcr_flag == "T"))))
+sprintf("B Cells (containing BCR) : %i", length(rownames(subset(metadata_clean, metadata_clean$bcr_flag == "T"))))
+sprintf("Scrublet Doublet : %i", length(rownames(subset(metadata_clean, metadata_clean$scrublet_predicted_doublet == "True"))))
+sprintf("Genotype Doublet : %i", length(rownames(subset(metadata_clean, metadata_clean$genotype_based_doublet_flag == "T"))))
+sprintf("Genotype Unassigned : %i", length(rownames(subset(metadata_clean, metadata_clean$genotype_based_unassigned_flag == "T"))))
+```
+
+## Save the seurat object 
+
+```{r}
+saveRDS(filtered_bcll.combined, file = path_to_save_seurat_assess_doublets_obj)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

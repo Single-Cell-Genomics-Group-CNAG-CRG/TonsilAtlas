@@ -1,0 +1,63 @@
+---
+author: "Paula Soler-Vila"
+date: "2020/04/10"
+
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+gem_id = "jbp85ve3_3179tpob"
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Scrublet: ", gem_id, sep = "")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+In this notebook, we summarize the doublet detection results obtained after running [Scrublet](https://www.sciencedirect.com/science/article/pii/S2405471218304745). 
+In particular, we run Scrublet for each accessible matrix derived from individual 10X Chip Channels, as recommended in their [notes on best practices](https://github.com/swolock/scrublet).
+
+# Histograms
+
+We start plotting the doublet score histograms for observed epigenome and simulated doublets. We should observe a bimodal distribution in the simulated doublets allowing us to set an accurate threshold. Although Scrublet was designed to detect doublets in scRNA-seq,
+[SnapATAC](https://www.biorxiv.org/content/10.1101/615179v3.full) authors[^1]
+have suggested that this tool can also be used to find doublets in scATAC-seq datasets as well.
+
+[^1]: Fang, Rongxin, et al. [SnapATAC](https://www.biorxiv.org/content/10.1101/615179v3.full): a comprehensive analysis package for single cell ATAC-seq." bioRxiv (2020)
+
+```{r}
+path_to_hist <- paste0("tmp/histograms/scrublet_doublet_prediction_histograms-",gem_id, ".png")
+```
+
+```{r echo=FALSE, fig.cap="Histogram with the automatic threshold determined by Scrublet"}
+knitr::include_graphics(path_to_hist)
+```
+
+
+# UMAPs
+As described in the [Scrublet best practices](https://github.com/swolock/scrublet):
+- Visualize the doublet predictions in a 2-D embedding (e.g., UMAP or t-SNE). Predicted doublets should mostly co-localize (possibly in multiple clusters). If they do not, you may need to adjust the doublet score threshold, or change the pre-processing parameters to better resolve the cell states present in your data.
+
+
+```{r}
+path_to_umap <- paste0("tmp/umaps/scrublet_doublet_prediction_umaps-",gem_id, ".png")
+```
+
+```{r echo=FALSE, fig.cap="Umap with the automatic threshold determined by Scrublet"}
+knitr::include_graphics(path_to_umap)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

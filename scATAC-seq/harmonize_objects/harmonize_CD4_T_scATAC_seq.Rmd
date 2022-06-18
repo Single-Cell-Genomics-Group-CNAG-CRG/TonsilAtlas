@@ -1,0 +1,165 @@
+---
+title: "Harmonize scATAC-seq object CD4 T"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+To be consistent with the other data modalities, we will harmonize the scATAC-seq dataset for the CD4 T cells, including the variable names in the metadata. We will also transfer the UMAP coordinates from RNA to ATAC-seq.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+library(caret)
+library(class)
+library(here)
+library(glue)
+```
+
+
+## Parameters
+
+```{r}
+# Source functions
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+
+
+# Misc
+optimal_k <- 5
+```
+
+
+## Read data
+
+```{r}
+atac <- readRDS(path_to_atac_cd4_not_harmonized)
+rna <- readRDS(path_to_save_cd4)
+```
+
+
+# Harmonize scATAC-seq dataset
+
+```{r}
+selected_cols_atac <- c(selected_cols_atac, "annotation_20220215",
+                        "nCount_peaks_level_5", "nFeature_peaks_level_5",
+                        "BCL6_enhancer1", "BCL6_gene1")
+selected_cols_atac <- selected_cols_atac[which(selected_cols_atac != "annotation_figure_1")]
+atac$barcode <- colnames(atac)
+atac$is_facs_sorted <- atac$technique
+atac$annotation_20220215 <- atac$annotation_paper
+atac$UMAP_1_20220215 <- Embeddings(atac, "umap")[, "UMAP_1"]
+atac$UMAP_2_20220215 <- Embeddings(atac, "umap")[, "UMAP_2"]
+if (all(selected_cols_atac %in% colnames(atac@meta.data))) {
+  atac@meta.data <- atac@meta.data[, selected_cols_atac]
+} else {
+  stop("Some columns are not present!")
+}
+```
+
+
+# Transfer UMAP coordinates
+
+```{r}
+# Define variables to predict
+ref_cells <- colnames(rna)[colnames(rna) %in% colnames(atac)]
+atac$UMAP_1_RNA_based <- NA
+atac$UMAP_2_RNA_based <- NA
+atac$UMAP_1_RNA_based[ref_cells] <- rna$UMAP_1_20220215[ref_cells]
+atac$UMAP_2_RNA_based[ref_cells] <- rna$UMAP_2_20220215[ref_cells]
+atac$type <- ifelse(
+  colnames(atac) %in% ref_cells,
+  "reference",
+  "query"
+)
+
+
+# Create training and test sets
+data_sets <- split_training_and_test_sets(
+  atac,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+data_sets$training_set <- data_sets$training_set[, 2:30]
+data_sets$test_set <- data_sets$test_set[, 2:30]
+
+
+# Predict UMAP coords
+umap_coords <- transfer_umap_coords(
+  seurat_obj = atac,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  umap1_var = "UMAP_1_RNA_based",
+  umap2_var = "UMAP_2_RNA_based"
+)
+atac$UMAP_1_RNA_based[umap_coords$query_cells] <- umap_coords$UMAP1
+atac$UMAP_2_RNA_based[umap_coords$query_cells] <- umap_coords$UMAP2
+```
+
+
+# Recreate fragment objects
+
+As we changed the names of the cells and the path to the fragment files, let us recreate the Fragment objects:
+
+```{r}
+# Create new fragment files
+gem_ids <- unique(atac$gem_id[atac$assay == "multiome"])
+fragments_list <- purrr::map(gem_ids, function(x) {
+  fragments <- CreateFragmentObject(
+    path = here(glue("data/raw_data_figures/scATAC_CD4_T/fragments/{x}_atac_fragments_renamed_cells.tsv.gz")),
+    cells = colnames(atac)[atac$gem_id == x],
+    validate.fragments = TRUE
+  )
+  fragments
+})
+names(fragments_list) <- gem_ids
+fragments_atac <- CreateFragmentObject(
+  path = here("data/raw_data_figures/scATAC_CD4_T/fragments/scATAC_fragments.tsv.gz"),
+  cells = colnames(atac)[atac$assay == "scATAC"],
+  validate.fragments = TRUE
+)
+fragments_list <- c(
+  "scATAC-seq" = fragments_atac,
+  fragments_list
+)
+atac[["peaks_level_5"]]@fragments <- fragments_list
+```
+
+
+# Save
+
+```{r}
+saveRDS(atac, path_to_save_atac_cd4)
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+

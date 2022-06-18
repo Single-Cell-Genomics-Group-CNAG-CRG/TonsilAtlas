@@ -1,0 +1,5 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/multiome/1-cellranger_mapping/projects/experiment_1/jobs/wdp0p728_jf6w68km/fastq/ATAC/lane2,wdp0p728_jf6w68km_atac,Chromatin Accessibility
+/scratch/devel/rmassoni/tonsil_atlas/current/multiome/1-cellranger_mapping/projects/experiment_1/jobs/wdp0p728_jf6w68km/fastq/ATAC/lane1,wdp0p728_jf6w68km_atac,Chromatin Accessibility
+/scratch/devel/rmassoni/tonsil_atlas/current/multiome/1-cellranger_mapping/projects/experiment_1/jobs/wdp0p728_jf6w68km/fastq/RNA/lane2,wdp0p728_jf6w68km_rna,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/multiome/1-cellranger_mapping/projects/experiment_1/jobs/wdp0p728_jf6w68km/fastq/RNA/lane1,wdp0p728_jf6w68km_rna,Gene Expression

@@ -1,0 +1,165 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Find markers (level 2):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+The objective of this notebook is to find markers for those clusters that we flagged as potential doublets. Later, we will discuss with the annotation team whether we keep them or remove.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_dir <- here::here("scRNA-seq/results/R_objects/level_2/")
+path_to_obj <- str_c(
+  path_to_dir,
+  cell_type,
+  "/",
+  cell_type,
+  "_integrated_level_2.rds",
+  sep = ""
+)
+path_to_save <- str_c(
+  path_to_dir,
+  cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_2.rds",
+  sep = ""
+)
+path_to_tmp <- here::here("scRNA-seq/3-clustering/2-level_2/tmp/")
+path_to_save_markers <- str_c(
+  path_to_tmp,
+  cell_type,
+  "_markers_level_2.xlsx",
+  sep = ""
+)
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "chocolate1", "coral2", "blueviolet",
+                   "brown1", "darkmagenta", "deepskyblue1", "dimgray",
+                   "deeppink1", "green", "lightgray", "hotpink1",
+                   "indianred4", "khaki", "mediumorchid2")
+
+
+# Resolutions
+resolutions <- c(
+  NBC_MBC = 0.2,
+  GCBC = 0.1,
+  CD4_T = 0.05,
+  Cytotoxic = 0.1,
+  PC = 0.1,
+  myeloid = 0.05,
+  FDC = 0.2,
+  PDC = 0.1,
+  epithelial = 0.1
+)
+resolution <- resolutions[cell_type]
+names(resolution) <- NULL
+
+
+# Flagged clusters
+flagged_clusters_all <- list(
+  NBC_MBC = c("5"),
+  GCBC = c("2", "3", "4", "5"),
+  CD4_T = c("2", "4", "5", "6"),
+  Cytotoxic = c("2", "5"),
+  PC = c("2", "3", "4", "5"),
+  myeloid = c("2", "3", "4", "6", "7", "8", "9", "10"),
+  FDC = c("1", "2", "3", "5", "6", "7"),
+  PDC = c("1"),
+  epithelial = c("2", "3", "4", "5", "6", "7")
+)
+flagged_clusters <- flagged_clusters_all[[cell_type]]
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Cluster
+
+Here, we cluster with the resolution that allows us to separate our clusters of interest, which was decided by inspecting the results of previous notebooks.
+
+```{r}
+seurat <- FindClusters(seurat, resolution = resolution)
+p <- DimPlot(seurat, cols = color_palette)
+p
+```
+
+
+# Find Markers
+
+```{r}
+markers_flagged_clust <- purrr::map(flagged_clusters, function(x) {
+  df <- FindMarkers(
+    seurat,
+    ident.1 = x,
+    logfc.threshold = 0.75,
+    only.pos = TRUE
+  )
+  fold_change_var <- str_subset(colnames(df), "FC")
+  sorted_rows <- order(df[[fold_change_var]], decreasing = TRUE)
+  df <- df[sorted_rows, ]
+  df$gene <- rownames(df)
+  df
+})
+names(markers_flagged_clust) <- flagged_clusters
+purrr::map(markers_flagged_clust, head, 25)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+dir.create(path_to_tmp, showWarnings = FALSE)
+openxlsx::write.xlsx(markers_flagged_clust, file = path_to_save_markers)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

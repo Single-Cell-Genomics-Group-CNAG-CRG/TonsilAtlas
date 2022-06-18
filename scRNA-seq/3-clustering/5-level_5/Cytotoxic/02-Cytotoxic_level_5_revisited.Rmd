@@ -1,0 +1,310 @@
+---
+title: "Cytotoxic: Level 5"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+TODO: INTEGRATE TIM3 DN!!
+
+# Introduction
+
+In future steps of the project, we decided it was a better option to include naive CD8 T cells, TIM3+ DN and the rest of the CD8 T cells together to show in figure 2. Thus, here we will merge, reintegrate them and recluster.
+
+In addition, we will merge them with the CITE-seq dataset.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+library(caret)
+library(class)
+```
+
+
+## Parameters
+
+```{r}
+path_to_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/CD8_T/CD8_T_clustered_level_5.rds"
+path_to_tim3 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/TIM3_DN/TIM3_DN_clustered_level_4.rds"
+path_to_naive_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/CD4_T/naive_CD8_T_subsetted_level_4.rds"
+path_to_cite_seq <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/CITE-seq/results/seurat_object_cite_seq_seurat_wnn.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+
+# Source functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/SLOcatoR_functions.R")
+```
+
+
+## Read data
+
+```{r}
+naive_cd8 <- readRDS(path_to_naive_cd8)
+tim3 <- readRDS(path_to_tim3)
+other_cd8 <- readRDS(path_to_cd8)
+cite_seq <- readRDS(path_to_cite_seq)
+```
+
+
+# Merge and integrate naive and other CD8 T cells
+
+```{r}
+naive_cd8 <- subset(naive_cd8, hospital != "Royal London")
+other_cd8 <- subset(other_cd8, hospital != "Royal London")
+tim3 <- subset(tim3, hospital != "Royal London")
+
+naive_cd8$annotation_level_4 <- "naive_CD8_T"
+tim3$annotation_level_4 <- tim3$annotation_level_3
+reference <- merge(x = naive_cd8, y = c(other_cd8, tim3))
+reference <- NormalizeData(reference)
+hvg <- find_assay_specific_features(
+  reference,
+  assay_var = "assay",
+  n_features = 5500
+)
+reference <- integrate_assays(
+  reference,
+  assay_specific = TRUE,
+  n_dim = 25,
+  assay_var = "assay",
+  shared_hvg = hvg
+)
+reference <- RunUMAP(reference, reduction = "harmony", dims = 1:25)
+DimPlot(reference, cols = color_palette, pt.size = 0.75)
+```
+
+
+# Recluster
+
+```{r}
+reference <- FindNeighbors(reference, reduction = "harmony", dims = 1:25)
+reference <- FindClusters(reference, resolution = 0.75)
+DimPlot(reference, cols = color_palette)
+```
+
+We will merge some clusters together into a single naive CD8 T cell cluster, since we know it's a homogeneous population:
+
+```{r}
+reference$annotation_level_5 <- reference$seurat_clusters
+reference$annotation_level_5[reference$annotation_level_5 %in% c("0", "2", "6", "7")] <- "0"
+DimPlot(reference, cols = color_palette, group.by = "annotation_level_5")
+```
+
+
+In addition, we will break cluster 8 into 2, since one of them shows a surprising expression of TRDC:
+
+```{r}
+Idents(reference) <- "annotation_level_5"
+reference <- FindSubCluster(
+  reference,
+  cluster = "8",
+  graph.name = "RNA_snn",
+  subcluster.name = "unconventional",
+  resolution = 0.25
+)
+DimPlot(reference, group.by = "unconventional", cols = color_palette)
+reference$annotation_level_5 <- reference$unconventional
+Idents(reference) <- "annotation_level_5"
+```
+
+
+# Project CITE-seq data
+
+```{r}
+query <- subset(cite_seq, idents = c("6", "7"))
+reference$UMAP1 <- Embeddings(reference, "umap")[, "UMAP_1"]
+reference$UMAP2 <- Embeddings(reference, "umap")[, "UMAP_2"]
+reference_diet <- DietSeurat(reference)
+query_diet <- DietSeurat(query)
+reference_diet$type <- "reference"
+query_diet$type <- "query"
+query_diet$assay <- "CITEseq"
+integrated <- merge(x = reference_diet, y = query_diet)
+integrated <- NormalizeData(integrated)
+rm(query_diet, reference_diet, naive_cd8, other_cd8)
+hvg <- find_assay_specific_features(
+  integrated,
+  assay_var = "assay",
+  n_features = 5000
+)
+integrated <- integrate_assays(
+  integrated,
+  assay_specific = TRUE,
+  n_dim = 30,
+  shared_hvg = hvg
+)
+integrated <- RunUMAP(integrated, reduction = "harmony", dims = 1:30)
+DimPlot(integrated, split.by = "assay", group.by = "assay")
+data_sets <- split_training_and_test_sets(
+  integrated,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+annotation_data  <- transfer_label(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 15,
+  response_var = "annotation_level_5"
+)
+umap_coords <- transfer_umap_coords(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 15,
+  umap1_var = "UMAP1",
+  umap2_var = "UMAP2"
+)
+integrated$UMAP1[umap_coords$query_cells] <- umap_coords$UMAP1
+integrated$UMAP2[umap_coords$query_cells] <- umap_coords$UMAP2
+integrated@reductions$umap@cell.embeddings[, "UMAP_1"] <- integrated$UMAP1
+integrated@reductions$umap@cell.embeddings[, "UMAP_2"] <- integrated$UMAP2
+integrated$annotation_level_5[annotation_data$query_cells] <- annotation_data$annotation
+integrated$annotation_prob <- NA
+integrated$annotation_prob[annotation_data$query_cells] <- annotation_data$annotation_prob
+DimPlot(integrated, group.by = "annotation_level_5", split.by = "assay", cols = color_palette)
+```
+
+# Find markers
+
+```{r}
+# Split
+rm(cite_seq)
+integrated_rna_multi <- subset(integrated, assay != "CITEseq")
+integrated_cite_seq <- subset(integrated, assay == "CITEseq")
+
+
+# Markers RNA
+Idents(integrated_rna_multi) <- "annotation_level_5"
+markers_rna <- FindAllMarkers(
+  integrated_rna_multi,
+  logfc.threshold = 0.75,
+  only.pos = TRUE
+)
+sorted_levels <- gtools::mixedsort(
+  unique(
+    integrated_rna_multi$annotation_level_5
+  )
+)
+markers_rna_dfs <- purrr::map(sorted_levels, function(x) {
+  df <- markers_rna[markers_rna$cluster == x, ]
+  df
+})
+names(markers_rna_dfs) <- sorted_levels
+
+
+# Markers protein
+Idents(integrated_cite_seq) <- "annotation_level_5"
+DefaultAssay(integrated_cite_seq) <- "ADT"
+markers_prot <- FindAllMarkers(
+  integrated_cite_seq,
+  only.pos = TRUE
+)
+markers_prot_dfs <- purrr::map(sorted_levels, function(x) {
+  df <- markers_prot[markers_prot$cluster == x, ]
+  df
+})
+names(markers_prot_dfs) <- sorted_levels
+```
+
+
+# Unconventional T cells
+
+```{r}
+unconventional_levels <- c("9", "13", "8_0", "12")
+unconventional <- subset(integrated_rna_multi, idents = unconventional_levels)
+unconventional <- subset(unconventional, assay == "3P")
+unconventional <- unconventional %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(reduction = "pca", group.by.vars = "donor_id", dims = 1:20) %>%
+  RunUMAP(reduction = "harmony", dims = 1:20)
+hvg2 <- find_assay_specific_features(unconventional,n_features = 5000)
+unconventional <- integrate_assays(
+  unconventional,
+  assay_specific = TRUE,
+  n_dim = 20,
+  shared_hvg = hvg2
+)
+unconventional <- RunUMAP(unconventional, dims = 1:20, reduction = "harmony")
+```
+
+
+# Save
+
+```{r}
+# Save Seurat objects
+saveRDS(integrated_rna_multi, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/paper/CD8_T_level_5_integrated_all_scRNA_multiome.rds")
+saveRDS(integrated_cite_seq, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/paper/CD8_T_level_5_integrated_all_CITEseq.rds")
+saveRDS(unconventional, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/paper/unconventional_CD8_T.rds")
+
+
+# Save UMAPs
+umap_rna <- DimPlot(integrated_rna_multi, cols = color_palette, pt.size = 0.75)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/Cytotoxic/tmp/umap_CD8_T_level_5_integrated_all_scRNA_multiome.png",
+  plot = umap_rna,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+umap_unconventional <- DimPlot(
+  unconventional,
+  cols = color_palette,
+  pt.size = 1
+)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/Cytotoxic/tmp/umap_unconventional_CD8_T.png",
+  plot = umap_unconventional,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+
+
+# Save markers
+openxlsx::write.xlsx(x = markers_rna_dfs, file = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/Cytotoxic/tmp/markers_rna_CD8_T_level_5_integrated_all_scRNA_multiome.xlsx")
+openxlsx::write.xlsx(x = markers_prot_dfs, file = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/Cytotoxic/tmp/markers_prot_CD8_T_level_5_integrated_all_scRNA_multiome.xlsx")
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

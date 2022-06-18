@@ -1,0 +1,162 @@
+---
+title: "Normalization and Batch Effect Correction after the new Peak calling round"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The new peak calling round applied on the previous notebook significantly increased the number of the features identified in our dataset. Therefore, we must need to repeat the standard downstream analysis, including data normalization, dimensionality reduction analysis and batch correction to account for this change in the number of features detected.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(Signac)
+library(harmony)
+library(tidyverse)
+
+set.seed(1234)
+```
+
+## Parameters
+
+```{r parameters}
+cell_type = "CD4_T"
+
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0",
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA",
+                    "#FBE426", "#16FF32",  "black",  "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3", 
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", 
+                    "#822E1C", "coral2",  "#1CFFCE", "#1CBE4F", 
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B", 
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", 
+                    "#FBE426", "Brown")
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/03.",
+  cell_type,
+  "_annotated_peak_calling_level_5.rds",
+  sep = ""
+)
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+```
+
+## Load data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+# Visualize UMAP without batch effect correction
+```{r}
+# Normalization, dimensionality reduction 
+seurat <- seurat %>%
+  RunTFIDF() %>% 
+  FindTopFeatures(min.cutoff = 10) %>%
+  RunSVD() %>%
+  RunUMAP(reduction = "lsi", dims = 2:40)
+
+DepthCor(seurat)
+```
+
+```{r}
+DimPlot(seurat, 
+        cols = color_palette,
+        group.by = "annotation_paper", 
+        pt.size = 0.1)
+```
+
+```{r}
+# Visualize UMAP's confounders
+confounders <- c("library_name", "sex", "age_group", "hospital", "assay")
+umaps_before_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_before_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_before_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_before_integration[2:length(umaps_before_integration)]
+```
+
+# Run and visualize Harmony’s integration
+```{r}
+seurat <- RunHarmony(
+  object = seurat,
+  dims = 2:40,
+  group.by.vars = 'assay',
+  reduction = 'lsi',
+  assay.use = 'peaks_level_5',
+  project.dim = FALSE,
+  max.iter.harmony = 20
+)
+    
+# Non-linear dimension reduction and clustering
+seurat <- RunUMAP(seurat, dims = 2:40, reduction = 'harmony')
+```
+
+```{r}
+DimPlot(seurat, 
+        cols = color_palette,
+        group.by = "annotation_paper", 
+        pt.size = 0.1)
+```
+
+```{r}
+# Visualize UMAP's confounders
+umaps_after_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_after_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_after_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_after_integration[2:length(umaps_before_integration)]
+```
+
+# Save
+
+```{r}
+# Save integrated Seurat object
+saveRDS(seurat, path_to_save)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,364 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "03- Clustering & Integration"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to integrate and cluster the merged Seurat objects.
+We aim to 1st annotate the main regions in the tissue, so that later we can subset to them and gain more resolution.
+To carry out the integration we are going to use Harmony since it is a recommeded integration method by the paper [A benchmark of batch-effect correction methods for single-cell RNA sequencing data](https://doi.org/10.1186/s13059-019-1850-9).
+
+The vignette can be found [here](https://htmlpreview.github.io/?https://github.com/satijalab/seurat.wrappers/blob/master/docs/harmony.html)
+
+## Libraries
+```{r warning = FALSE, message = FALSE}
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+library(harmony)
+```
+
+## Parameters
+Here we will define and load objects and functions that will be used throughout the document.
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{clust}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{clust}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from 02-QC_common.Rmd where the data was QC'd.
+```{r}
+merged_se <- purrr::map(id_sp_df$gem_id, function(x) {
+  tmp_se <- "{qc}/{robj_dir}/qc_se_{x}.rds" %>%
+    glue::glue() %>%
+    here::here() %>% 
+    readRDS(file = .)
+  
+  tmp_se[["gem_id"]] <- x
+  tmp_se[["donor_id"]] <- id_sp_df[id_sp_df$gem_id == x, ] %>% dplyr::pull(donor_id)
+  tmp_se
+}) %>% 
+  purrr::reduce(., merge)
+```
+
+## Analysis
+
+### Preprocessing
+Preprocess data
+```{r}
+merged_se <- Seurat::NormalizeData(merged_se,
+                                   verbose = FALSE) %>%
+  Seurat::FindVariableFeatures(., verbose = FALSE) %>%
+  Seurat::ScaleData(., verbose = FALSE) %>%
+  Seurat::RunPCA(., verbose = FALSE)
+```
+
+Lets see if the PCs merge well using the uncorrected PCs, we can see how there are clear differences due to the batch (donor). 
+```{r fig.height=6, fig.width=15}
+p1 <- Seurat::DimPlot(object = merged_se,
+                       reduction = "pca",
+                      pt.size = .1,
+                      group.by = "donor_id")
+
+p2 <- Seurat::VlnPlot(object = merged_se,
+              features = "PC_1",
+              group.by = "donor_id",
+              pt.size = .1)
+p1 + p2
+```
+
+Lets also check how they look in a UMAP embedding prior to integration
+```{r fig.height=7, fig.width=15}
+merged_se <- Seurat::RunUMAP(
+  merged_se,
+  reduction = "pca",
+  dims = 1:30,
+  verbose = FALSE)
+
+merg_pca <- Seurat::DimPlot(
+  merged_se,
+  group.by = "donor_id",
+  pt.size = 0.1,
+  reduction = "pca")
+
+merg_umap <- Seurat::DimPlot(
+  merged_se,
+  group.by = "donor_id",
+  pt.size = 0.1,
+  reduction = "umap")
+
+merg_pca | merg_umap
+```
+
+We can appreciate how they are clearly separate and require integration.
+
+### Harmony Integration
+```{r fig.height=6, fig.width=6}
+Seurat::ElbowPlot(merged_se)
+# After looking at the Elbow plot we see the elbow at around 5 PCs so we are going to be a bit lax and use the top 15
+merged_se <- harmony::RunHarmony(merged_se,
+                                 group.by.vars = "donor_id",
+                                 assay.use = "Spatial",
+                                 reduction = "pca",
+                                 dims = 1:20,
+                                 plot_convergence = TRUE)
+```
+
+### Clustering + non-linear dimensionality embedding
+```{r}
+merged_se <- Seurat::FindNeighbors(merged_se,
+                                   reduction = "harmony",
+                                   dims = 1:20,
+                                   verbose = FALSE) %>% 
+  Seurat::FindClusters(
+    resolution = c(0.01, 0.05, 0.1, 0.3,
+                   0.8, 1, 1.25, 1.5))
+
+merged_se <- Seurat::RunUMAP(merged_se,
+                             reduction = "harmony",
+                             dims = 1:20,
+                             verbose = FALSE)
+```
+
+1st we want to see if the datasets are well merged after scaling and normalizing the data.
+All the data comes from the same flowcell and the same Visium slide.
+```{r fig.height=6, fig.width=6}
+Seurat::DimPlot(object = merged_se,
+                group.by = c("donor_id"))
+```
+
+
+```{r}
+donor_metadata <- readr::read_csv(
+  file = here::here("../data/tonsil_atlas_donor_metadata.csv"))
+
+id_comb <- readr::read_tsv(
+  file = here::here("01-spaceranger/data/donor_ids.txt")) %>%
+  dplyr::rename(
+    sample_id = BCLL_ID,
+    donor_id = Old_names
+    )
+
+se_metadata <- merged_se@meta.data %>%
+  dplyr::mutate(sample_id = stringr::str_replace(string = sample_id,
+                                                 pattern = "_",
+                                                 replacement = "-")) %>%
+  tibble::rownames_to_column("barcode")
+
+donor_metadata2 <- donor_metadata %>%
+  dplyr::left_join(id_comb, by = "donor_id") %>%
+  dplyr::select(-donor_id)
+
+
+merged_se@meta.data <- se_metadata %>%
+  dplyr::left_join(donor_metadata2,
+                    by = "sample_id") %>%
+  tibble::column_to_rownames("barcode")
+
+unique(merged_se@meta.data$sampltonsile_id)
+table(merged_se@meta.data$age, merged_se@meta.data$sample_id, useNA = "ifany")
+```
+
+Visualize the clustering / 
+Split by donors so we can see if there are clusters exclusive to one sample/group
+```{r fig.height=8, fig.width=20}
+Seurat::DimPlot(merged_se,
+               group.by = c("Spatial_snn_res.0.01",
+                            "Spatial_snn_res.0.05",
+                            "Spatial_snn_res.0.1",
+                            "Spatial_snn_res.0.3",
+                            "Spatial_snn_res.0.8",
+                            "Spatial_snn_res.1",
+                            "Spatial_snn_res.1.25",
+                            "Spatial_snn_res.1.5"),
+               pt.size = 0.1,
+               reduction = "umap",
+               label = TRUE,
+               # split.by = "age",
+               ncol = 4)
+```
+
+## Save object
+```{r}
+"{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = merged_se, file = .)
+```
+
+## Save shiny
+
+Function
+```{r}
+#' This function takes in a Seurat 3.0 object and returns a named list with 2
+#' objects formated to be loaded in the ShinyApp:
+#'
+#'      1. Metadata + coordinates of the 2D embedding.
+#'      2. Expression matrix of the selected slot.
+#'
+#' ShinyApp: https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/shiny-annotation/blob/main/seurat2shiny.R
+#'
+#' @param object Object of class Seurat. Mandatory.
+#' @param tech Character string. Specify the technology 
+#' @param assay Character string. Assay within the Seurat object from which to extract the expression matrix. Default: active assay.
+#' @param slot Character string. Slot containing the expression matrix. Default: data.
+#' @param reduction Character string. Dimensionality reduction from which to extract the 2D coordinates. Default: umap.
+#' @param image Character string or NULL. When tech is sp, name of the image from which we want to extract the coordinates as found in names(object/@images), by default NULL.
+#' @param asfactors Character vector. Metadata columns to be converted to factors. Default: NULL.
+#' @param save Logical value. Save metadata and expression matrix objects as RDS files. Default: FALSE
+#' @param path Character string. Path to save output files if 'save = TRUE'. Default: working directory.
+#'
+#' @return Named list containing the joint metadata + 2D embedding and the expression matrix.
+#'
+#' @examples
+#' seurat2shiny( object = seurat_object, asfactors = c("plate", "replicate") )
+#'
+#' shiny_list = seurat2shiny(object = seurat_object)
+#'
+#' @export
+
+seurat2shiny = function(
+    object                         ,
+    tech      = c("sc", "sp")      ,
+    assay     = object@active.assay,
+    slot      = "data"             ,
+    reduction = "umap"             ,
+    image     = NULL               ,
+    asfactors = NULL               ,
+    save      = FALSE               ,
+    path      = "."                  # path = getwd()
+) {
+    suppressMessages( library(Seurat) );
+
+    # Input check.
+    if ( ! is(object, "Seurat") )
+        stop("'object' is not a Seurat object.");
+
+    if ( ! assay %in% Seurat::Assays(object) )
+        stop("'assay' not in the Seurat object's available assays.");
+
+    if ( tech == "sc" & ! (reduction %in% names(object@reductions)) )
+        stop("'reduction' not in the Seurat object's available reductions.");
+
+    if ( ! slot %in% c("counts", "data", "scale.data") )
+        stop("'slot' not in the Seurat object's available slots.");
+    
+    if ( ! tech %in% c("sc", "sp") )
+        stop("tech must be sc or sp.");
+    
+    
+    # Check Which technology it is processing
+    if (tech == "sc") {
+        # Extract 2D coordinates. Keep only first 2 dimensions, remove the rest if any.
+        embeds <- as.data.frame(object@reductions[[reduction]]@cell.embeddings)[1:2];
+        names(embeds) <- c("coord_x", "coord_y");
+    } else if (tech == "sp") {
+        # If the image is null select the first one
+        if (is.null(image)) {
+            image <- names(object@images)[1]
+            warning(sprintf("image is not set, we will use %s", image))
+        } 
+        
+        embeds <- data.frame(object@images[[image]]@coordinates[, c("imagerow", "imagecol")])
+        colnames(embeds) <- c("coord_y", "coord_x");
+        
+        # Inverse coord_y
+        embeds$coord_y <- - embeds$coord_y
+    }
+    
+
+    # Join metadata with coordinates.
+    metadata <- object@meta.data;
+
+    for (col in asfactors) {
+        metadata[[col]] <- as.factor(metadata[[col]]);
+    };
+
+    metadata <- merge(x = metadata, y = embeds, by = "row.names");
+    names(metadata)[1] <-  "barcode"; # names(metadata)[names(metadata) == "Row.names"] = "barcode";
+    rownames(metadata) <- metadata$barcode
+    metadata$barcode <- as.character(metadata$barcode)
+    # Reset barcode order which is shuffled in merge
+    metadata <- metadata[rownames(object@meta.data), ]
+    
+    # Extract expression data.
+    # expression = as.matrix( Seurat::GetAssayData(object = object, slot = slot, assay = assay) );
+    expression = Seurat::GetAssayData(object = object, slot = slot, assay = assay);
+
+    if ( ! identical( as.character(metadata$barcode), colnames(expression) ) )
+        warning("Cells in metadata and expression matrix do not match.");
+
+    if (save) {
+        saveRDS( object = metadata  , file = paste0(path, "/metadata.rds"  ) );
+        saveRDS( object = expression, file = paste0(path, "/expression.rds") );
+    };
+
+    invisible(
+        list(metadata = metadata, expression = expression)
+    );
+}
+```
+
+Loop through all the images
+```{r}
+
+lapply(Seurat::Images(merged_se), function(i) {
+  
+  se_sub <- subset(merged_se, subset = gem_id == i)
+  se_sub@images <- se_sub@images[Seurat::Images(se_sub) == i]
+
+  shiny_ls <- seurat2shiny(
+    object = se_sub,
+    tech = "sp",
+    assay = "Spatial",
+    slot = "data",
+    image = i)
+  
+  # Save metadata
+  "{clust}/{robj_dir}/shiny_metadata_{i}.rds" %>%
+    glue::glue() %>%
+    here::here() %>%
+    saveRDS(object = shiny_ls[[1]], file = .)
+  
+  # Save expression matrix
+  "{clust}/{robj_dir}/shiny_expression_{i}.rds" %>%
+    glue::glue() %>%
+    here::here() %>%
+    saveRDS(object = shiny_ls[[2]], file = .)
+    
+})
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

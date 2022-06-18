@@ -1,0 +1,169 @@
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	4	lims
+	15	make_cellranger
+	4	write_fastqs
+	24
+Select jobs to execute...
+
+[Wed Jan 20 15:31:02 2021]
+localrule lims:
+    output: projects/BCLLATLAS_38/info.txt
+    jobid: 10
+    wildcards: subproject=BCLLATLAS_38
+
+
+[Wed Jan 20 15:31:02 2021]
+localrule lims:
+    output: projects/BCLLATLAS_46/info.txt
+    jobid: 6
+    wildcards: subproject=BCLLATLAS_46
+
+
+[Wed Jan 20 15:31:02 2021]
+localrule lims:
+    output: projects/BCLLATLAS_33/info.txt
+    jobid: 14
+    wildcards: subproject=BCLLATLAS_33
+
+
+[Wed Jan 20 15:31:02 2021]
+localrule lims:
+    output: projects/BCLLATLAS_40/info.txt
+    jobid: 3
+    wildcards: subproject=BCLLATLAS_40
+
+[Wed Jan 20 15:31:03 2021]
+Finished job 14.
+1 of 24 steps (4%) done
+[Wed Jan 20 15:31:03 2021]
+Finished job 3.
+2 of 24 steps (8%) done
+[Wed Jan 20 15:31:03 2021]
+Finished job 6.
+3 of 24 steps (12%) done
+Select jobs to execute...
+[Wed Jan 20 15:31:03 2021]
+Finished job 10.
+4 of 24 steps (17%) done
+
+[Wed Jan 20 15:31:03 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_46/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_46/fastq_paths.csv
+    jobid: 5
+    wildcards: subproject=BCLLATLAS_46
+
+
+[Wed Jan 20 15:31:03 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_33/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_33/fastq_paths.csv
+    jobid: 13
+    wildcards: subproject=BCLLATLAS_33
+
+
+[Wed Jan 20 15:31:03 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_40/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_40/fastq_paths.csv
+    jobid: 2
+    wildcards: subproject=BCLLATLAS_40
+
+Select jobs to execute...
+
+[Wed Jan 20 15:31:03 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_38/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_38/fastq_paths.csv
+    jobid: 9
+    wildcards: subproject=BCLLATLAS_38
+
+[Wed Jan 20 15:31:04 2021]
+Finished job 13.
+5 of 24 steps (21%) done
+[Wed Jan 20 15:31:04 2021]
+Finished job 5.
+6 of 24 steps (25%) done
+[Wed Jan 20 15:31:04 2021]
+Finished job 2.
+7 of 24 steps (29%) done
+Select jobs to execute...
+[Wed Jan 20 15:31:04 2021]
+Finished job 9.
+8 of 24 steps (33%) done
+
+[Wed Jan 20 15:31:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/uqJAc4r9_BYScOzxA/uqJAc4r9_BYScOzxA.cmd
+    jobid: 18
+    wildcards: subproject=BCLLATLAS_40, gem_id=uqJAc4r9_BYScOzxA
+
+
+[Wed Jan 20 15:31:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/SOJZt9kY_qpnv20QN/SOJZt9kY_qpnv20QN.cmd
+    jobid: 19
+    wildcards: subproject=BCLLATLAS_46, gem_id=SOJZt9kY_qpnv20QN
+
+
+[Wed Jan 20 15:31:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd
+    jobid: 17
+    wildcards: subproject=BCLLATLAS_46, gem_id=HjqdPU0E_aGDmEY5F
+
+Select jobs to execute...
+
+[Wed Jan 20 15:31:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/pseMjZsU_qgZNOhOQ/pseMjZsU_qgZNOhOQ.cmd
+    jobid: 1
+    wildcards: subproject=BCLLATLAS_40, gem_id=pseMjZsU_qgZNOhOQ
+
+Select jobs to execute...
+Select jobs to execute...
+[Wed Jan 20 15:31:06 2021]
+Error in rule make_cellranger:
+    jobid: 18
+    output: projects/BCLLATLAS_40/jobs/uqJAc4r9_BYScOzxA/uqJAc4r9_BYScOzxA.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_40 --gem_id uqJAc4r9_BYScOzxA --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_40/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:31:06 2021]
+Error in rule make_cellranger:
+    jobid: 17
+    output: projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_46 --gem_id HjqdPU0E_aGDmEY5F --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_46/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:31:06 2021]
+Error in rule make_cellranger:
+    jobid: 19
+    output: projects/BCLLATLAS_46/jobs/SOJZt9kY_qpnv20QN/SOJZt9kY_qpnv20QN.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_46 --gem_id SOJZt9kY_qpnv20QN --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_46/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:31:06 2021]
+Error in rule make_cellranger:
+    jobid: 1
+    output: projects/BCLLATLAS_40/jobs/pseMjZsU_qgZNOhOQ/pseMjZsU_qgZNOhOQ.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_40 --gem_id pseMjZsU_qgZNOhOQ --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_40/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look above for error message
+Complete log: /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/.snakemake/log/2021-01-20T153101.890980.snakemake.log

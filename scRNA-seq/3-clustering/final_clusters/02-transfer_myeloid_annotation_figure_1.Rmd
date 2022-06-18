@@ -1,0 +1,129 @@
+---
+title: "Predict annotation myeloid multiome (figure 1)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the annotation of the figure 1 for myeloid cells from scRNA-seq to multiome cells.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+library(caret)
+library(class)
+library(tidyverse)
+library(here)
+```
+
+
+## Define parameters
+
+```{r}
+# Functions
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_multiome_myeloid)
+seurat <- subset(seurat, hospital != "Royal London")
+final_cells_df <- readRDS(path_to_save_umap_df_rds)
+```
+
+
+# Reintegrate
+
+```{r}
+final_cells_df_copy <- final_cells_df
+final_cells_df <- final_cells_df %>%
+  dplyr::filter(annotation_level_1 == "myeloid")
+seurat <- subset(seurat, cells = final_cells_df$barcode)
+shared_feat <- find_assay_specific_features(seurat)
+seurat <- integrate_assays(
+  seurat,
+  assay_specific = TRUE,
+  shared_hvg = shared_feat
+)
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 1:30)
+seurat$barcode <- colnames(seurat)
+new_metadata <- left_join(seurat@meta.data, final_cells_df, by = "barcode")
+seurat$annotation_20220215 <- new_metadata$annotation_20220215
+seurat$annotation_figure_1 <- new_metadata$annotation_figure_1
+DimPlot(seurat, group.by = "annotation_20220215", split.by = "assay", cols = color_palette)
+DimPlot(seurat, group.by = "annotation_figure_1", split.by = "assay", cols = color_palette)
+```
+
+
+# Create training and test sets
+
+```{r}
+print("splitting datasets!")
+data_sets <- split_training_and_test_sets(
+  seurat,
+  split_var = "assay",
+  referece_label = "3P",
+  query_label = "multiome",
+  reduction = "harmony",
+  n_dims = 30
+)
+print("datasets splitted!")
+```
+
+
+# Transfer label
+
+```{r}
+annotation_data  <- transfer_label(
+  seurat_obj = seurat,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 10,
+  response_var = "annotation_figure_1"
+)
+seurat$annotation_figure_1[annotation_data$query_cells] <- annotation_data$annotation
+seurat$annotation_prob <- NA
+seurat$annotation_figure_1[annotation_data$query_cells] <- annotation_data$annotation
+seurat$annotation_prob[annotation_data$query_cells] <- annotation_data$annotation_prob
+DimPlot(seurat, group.by = "annotation_figure_1", split.by = "assay", cols = color_palette)
+```
+
+
+# Save
+
+```{r}
+final_cells_df_copy[annotation_data$query_cells, "annotation_figure_1"] <- annotation_data$annotation
+saveRDS(final_cells_df_copy, path_to_save_df_multi_myeloid)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

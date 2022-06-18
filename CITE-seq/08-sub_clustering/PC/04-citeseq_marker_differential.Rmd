@@ -1,0 +1,317 @@
+---
+title: "CITEseq marker Differential"
+author: "Sonal Rashmi"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries}
+library(Seurat)
+library(Signac)
+library(flexclust)
+library(tidyverse)
+library(plyr)
+library(harmony)
+library(class)
+library(ggplot2)
+library(reshape2)
+```
+
+## Parameters
+
+```{r parameters}
+path_to_save_annotated_citeseq <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/10-sub_cluster_annotation/PC_differential/objects/PC_tonsil_cite_seq_annotated.rds"
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "greenyellow", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet", "indianred", "gold","coral", "orangered")
+```
+
+## Variables
+
+## Load data
+
+```{r}
+seurat_citeseq <- readRDS(path_to_save_annotated_citeseq)
+DefaultAssay(seurat_citeseq) <- "ADT"
+Idents(seurat_citeseq) <- seurat_citeseq@meta.data$PC_annotation_level_5
+```
+
+
+## GZ-LZ vs PC commited
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "GC-LZ", ident.2 = "PC committed GC-LZ", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F)
+```
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## GZ-LZ vs IgG+ PC precursor
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "GC-LZ", ident.2 = "IgG+ PC precursor", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+## GZ-LZ vs Pre-Mature IgG+ PC
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "GC-LZ", ident.2 = "Pre-Mature IgG+ PC", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+## GZ-LZ vs Mature PC ("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC")
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "GC-LZ", ident.2 = c("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC"), min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+## PC committed GC-LZ vs IgG+ PC precursor
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "PC committed GC-LZ", ident.2 = "IgG+ PC precursor", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## PC committed GC-LZ vs Pre-Mature IgG+ PC
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "PC committed GC-LZ", ident.2 = "Pre-Mature IgG+ PC", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## PC committed GC-LZ vs Mature PC ("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC")
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "PC committed GC-LZ", ident.2 = c("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC"), min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## IgG+ PC precursor vs Pre-Mature IgG+ PC
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "IgG+ PC precursor", ident.2 = "Pre-Mature IgG+ PC", min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F)  
+```
+
+
+```{r , echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+if(num==0){
+  defined_marker_list<-chunk(defined_markers,1)
+} else {
+  defined_marker_list<-chunk(defined_markers,num)
+}
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## IgG+ PC precursor vs Mature PC ("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC")
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "IgG+ PC precursor", ident.2 = c("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC"), min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F)
+```
+
+
+```{r, echo=FALSE }
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+## Pre-Mature IgG+ PC vs Mature PC ("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC")
+
+```{r}
+markers <- FindMarkers(object = seurat_citeseq, ident.1 = "Pre-Mature IgG+ PC", ident.2 = c("MBC-derived IgG+ PC", "MBC-derived IgA+ PC", "Mature IgM+ PC", "Mature IgG+ PC", "Mature IgA+ PC"), min.pct = 0.25)
+DT::datatable(markers)
+```
+
+
+```{r}
+DoHeatmap(seurat_citeseq, features = unique(rownames(markers)), label = F) 
+```
+
+
+```{r, echo=FALSE}
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- seurat_citeseq$PC_UMAP1
+seurat_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- seurat_citeseq$PC_UMAP2
+defined_markers <- rownames(markers)
+chunk <- function(x, n) split(x, sort(rank(x) %% n))
+num<-round(length(defined_markers)/4)
+defined_marker_list<-chunk(defined_markers,num)
+purrr::map(defined_marker_list, function(l) {
+  FeaturePlot(seurat_citeseq, features = l, pt.size = 0.1, order=TRUE) 
+})
+```
+
+
+# Session Information
+
+```{r session}
+sessionInfo()
+```

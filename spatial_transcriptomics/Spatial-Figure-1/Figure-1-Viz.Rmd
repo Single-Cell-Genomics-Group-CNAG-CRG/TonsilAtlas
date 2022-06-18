@@ -1,0 +1,397 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 1 - Spatial Figure-1`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to make the spatial panels for Figure-1
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(Matrix)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig1}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig1}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+clust_vr <- "annotation_figure_1"
+```
+
+```{r}
+cols_fig1 <- c(
+  "NBC" = "#dcf0f4",
+  "Activated NBC" = "#7bc6d6", 
+  "GCBC" = "#398D9F",
+  "MBC" = "#025566", 
+  "PC" = "#032872", 
+  "CD4 T" = "#93331b", 
+  "Naive CD4 T" = "#be8476", 
+  "Naive CD8 T" = "#e5b7c6", 
+  "CD8 T" = "#cb708e", 
+  "NK" = "#67253a", 
+  "DN" = "#d2a027", 
+  "ILC" = "#88657f",
+  "cycling T"  = "#cc0000",
+  "preB/T" = "#4363d8", 
+  "DC" = "#b6dec3", 
+  "Mono/Macro" = "#6ac087", 
+  "Mast" = "#3a8b55", 
+  "Granulocytes" = "#32d732", 
+  "cycling myeloid" = "#2b6840",
+  "FDC" = "#d5ff00", 
+  "cycling FDC" = "#bfe600", 
+  "epithelial" = "#ffdc9f", 
+  "PDC" = "#f032e6",
+  "Cycling" = "lightgrey")
+
+col_df <- data.frame(
+  ct = names(cols_fig1),
+  ct_mod = str_replace_all(names(cols_fig1), "[[:punct:]]|[[:space:]]", "."),
+  color = cols_fig1)
+```
+
+## Load data
+We have 8 different datasets that we have integrated in previous scripts - *03-clustering/03-clustering_integration.Rmds*.
+We are going to analyze the integrated dataset all together since the regions are shared across all
+
+```{r}
+# Tonsils integrated
+sp_obj <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+decon_mtrx_ls <- "{fig1}/{robj_dir}/decon_mtrx_{clust_vr}.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+Change old names to ones unmodified without dots
+```{r}
+decon_mtrx <- decon_mtrx_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+decon_mtrx <- decon_mtrx[, !is.na(colnames(decon_mtrx))]
+
+# Set as 0 cell types predicted to be under 3 % of the spot
+decon_mtrx[decon_mtrx < 0.03] <- 0
+
+# new_colnames <- data.frame(ct_name = colnames(decon_mtrx),
+#                            stringsAsFactors = FALSE) %>%
+#   dplyr::left_join(col_df, by = c("ct_name" = "ct_mod")) %>%
+#   dplyr::pull(ct)
+
+# colnames(decon_mtrx) <- new_colnames
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+sp_obj@meta.data <- cbind(sp_obj@meta.data, decon_mtrx)
+```
+
+Save the seurat object with the predicted cell-type proportions
+```{r eval=FALSE}
+"{fig1}/{robj_dir}/se_deconv_{clust_vr}.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = sp_obj,
+    file = .)
+```
+
+### Clustering
+Subset slide of interest
+```{r}
+i <- "esvq52_nluss5"
+print(i)
+# Subset sp object
+keep <- sp_obj$gem_id == i
+sp_sub <- sp_obj[, names(keep[keep])]
+```
+
+### Visualization
+
+Before even looking at the decomposed spots we can gain insight on how well the model performed by looking at the topic profiles for the cell types.
+
+#### Cell type location
+Look at the location of each cell type in each slice separately
+```{r fig.height=25, fig.width=25}
+ct <- colnames(decon_mtrx)
+
+# https://stackoverflow.com/questions/38722202/how-do-i-change-the-number-of-decimal-places-on-axis-labels-in-ggplot2
+# Our transformation function to ensure 2 decimals in the legend
+scaleFUN <- function(x) sprintf("%.2f", x)
+
+# Iterate over imagesample_id
+# lapply(id_sp_df$gem_id, function(i) {
+# i <- "esvq52_nluss5"
+# print(i)
+# # Subset sp object
+# sp_sub <- subset(sp_obj, subset = gem_id == i)
+
+# Set filename
+donor <- id_sp_df %>% 
+dplyr::filter(gem_id == i) %>%
+  dplyr::pull(donor_id)
+
+fn <- "{fig1}/{plt_dir}/{i}_{clust_vr}_celltype.pdf" %>%
+glue::glue() %>%
+here::here()
+
+# Iterate over cell types
+lapply(ct, function(ii) {
+  tmp_plt <- Seurat::SpatialFeaturePlot(
+    object = sp_sub, 
+    features = ii,
+    alpha = c(0.1, 1),
+    images = i)
+  
+if (sum(sp_sub@meta.data[, ii]) == 0) {
+  tmp_plt <- tmp_plt + ggplot2::scale_alpha(range = c(0,0))
+} else {
+  tmp_plt <- tmp_plt + ggplot2::scale_alpha(range = c(0, 1))
+}
+
+  tmp_plt <- tmp_plt +
+    ggplot2::theme(legend.title = ggplot2::element_blank()) +
+    ggplot2::labs(title = ii) +
+    ggplot2::scale_fill_gradientn(
+      colors = grDevices::heat.colors(10, rev = TRUE),
+      # Same number of breaks for all plots
+      breaks = seq(min(sp_sub@meta.data[, ii]),
+                   max(sp_sub@meta.data[, ii]),
+                   length.out = 4),
+      limits = c(0, max(sp_sub@meta.data[, ii])),
+      # 2 decimals in the legend
+      labels = scaleFUN
+      # limits = c(0, 1)
+    )
+  tmp_plt
+}) %>%
+  cowplot::plot_grid(
+    plotlist = .,
+    align = "hv",
+    axis = "trbl") %>%
+  cowplot::save_plot(
+    filename = fn,
+    plot = .,
+    base_height = 25,
+    base_width = 25)
+# })
+```
+
+#### Spatial scatterpie
+```{r eval=TRUE, fig.height=10, fig.width=8}
+# lapply(id_sp_df$gem_id, function(i) {
+# print(i)
+# Subset sp object
+# sp_sub <- subset(sp_obj, subset = gem_id == i)
+
+sct_plt <- SPOTlight::scatterpie_plot(
+  se_obj = sp_sub,
+  cell_types_all = ct,
+  pie_scale = 0.425,
+  slice = i) +
+  ggplot2::scale_fill_manual(
+    values = col_df[col_df$ct_mod %in% ct, "color"],
+    breaks = col_df[col_df$ct_mod %in% ct, "ct_mod"],
+    labels = stringr::str_wrap(string = col_df[col_df$ct_mod %in% ct, "ct"],
+                               width = 25)) +
+  ggplot2::coord_fixed(ratio = 1) +
+  ggplot2::theme(
+    legend.position = "top",
+    legend.text = ggplot2::element_text(size = 12),
+    legend.title = ggplot2::element_blank()) +
+  ggplot2::guides(fill = ggplot2::guide_legend(nrow = 3, byrow = TRUE))
+
+# sct_plt
+
+# Set filename
+"{fig1}/{plt_dir}/{i}_{clust_vr}_scatterpie_allct.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = sct_plt,
+    base_width = 9,
+    base_height = 9)
+
+"{fig1}/{plt_dir}/{i}_{clust_vr}_scatterpie_allct.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = sct_plt,
+    file = .)
+```
+
+We can also take a look at the spatial scatterpie by looking at cell types which are not present throughout the entire tissue.
+```{r eval=TRUE, echo=FALSE, fig.height=10, fig.width=8}
+lapply(id_sp_df$gem_id, function(i) {
+  print(i)
+  # Subset sp object
+  sp_sub <- subset(sp_obj, subset = gem_id == i)
+  # Subset cell types from metadata
+  metadata_subset <- sp_sub@meta.data[, ct]
+  
+  # Create masks
+  keep_0.7 <- colSums(metadata_subset > 0) < 0.9 * ncol(sp_sub)
+  keep_g0 <- colSums(metadata_subset > 0) > 0
+  
+  # Select cell types fullfiling the conditions
+  ct_var <- colnames(metadata_subset)[keep_0.7 & keep_g0]
+  
+  sct_int_plt <- SPOTlight::scatterpie_plot(
+    se_obj = sp_sub,
+    cell_types_all = ct_var,
+    pie_scale = 0.4,
+    slice = i) +
+  ggplot2::scale_fill_manual(
+    values = col_df[col_df$ct_mod %in% ct, "color"],
+    breaks = col_df[col_df$ct_mod %in% ct, "ct_mod"],
+    labels = stringr::str_wrap(string = col_df[col_df$ct_mod %in% ct, "ct"],
+                               width = 25)) +
+            ggplot2::coord_fixed(ratio = 1) +
+            ggplot2::theme(
+              legend.position = "top",
+              legend.text = ggplot2::element_text(size = 12),
+              legend.title = ggplot2::element_blank()) +
+            ggplot2::guides(fill = ggplot2::guide_legend(nrow = 3, byrow = TRUE))
+  
+  # sct_int_plt
+  
+  # Set filename
+  donor <- id_sp_df %>% 
+  dplyr::filter(gem_id == i) %>%
+    dplyr::pull(donor_id)
+  
+  "{fig1}/{plt_dir}/{i}_{clust_vr}_scatterpie_subset.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = sct_int_plt,
+      base_width = 9,
+      base_height = 9)
+  })
+```
+
+#### Cell-Cell correlation plot
+By looking at correlations we want to assess if there are cell types which are correlating in space. So when one is present is another one also present?
+
+We will be using `ggcorrplot` to show these correlation plots a bit nicer:
+http://www.sthda.com/english/wiki/ggcorrplot-visualization-of-a-correlation-matrix-using-ggplot2
+
+Get correlation matrix between all cell types
+```{r echo=FALSE, fig.height=12, fig.width=12}
+# Extract metadata features
+mtrx <- sp_sub@meta.data[, ct]
+
+# Remove those cell types that are all 0s
+mtrx <- mtrx[, colSums(mtrx) > 0]
+
+# Compute correlation matrix
+mtrx_cor <- cor(as.matrix(mtrx))
+
+# Correlation P value test
+p.mat <- corrplot::cor.mtest(mat = mtrx, conf_int = 0.95, 
+    method = "pearson")
+
+# Modify column and row names
+colnames(mtrx_cor) <- stringr::str_wrap(string = colnames(mtrx_cor), 
+    width = 30)
+rownames(mtrx_cor) <- stringr::str_wrap(string = rownames(mtrx_cor), 
+    width = 30)
+
+# Remove diagonal
+diag(mtrx_cor) <- 0
+
+colors = c("#6D9EC1", "white", "#E46726")
+# Plot correlation heatmap
+cor_plt <- ggcorrplot::ggcorrplot(
+  corr = mtrx_cor,
+  p.mat = p.mat[[1]], 
+  hc.order = TRUE,
+  type = "full",
+  insig = "blank",
+  lab = FALSE, 
+  outline.col = "lightgrey",
+  method = "square",
+  colors = c("#6D9EC1", "white", "#E46726"),
+  legend.title = glue::glue("Correlation\n(Pearson)")) +
+  ggplot2::scale_fill_gradient2(
+    low = colors[1],
+    high = colors[3], 
+    mid = colors[2],
+    midpoint = 0,
+    space = "Lab", 
+    # name = legend.title,
+    limits = c(min(mtrx_cor) - 0.01, max(mtrx_cor) + 0.01)) +
+  ggplot2::theme(
+    plot.title = ggplot2::element_text(
+      size = 22,
+      hjust = 0.5,
+      face = "bold"),
+    legend.text = ggplot2::element_text(size = 12), 
+    legend.title = ggplot2::element_text(size = 15),
+    axis.text.x = ggplot2::element_text(angle = 90,
+                                        vjust = 0.5),
+    axis.text = ggplot2::element_text(size = 18,
+                                      vjust = 0.5))
+
+cor_plt
+
+"{fig1}/{plt_dir}/correlation_plot_{i}_{clust_vr}.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    plot = cor_plt,
+    filename = .,
+    base_width = 10,
+    base_height = 8)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

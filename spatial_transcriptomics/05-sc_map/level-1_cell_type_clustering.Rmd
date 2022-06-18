@@ -1,0 +1,275 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "`r sprintf('%s L1 Cell-Type clustering', params$donor_id)`"
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+title: `r params$donor_id`
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to attempt to cluster the spots by cell type composition. We are going to follow different approaches to assess which is the best one
+
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+dir.create(path = here::here(sprintf("%s/%s", decon_32, plt_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+
+dir.create(path =here::here(sprintf("%s/%s", decon_32, robj_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+sample_id <- params$sample_id
+sample_id <- "esvq52_nluss5"
+donor_id <- id_df[id_df$gem_id == sample_id, "BCLL_ID"]
+```
+
+## Load data
+We have 4 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering.Rmd* while the SPOTlight model was generated in the script *level1-mapping.Rmd*.
+**col_df_l1** contains the color for each cell-type and the relations between modified and unmodified names, this is generated in *misc/col_df_l1.Rmd*.
+```{r}
+se_obj <- readRDS(file = here::here(glue::glue("{clust_32}/{robj_dir}/clust_se_{sample_id}.RDS")))
+
+spotlight_ls <- readRDS(file = here::here(glue::glue("{decon_32}/{robj_dir}/spotlight_ls_l1_{sample_id}.rds")))
+
+col_df <- readRDS(file = here::here("misc/col_df_l1.rds"))
+ct <- col_df$cell_type
+```
+
+## Analysis
+Change old names to ones unmodified without dots
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 1 % of the spot
+decon_mtrx[decon_mtrx < 0.07] <- 0
+
+new_colnames <- data.frame(ct_name = colnames(decon_mtrx),
+                           stringsAsFactors = FALSE) %>%
+  dplyr::left_join(col_df, by = c("ct_name" = "cell_type_mod")) %>%
+  dplyr::pull(cell_type)
+
+colnames(decon_mtrx) <- new_colnames
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+metadata <- cbind(se_obj@meta.data, decon_mtrx)
+se_obj@meta.data <- metadata
+```
+
+### K-means clustering
+[guided tutorial](https://www.datanovia.com/en/lessons/k-means-clustering-in-r-algorith-and-practical-examples/)
+k-means clustering consists of defining clusters so that the total intra-cluster variation (known as total within-cluster variation) is minimized.
+
+The standard algorithm is the Hartigan-Wong algorithm (Hartigan and Wong 1979), which defines the total within-cluster variation as the sum of squared distances Euclidean distances between items and the corresponding centroid.
+$W(C_{k}) = \sum_{x_{i}\epsilon_{k}}(x_{i}-\mu_{k})^2$
+
+*How do we estimate the optimal number of clusters?*
+The idea is to compute k-means clustering using different values of clusters k. Next, the wss (within sum of square) is drawn according to the number of clusters. The location of a bend (knee) in the plot is generally considered as an indicator of the appropriate number of clusters.
+
+The R function `fviz_nbclust` in `factoextra` package provides a convenient solution to estimate the optimal number of clusters.
+```{r}
+install.packages("factoextra")
+factoextra::fviz_nbclust(
+  x = decon_mtrx,
+  kmeans,
+  method = "wss") +
+  geom_vline(xintercept = 4, linetype = 2) +
+  geom_vline(xintercept = 8, linetype = 2) +
+  labs(subtitle = "Elbow method")
+
+```
+
+We can see there are 2 elbows when k is 4 and 8, we are going to carry out the clustering at both resolutions.
+```{r}
+k3 <- kmeans(decon_mtrx, 3, iter.max = 10, nstart = 5)
+
+k8 <- kmeans(decon_mtrx, 8, iter.max = 20, nstart = 5)
+```
+
+Function to print stacked barplots of the cell types contributing to each cluster:
+```{r fig.height=8, fig.width=8}
+kmeans_barplot <- function(mtrx) {
+  
+  data.frame(mtrx, check.names = FALSE) %>%
+    tibble::rownames_to_column("Cluster") %>%
+    tidyr::pivot_longer(
+      cols = colnames(decon_mtrx),
+      names_to = "Cell type",
+      values_to = "Loadings") %>%
+    ggplot(
+      .,
+      aes(
+        x = Cluster,
+        y = Loadings,
+        fill = `Cell type`)) + 
+      geom_bar(position = "stack", stat = "identity") +
+    ggpubr::theme_pubr()
+}
+
+kmeans_barplot(mtrx = k3$centers)
+kmeans_barplot(mtrx = k8$centers)
+```
+
+Add the clusterings to the spatial seurat object
+```{r}
+k_df <- data.frame(k3$cluster, k8$cluster)
+se_obj@meta.data <- dplyr::bind_cols(se_obj@meta.data, k_df)
+```
+
+Plot k-means clusterings in space
+```{r}
+Seurat::SpatialDimPlot(
+  object = se_obj,
+  group.by = c("Spatial_snn_res.0.1",
+               "Spatial_snn_res.0.75",
+               "k3.cluster",
+               "k8.cluster"))
+```
+
+## Save to Shiny app
+Lastly we will extract the metadata and counts and save them so we can use them in th in-house shinny app
+`seurat2shiny` function can be found [here](https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/shiny-annotation/blob/main/seurat2shiny.R)
+```{r echo = FALSE}
+seurat2shiny = function(
+    object                         ,
+    tech      = c("sc", "sp")      ,
+    assay     = object@active.assay,
+    slot      = "data"             ,
+    reduction = "umap"             ,
+    image     = NULL               ,
+    asfactors = NULL               ,
+    save      = FALSE               ,
+    path      = "."                  # path = getwd()
+) {
+    suppressMessages( library(Seurat) );
+
+    # Input check.
+    if ( ! is(object, "Seurat") )
+        stop("'object' is not a Seurat object.");
+
+    if ( ! assay %in% Seurat::Assays(object) )
+        stop("'assay' not in the Seurat object's available assays.");
+
+    if ( tech == "sc" & ! (reduction %in% names(object@reductions)) )
+        stop("'reduction' not in the Seurat object's available reductions.");
+
+    if ( ! slot %in% c("counts", "data", "scale.data") )
+        stop("'slot' not in the Seurat object's available slots.");
+    
+    if ( ! tech %in% c("sc", "sp") )
+        stop("tech must be sc or sp.");
+    
+    
+    # Check Which technology it is processing
+    if (tech == "sc") {
+        # Extract 2D coordinates.
+        embeds <- as.data.frame(object@reductions[[reduction]]@cell.embeddings);
+        names(embeds) <- c("coord_x", "coord_y");
+    } else if (tech == "sp") {
+        # If the image is null select the first one
+        if (is.null(image)) {
+            image <- names(object@images)[1]
+            warning(sprintf("image is not set, we will use %s", image))
+        } 
+        
+        embeds <- data.frame(object@images[[image]]@coordinates[, c("imagerow", "imagecol")])
+        colnames(embeds) <- c("coord_y", "coord_x");
+        
+        # Inverse coord_y
+        embeds$coord_y <- - embeds$coord_y
+    }
+    
+
+    # Join metadata with coordinates.
+    metadata <- object@meta.data;
+
+    for (col in asfactors) {
+        metadata[[col]] <- as.factor(metadata[[col]]);
+    };
+
+    metadata <- merge(x = metadata, y = embeds, by = "row.names");
+    names(metadata)[1] <-  "barcode"; # names(metadata)[names(metadata) == "Row.names"] = "barcode";
+    rownames(metadata) <- metadata$barcode
+
+    # Extract expression data.
+    # expression = as.matrix( Seurat::GetAssayData(object = object, slot = slot, assay = assay) );
+    expression = Seurat::GetAssayData(object = object, slot = slot, assay = assay);
+
+    if ( ! identical( as.character(metadata$barcode), colnames(expression) ) )
+        warning("Cells in metadata and expression matrix do not match.");
+
+    if (save) {
+        saveRDS( object = metadata  , file = paste0(path, "/metadata.rds"  ) );
+        saveRDS( object = expression, file = paste0(path, "/expression.rds") );
+    };
+
+    invisible(
+        list(metadata = metadata, expression = expression)
+    );
+}
+```
+
+Extract elements
+```{r eval = FALSE}
+se_obj@images
+shiny_ls <- seurat2shiny(
+  object = se_obj,
+  tech = "sp",
+  assay = "Spatial",
+  slot = "data",
+  image = sample_id)
+
+saveRDS(object = shiny_ls[[1]],
+        file = here::here(glue::glue("{decon_32}/{robj_dir}/metadata_{donor_id}.rds")))
+
+saveRDS(object = shiny_ls[[2]],
+        file = here::here(glue::glue("{decon_32}/{robj_dir}/expression_{donor_id}.rds")))
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+
+
+

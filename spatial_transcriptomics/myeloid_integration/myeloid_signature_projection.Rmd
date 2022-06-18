@@ -1,0 +1,182 @@
+---
+title: "Myeloid Signature Projection"
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to project the myeloid gene signatures onto the Tonsil Visium slices. \
+
+## Libraries
+```{r}
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(dtplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(data.table)
+library(Matrix)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+source(here::here("utils/stereoseq_bin.R"))
+
+"{myeloid}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{myeloid}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+Data loaded here is generated in the previous script *myeloid_signatures.Rmd* and *03-clustering/03-clustering_integration.Rmds*
+```{r}
+# Markers for signatures
+markers_subset <- "{myeloid}/{robj_dir}/myeloid_markers_signature.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Tonsils integrated
+se_obj <- "{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+
+### Signature scores
+We start by computing the gene signatures for each cell type:
+```{r}
+ct_vec <- as.character(unique(markers_subset$cluster))
+
+for (i in ct_vec) {
+  print(i)
+  tmp_df <- markers_subset %>%
+    dplyr::filter(cluster == i) %>%
+    dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+    dplyr::top_n(n = 15, wt = avg_log2FC)
+  
+  se_obj <- Seurat::AddModuleScore(
+    object = se_obj,
+    features = list(tmp_df$gene),
+    assay = "Spatial",
+    name = glue::glue("{i}-Signature"))
+}
+head(se_obj@meta.data)
+```
+
+### Visualize Signatures
+```{r}
+sign_vec <- colnames(se_obj@meta.data)[stringr::str_detect(
+  string = colnames(se_obj@meta.data),
+  pattern = "Signature1$")]
+```
+
+Iterate over signatures and slides
+```{r fig.width=12, fig.height=8}
+# Iterate over signature
+plt_all <- lapply(sign_vec, function(sign) {
+  # Iterate over slides
+  plt_ls <- lapply(Seurat::Images(se_obj), function(img) {
+    Seurat::SpatialPlot(
+      object = se_obj,
+      features = sign,
+      images = img,
+      alpha = c(0, 1),
+      crop = FALSE,
+      pt.size.factor = 1) +
+      ggplot2::scale_fill_gradient(
+        low = "yellow", high = "red",
+        limits = c(min(se_obj@meta.data[, sign]),
+                   max(se_obj@meta.data[, sign]))) +
+      # Remove title
+      ggplot2::theme(legend.title = ggplot2::element_blank())
+  })
+  # Combine all the plots
+  cowplot::plot_grid(plotlist = plt_ls, align = "hv", axis = "trbl", ncol = 4) +
+    # Add title
+    patchwork::plot_annotation(
+      # Remove the trailin1 added by module score
+      title = stringr::str_sub(string = sign, start = 1, end = nchar(sign)-1))
+      # title = sign)
+})
+
+plt_all
+```
+
+Add empty plot as the 1st element to have the reference files
+```{r fig.width=12, fig.height=6}
+plt_hist <- lapply(Seurat::Images(se_obj), function(img) {
+    Seurat::SpatialPlot(
+      object = se_obj,
+      features = "CD3D",
+      images = img,
+      alpha = c(0, 0),
+      crop = FALSE,
+      pt.size.factor = 1) +
+    Seurat::NoLegend() +
+    # Remove title
+    ggplot2::theme(legend.title = ggplot2::element_blank())
+  }) %>%
+  # Combine all the plots
+  cowplot::plot_grid(plotlist = ., align = "hv", axis = "trbl", ncol = 4)
+```
+
+## Save Plots
+
+```{r}
+"{myeloid}/{plt_dir}/myeloid_signature_plots.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  ggpubr::ggexport(
+    plotlist = plt_all,
+    filename = .,
+    ncol = 1,
+    nrow = 1,
+    width = 20,
+    height = 12)
+
+"{myeloid}/{plt_dir}/tissue_plots.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    plot = plt_hist,
+    filename = .,
+    base_width = 20,
+    base_height = 10)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

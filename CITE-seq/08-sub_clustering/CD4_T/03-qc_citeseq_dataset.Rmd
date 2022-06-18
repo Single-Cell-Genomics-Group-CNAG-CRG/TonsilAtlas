@@ -1,0 +1,128 @@
+---
+title: "QC of integrated dataset"
+author: "Sonal Rashmi"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+This script performs QC on the integrated dataset to identify low quality cells.
+
+# Define Parameters
+
+## Load packages
+
+```{r}
+library(Seurat)
+#library(SeuratWrappers)
+library(harmony)
+library(caret)
+library(class)
+library(tidyverse)
+library(ggplot2)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_annotated_citeseq_cells <- "objects/umap_df_cite_seq.tsv"
+path_to_seurat_wnn_citeseq_obj <- "objects/seurat_object_cite_seq_cd4_positive_object.rds"
+path_to_save_annotated_citeseq <- "objects/CD4_tonsil_cite_seq_annotated.rds"
+
+# Color
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet")
+
+```
+
+# QC
+
+## Load Dataset
+
+```{r}
+annotated_cells <- readRDS(path_to_annotated_citeseq_cells)
+rownames(annotated_cells) <- annotated_cells$query_cells
+annotated_cells <- annotated_cells[-c(1)]
+colnames(annotated_cells) <- c("CD4_annotation_level_5","CD4_annotation_probability", "CD4_UMAP1", "CD4_UMAP2")
+```
+
+
+## Citeseq dataset
+
+```{r}
+seurat_wnn_citeseq <- readRDS(path_to_seurat_wnn_citeseq_obj)
+```
+
+## extract the annotation for CITEseq cells
+
+```{r}
+
+if  (rownames(annotated_cells) == rownames(seurat_wnn_citeseq@meta.data)){
+seurat_wnn_citeseq@meta.data <- merge(seurat_wnn_citeseq@meta.data, annotated_cells, by=0, all=TRUE)  
+}
+rownames(seurat_wnn_citeseq@meta.data) <- seurat_wnn_citeseq@meta.data$Row.names
+seurat_wnn_citeseq@meta.data <- seurat_wnn_citeseq@meta.data[-c(1)]
+```
+
+
+## UMAP for CITEseq
+
+```{r}
+seurat_wnn_citeseq@meta.data %>%
+  ggplot(aes(CD4_UMAP1, CD4_UMAP2, color = CD4_annotation_level_5)) +
+    geom_point(size = 0.75) +
+    scale_color_manual(values = color) +
+    labs(x = "UMAP1", y = "UMAP2", color = "") +
+    theme_classic()
+```
+
+## Citeseq cell frequency
+
+```{r}
+metadata <- seurat_wnn_citeseq@meta.data
+df = count(metadata,metadata$CD4_annotation_level_5)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+
+## Repertoire based refining
+
+```{r}
+df <- seurat_wnn_citeseq@meta.data
+with(df, table(CD4_annotation_level_5, repertoire_flag, useNA = "ifany"))
+```
+
+
+## Save object
+
+```{r}
+saveRDS(seurat_wnn_citeseq, path_to_save_annotated_citeseq)
+```
+
+
+# Session Information
+
+```{r session}
+sessionInfo()
+```

@@ -1,0 +1,269 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste(cell_type, ": Compositional analysis (age and sex)", sep = "")
+```
+
+---
+title: "`r title`"
+---
+
+
+# Introduction
+
+In this notebook, we will perform a basic compositional analysis to find the difference in cell type composition across age and sex groups. We will consider the clusters defined at level 3.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(gridExtra)
+library(cowplot)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_level_3 <- here::here("scRNA-seq/results/R_objects/level_3/")
+path_to_level_3_cell_type <- str_c(path_to_level_3, cell_type, sep = "")
+path_to_obj <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_3.rds",
+  sep = ""
+)
+path_to_tmp <- here::here("scRNA-seq/4-compositional_analysis/tmp/")
+path_to_tmp2 <- str_c(
+  path_to_tmp,
+  cell_type,
+  sep = ""
+)
+dir.create(path_to_tmp, showWarnings = FALSE)
+dir.create(path_to_tmp2, showWarnings = FALSE)
+path <- str_c(
+  path_to_tmp2,
+  "/",
+  cell_type,
+  sep = ""
+)
+path_to_save_age <- str_c(path, "_age_driven_compositional_analysis.pdf")
+path_to_save_sex <- str_c(path, "_sex_driven_compositional_analysis.pdf")
+path_to_annotation <- str_c(here::here("annotation/level_3/"), cell_type, sep = "")
+path_to_save_age_annotation <- str_c(path_to_annotation, "/", cell_type, "_age_driven_compositional_analysis.pdf")
+path_to_save_sex_annotation <- str_c(path_to_annotation, "/", cell_type, "_sex_driven_compositional_analysis.pdf")
+
+
+# Point sizes
+pt_sizes <- c(
+  NBC_MBC = 0.15,
+  GCBC = 0.15,
+  CD4_T = 0.25,
+  Cytotoxic = 0.4,
+  PC = 0.5,
+  myeloid = 0.6,
+  FDC = 0.6,
+  PDC = 1,
+  epithelial = 1
+)
+pt_size <- pt_sizes[cell_type]
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "plum4", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "gold", "brown",
+                   "mediumvioletred", "mediumaquamarine")
+
+
+# Source functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Age
+
+## UMAPs
+
+```{r fig.wide=TRUE}
+seurat$age_group <- factor(
+  seurat$age_group,
+  levels = c("kid", "young_adult", "old_adult")
+)
+umap_age <- plot_split_umap(seurat_obj = seurat, var = "age_group")
+umap_age
+```
+
+
+## Stacked bar plot 1
+
+```{r}
+proportions_df_age1 <- find_proportions_df(
+  seurat_obj = seurat,
+  x = "age_group",
+  fill = "seurat_clusters"
+)
+DT::datatable(proportions_df_age1)
+stacked_barplot_age1 <- plot_stacked_barplot(
+  proportions_df_age1,
+  x = "age_group",
+  fill = "seurat_clusters",
+  colors = color_palette
+)
+stacked_barplot_age1
+```
+
+
+## Stacked bar plot 2
+
+```{r}
+proportions_df_age2 <- find_proportions_df(
+  seurat_obj = seurat,
+  x = "seurat_clusters",
+  fill = "age_group"
+)
+DT::datatable(proportions_df_age2)
+stacked_barplot_age2 <- plot_stacked_barplot(
+  proportions_df_age2,
+  x = "seurat_clusters",
+  fill = "age_group",
+  colors = color_palette
+)
+stacked_barplot_age2
+```
+
+
+# Sex
+
+## UMAPs
+
+```{r fig.wide=TRUE}
+umap_sex <- plot_split_umap(seurat_obj = seurat, var = "sex")
+umap_sex
+```
+
+
+## Stacked bar plot 1
+
+```{r}
+proportions_df_sex1 <- find_proportions_df(
+  seurat_obj = seurat,
+  x = "sex",
+  fill = "seurat_clusters"
+)
+DT::datatable(proportions_df_sex1)
+stacked_barplot_sex1 <- plot_stacked_barplot(
+  proportions_df_sex1,
+  x = "sex",
+  fill = "seurat_clusters",
+  colors = color_palette
+)
+stacked_barplot_sex1
+```
+
+
+## Stacked bar plot 2
+
+```{r}
+proportions_df_sex2 <- find_proportions_df(
+  seurat_obj = seurat,
+  x = "seurat_clusters",
+  fill = "sex"
+)
+DT::datatable(proportions_df_sex2)
+stacked_barplot_sex2 <- plot_stacked_barplot(
+  proportions_df_sex2,
+  x = "seurat_clusters",
+  fill = "sex",
+  colors = color_palette
+)
+stacked_barplot_sex2
+```
+
+
+# Save
+
+```{r}
+# Age
+age_plot <- plot_grid(
+  umap_age,
+  stacked_barplot_age1,
+  stacked_barplot_age2,
+  nrow = 3,
+  ncol = 1,
+  rel_heights = c(1, 1, 1)
+)
+ggsave(
+  filename = path_to_save_age,
+  plot = age_plot,
+  height = 27,
+  width = 19,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_age_annotation,
+  plot = age_plot,
+  height = 27,
+  width = 19,
+  units = "cm"
+)
+
+
+# Sex
+sex_plot <- plot_grid(
+  umap_sex,
+  stacked_barplot_sex1,
+  stacked_barplot_sex2,
+  nrow = 3,
+  ncol = 1,
+  rel_heights = c(1, 1, 1)
+)
+ggsave(
+  filename = path_to_save_sex,
+  plot = sex_plot,
+  height = 29,
+  width = 21,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_sex_annotation,
+  plot = sex_plot,
+  height = 29,
+  width = 21,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,168 @@
+---
+title: "Chromatin signature: chromatin module"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+In this notebook, we are going to compute specific chromatin accesibility patterns for each of the cell types defined at level 1. To do this, we will use an differential accessible test (DA) followed by obtaining the chromatin signature per each group of cells. We used Signac and ChromVar tools to achieve the above goals.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(chromVAR)
+library(motifmatchr)
+library(ggpubr)
+library(dplyr)
+library(tidyr)
+
+set.seed(1234)
+```
+
+## Parameters
+```{r parameters}
+path_to_ATAC <- here::here("scATAC-seq/results/R_objects/8.2.tonsil_peakcalling_annotation_level1_integrated.rds")
+path_to_save <- here::here("scATAC-seq/results/R_objects/8.3.tonsil_peakcalling_annotation_level1_signature.rds")
+path_to_save_df <- here::here("scATAC-seq/results/files/2.da_peaks_level1.tsv")
+```
+
+# Load data
+```{r}
+seurat <- readRDS(path_to_ATAC)
+seurat
+table(seurat$annotation_level_1)
+
+# Remove epithelial cell
+toRemove = row.names(seurat@meta.data[which(seurat@meta.data$annotation_level_1 == "epithelial"),])
+seurat <- seurat[,!colnames(seurat) %in% toRemove]
+table(seurat$annotation_level_1)
+```
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat, reduction = "umap",
+  group.by = "annotation_level_1",
+  cols = c("#a6cee3", "#1f78b4","#b2df8a", 
+             "#33a02c", "#fb9a99","#e31a1c", 
+             "#fdbf6f", "#ff7f00","#cab2d6",
+             "#6a3d9a"),
+  pt.size = 0.1
+)
+```
+
+
+```{r}
+CoveragePlot(
+  object = seurat,
+  region = "chr19-42282829-42284493",
+  extend.upstream = 1000,
+  extend.downstream = 1000
+)
+```
+
+# Detection of features to include in each module.
+To do that, we are going to compute all differentially accessible peaks between all the clusters defined at level1. We used a logistic regression, as suggested by Ntranos et.al 2018, adding the total number of fragments per peak as a latent variable to mitigate the effect of sequencing depth.
+
+
+# Get differentially accessible (DA) peaks
+
+```{r}
+differential.peaks <- FindAllMarkers(
+  object = seurat,
+  test.use = 'LR',
+  min.pct = 0.2,
+  only.pos = TRUE,
+ latent.vars = 'nCount_peaks_macs'
+)
+
+write.table(differential.peaks, path_to_save_df, quote = F)
+#differential.peaks <- read.table(path_to_save_df)
+
+```
+
+# Adding Chromatin signature using the top 2000 differentially accessible peaks
+Initially, we decided to filter out DA peaks that present an avg_log2FC less than 0.5. Then, the top 2000 DA peaks per group, defined at level 1, were considered the features to compute chromVAR deviations and thus add the chromatin signature in each cell-type. 
+
+```{r}
+chromatin_module <- function(seurat, top_peaks){
+  DA_filt <- differential.peaks[differential.peaks$avg_log2FC > 0.5, ]
+  DA_filt_2000 <- DA_filt %>% group_by(cluster) %>% top_n(n = top_peaks) #, wt = avg_log2FC)
+  features <- as.list(spread(DA_filt_2000, cluster, gene)[6:13])
+  features_na_omit <- lapply(features, function(x) x[!is.na(x)])
+
+  seurat <- AddChromatinModule(seurat, 
+                             features = features_na_omit, 
+                             genome = BSgenome.Hsapiens.UCSC.hg38)
+  return(seurat)}
+```
+
+```{r}
+seurat <- chromatin_module(seurat, 2000)
+```
+
+```{r}
+# Replace NA values per 0 to avoid problems in the representation
+seurat@meta.data[c("NBC.MBC", "GCBC", "PC", "CD4.T","Cytotoxic",  
+                   "myeloid",  "FDC", "PDC")][is.na(seurat@meta.data[c("NBC.MBC","GCBC", "PC","CD4.T",
+                   "Cytotoxic",  "myeloid",  "FDC", "PDC")])] <- 0
+```
+
+# Signature visualization 
+To visualize this signature, we plotted the scores using FeaturePlot, with a maximum cutoff of ‘q95’.
+
+```{r fig.wide=TRUE}
+FeaturePlot(seurat, "NBC.MBC", max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, "GCBC", max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, "PC", max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, "CD4.T", max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, "Cytotoxic", max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, c("myeloid"), max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, c("FDC"), max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+
+FeaturePlot(seurat, c("PDC"), max.cutoff = "q95") + 
+scale_color_viridis_c(option = "magma")
+```
+
+```{r}
+saveRDS(seurat,path_to_save)
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

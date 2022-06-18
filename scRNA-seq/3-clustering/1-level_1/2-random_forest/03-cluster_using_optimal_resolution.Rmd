@@ -1,0 +1,82 @@
+---
+title: "Cluster level 1 (optimal resolution)"
+author: "Ramon Massoni-Badosa"
+date: "2021/03/11"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we will cluster the cells of the tonsil atlas (level 1) using the optimal resolution we predicted previously. We will save it to annotate it in the future.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_knn.rds")
+path_to_save <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_clustered_level_1.rds")
+
+
+# Optimal resolution
+optimal_resolution <- 0.25
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+tonsil
+```
+
+
+# Cluster
+
+```{r}
+tonsil <- FindClusters(tonsil, resolution = optimal_resolution)
+```
+
+
+# Visualize UMAP
+
+```{r}
+p <- DimPlot(tonsil, group.by = "seurat_clusters", pt.size = 0.1)
+p
+```
+
+
+# Save
+
+```{r}
+saveRDS(tonsil, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

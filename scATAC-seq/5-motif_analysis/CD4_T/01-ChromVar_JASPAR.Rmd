@@ -1,0 +1,372 @@
+---
+title: "Motif analysis JASPAR"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+The transcription factors (TF) and DNA recognitions depend on multiples levels of interactions. The first level involves chromatin accessibility, where nuclesosome-depleted regions are highly associated with TFs binding compared to the closed chromatin, which is often inaccesible to most TFs. The second represents the existence of the consensus binding motif in the DNA sequence, a point that we are going to identify in this notebook in each cell type using Signac and ChromVar.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(chromVAR)
+library(motifmatchr)
+library(ggpubr)
+library(data.table)
+library(chromVARmotifs)
+library(dplyr)
+library(purrr)
+library(readxl)
+library(writexl)
+library(pheatmap)
+library(factoextra)
+library(corrplot)
+
+set.seed(1234)
+```
+
+## Parameters
+```{r parameters}
+cell_type = "CD4_T"
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0",
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA",
+                    "#FBE426", "#16FF32",  "black",  "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3", 
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", 
+                    "#822E1C", "coral2",  "#1CFFCE", "#1CBE4F", 
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B", 
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", 
+                    "#FBE426", "Brown")
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/05.",
+  cell_type,
+  "_chromVar_JASPAR_level_5.rds",
+  sep = ""
+)
+
+path_to_save_TF_motifs <- paste0(
+  here::here("scATAC-seq/results/files/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_chromVar_JASPAR_level_5.xlsx",
+  sep = ""
+)
+```
+
+## Functions
+```{r}
+remove_correlated_helper <- function(mat, val, cutoff = 0.9) {
+  stopifnot(nrow(mat) == length(val))
+  cormat <- cor(t(mat), use = "pairwise.complete.obs")
+  diag(cormat) <- NA
+  keep <- seq_len(nrow(mat))
+  for (i in order(val, decreasing = TRUE)) {
+    if (i %in% keep) {
+      toremove <- which(cormat[keep, i] >= cutoff)
+      if (length(toremove) > 0) 
+        keep <- keep[-toremove]
+    }
+  }
+  return(keep)
+}
+```
+
+# Load data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+DimPlot(
+  seurat, 
+  group.by = "annotation_paper",
+  cols = color_palette,
+  pt.size = 0.1
+)
+
+DimPlot(
+  seurat, 
+  split.by = "annotation_paper",
+  cols = color_palette,
+  pt.size = 0.1,
+  ncol = 5
+) + NoLegend()
+```
+
+# Adding motif information to the Seurat object
+
+## Retrieving matrices from JASPAR2020 database
+JASPAR is a collection of transcription factor DNA-binding preferences, modeled as matrices. To have a detaill explanation of it, visit the following link, http://jaspar.genereg.net/about/.
+
+```{r}
+opts <- list()
+opts[["tax_group"]] <- "vertebrates"
+pfm <- getMatrixSet(JASPAR2020, opts)
+length(pfm)
+```
+
+## Add motif information
+
+```{r}
+seurat <- AddMotifs(
+  object = seurat,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = pfm
+)
+
+seurat[["peaks_level_5"]]
+```
+
+
+# Computing motif activities
+The TF motif enrichments (that help us to predict potential specific cell-type regulators) previously computed are not calculated per-cell and they do not take into account the insertion sequence bias of the Tn5 transposase. To account for these issues we can use 
+chromVAR that computes for each motif annotation and each cell a bias corrected "desviation" in accessibility from a expected accessibility based on the average of all the cells. This allows us to visualize motif activities per cell, and also provides an alternative method of identifying differentially-active motifs between cell types. 
+
+```{r}
+# The RunChromVAR function retrieved the deviationScores, the Z-scores for each bias corrected deviations.
+seurat <- RunChromVAR(
+  object = seurat,
+  genome = BSgenome.Hsapiens.UCSC.hg38
+)
+
+saveRDS(seurat, path_to_save)
+```
+
+## Averaging the Z-Score by all the cell that conform a cell-type group.
+```{r}
+avgexpr_mat <- AverageExpression(
+  seurat,
+  assays = "chromvar",
+  return.seurat = F,
+  group.by = "ident",
+  slot = "data")
+```
+
+```{r}
+res.pca <- prcomp(t(avgexpr_mat$chromvar),scale. = T)
+
+options(repr.plot.width=6, repr.plot.height=8)
+fviz_pca_ind(res.pca,
+             repel = TRUE)
+```
+
+```{r}
+pheatmap(avgexpr_mat$chromvar, scale = "row",
+         border_color = "black",
+         cluster_rows = T,
+         cluster_cols = T,
+         fontsize_row= 3,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean", 
+         clustering_method = "ward.D2",
+         cutree_rows = NA, 
+         cutree_cols = 2)
+```
+
+## Averaging the Z-Score & Correction proposed by chromVar
+We compute the standar desviation for each annotated motif. Then, we select motifs that have a standar desviation higher than a specific theshold and use them to perform a correlation test and a principal component analysis. Note, that we are going to use the function "remove_correlated_helper", to eliminate the variables that present a correlation greater than 0.9.
+
+```{r}
+seurat_average <- AverageExpression(
+  seurat,
+  assays = "chromvar",
+  return.seurat = T,
+  group.by = "ident")
+
+
+threshold = 1
+matrix <- seurat_average[["chromvar"]]@data
+vars <- matrixStats::rowSds(matrix, na_rm = TRUE)
+boxplot(vars)
+abline(h=1)
+
+ix <- which(vars >= threshold)
+ix2 <- ix[remove_correlated_helper(matrix[ix, , drop = FALSE], 
+                                   vars[ix])]
+
+cormat <- cor(matrix[ix2,], 
+              use = "pairwise.complete.obs")
+
+corrplot(cormat, type="upper", order="hclust", tl.col="black", tl.srt=45)
+
+pc_res <- prcomp(t(matrix[ix2, ]))
+fviz_pca_ind(pc_res, repel = TRUE)
+```
+
+
+## Performing differential motif activity analysis. 
+
+```{r}
+DefaultAssay(seurat) <- 'chromvar'
+Idents(seurat) <- seurat$annotation_paper
+
+da_regions <- FindAllMarkers(
+ object = seurat,
+ only.pos = TRUE,
+ min.pct = 0.1,
+ test.use = 'LR',
+ latent.vars = 'nCount_peaks_level_5'
+)
+
+motif_name <- sapply(da_regions$gene, function(x) {name(getMatrixByID(JASPAR2020, ID = x))})
+da_regions$motif_name <- motif_name
+
+families <- sapply(da_regions$gene, function(x) {tags(getMatrixByID(JASPAR2020, ID = x))$family})
+da_regions$family <- families
+da_regions$family <- gsub('\\s+', '',da_regions$family)
+
+DT::datatable(da_regions)
+
+da_regions_selected <- (da_regions[da_regions$p_val_adj < 0.005 & 
+                                     da_regions$avg_log2FC > 0.5, ])
+```
+
+We transform the motif ID in motif name and also we add the family associated with it.
+
+```{r}
+output <- split(da_regions, da_regions$cluster)
+names(output) <- c("Naive", "CM Pre-non-Tfh", "CM PreTfh", "T-Trans-Mem", 
+                   "T-Eff-Mem", "T-helper", "Tfh T-B border", "Tfh-LZ-GC", 
+                   "GC-Tfh-SAP", "GC-Tfh-0X40", "Tfh-Mem","Eff-Tregs","non-GC-Tf-regs","GC-Tf-regs")
+
+write_xlsx(output, path_to_save_TF_motifs)
+```
+
+### Correlation between the number of potential motifs compared with the number of cells
+
+```{r}
+correlation <- data.frame(table(da_regions_selected$cluster),
+              table(seurat$annotation_paper))[,c(1,2,4)]
+
+colnames(correlation) <- c("cluster","n_motifs","n_cells")
+
+ggscatter(correlation, x = "n_cells",
+          y = "n_motifs",
+          add = "reg.line",                                 # Add regression line
+          conf.int = TRUE,
+          label = "cluster", 
+          font.label = c(9, "bold", "black"),
+          add.params = list(color = "blue",
+                            fill = "lightgray")
+          )+stat_cor(method = "pearson", 
+                     label.x = 3, 
+                     label.y = 500)  # Add correlation coefficient
+```
+
+### Ranking motifs and save the entire output
+
+```{r}
+da_regions_selected_sorted <- da_regions_selected[with(da_regions_selected,
+                                                       order(cluster, -avg_log2FC)), ]
+
+da_regions_selected_sorted$rank <- ave(da_regions_selected_sorted$avg_log2FC,
+                                       da_regions_selected_sorted$cluster, 
+                                       FUN = seq_along)
+
+da_regions_selected_sorted_prepared <- da_regions_selected_sorted %>% 
+  group_by(cluster) %>% top_n(20,-rank)
+
+```
+
+```{r}
+ggplot(da_regions_selected_sorted_prepared, 
+       aes(x = rank, 
+           y = avg_log2FC, 
+           color = avg_log2FC)) + 
+ geom_point(size = 1) +
+  ggrepel::geom_label_repel(
+        data = da_regions_selected_sorted_prepared, 
+        aes(y = avg_log2FC, label = motif_name), 
+        size = 4,
+       nudge_x = 2,
+        color = "black"
+  ) + theme_minimal() + facet_wrap(~ cluster, ncol = 3)
+```
+
+We can plot the motifs group by family.
+
+```{r}
+ggbarplot(da_regions_selected_sorted_prepared, "family", "avg_log2FC", 
+  fill = "cluster",width = 0.5,
+  size = 0.1) + theme(legend.position = "none",
+  text = element_text(size=12),
+  axis.text.x = element_text(angle=90, hjust=1),
+  strip.text.x = element_text(size = 7, colour = "black")) + 
+  facet_grid(~cluster, scales = "free_x")
+
+name <- "GC-Tfh-SAP"
+specific_cluster = da_regions_selected_sorted_prepared[da_regions_selected_sorted_prepared$cluster == name,]
+
+ggbarplot(specific_cluster, "motif_name", "avg_log2FC", 
+  fill = "family",width = 0.5,
+  size = 0.1) + theme(legend.position = "none",
+  text = element_text(size=10),
+  axis.text.x = element_text(angle=90, hjust=1),
+  strip.text.x = element_text(size = 7, colour = "black")) + 
+  facet_grid(~cluster ~family, scales = "free_x")
+```
+
+### Plotting UMAP TF motif activity
+
+```{r}
+specific_cluster_sorted <- specific_cluster[order(specific_cluster$rank),]
+
+FeaturePlot(
+  object = seurat,
+  features = specific_cluster_sorted$gene[1:4],
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.1,
+  ncol = 2
+)
+
+```
+
+
+# Session info
+```{r}
+sessionInfo()
+```
+

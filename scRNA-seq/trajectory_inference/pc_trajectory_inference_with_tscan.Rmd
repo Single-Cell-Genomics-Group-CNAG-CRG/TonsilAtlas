@@ -1,0 +1,348 @@
+---
+title: "Trajectory Inference with TSCAN (PC)"
+author: "William Blevins and Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will perform a trajectory analysis with the final annotation of the plasma cells (PC). We will use the [TSCAN](https://github.com/LTLA/TSCAN) package and follow [this tutorial](http://bioconductor.org/books/3.14/OSCA.advanced/trajectory-analysis.html).
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(scater)
+library(TSCAN)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ComplexHeatmap)
+library(tidyverse)
+```
+
+
+## Define parameters
+
+```{r}
+# Paths
+# path_to_obj <- "~/Desktop/PhD/PC_with_csMBC_and_AIDcells_analysis/data/PC_level_5_seurat_object_clean_with_new_csMBC_and_aid_and_with_annotated_clusters.rds"
+path_to_obj <- "~/Desktop/diogenes/PC_with_csMBC_and_AIDcells_analysis/data/PC_level_5_seurat_object_clean_with_new_csMBC_and_aid_and_with_annotated_clusters.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+
+# Thresholds
+alpha <- 0.05
+GO_max_total_genes <- 250
+GO_min_enriched_genes <- 3
+GO_p_adj_threshold <- 0.01
+GO_min_odds_ratio <- 2.5
+max_gs_size <- 250
+min_gs_size <- 10
+simplify_cutoff <- 0.75
+```
+
+
+## Read data
+
+```{r}
+pc <- readRDS(path_to_obj)
+DimPlot(pc, group.by = "names_level_5_clusters", cols = color_palette)
+```
+
+
+# Infer pseudotime
+
+```{r}
+# Convert to SingleCellExperiment
+pc_sce <- as.SingleCellExperiment(pc)
+colLabels(pc_sce) <- pc_sce$names_level_5_clusters
+
+
+# Calculate minimum spanning tree (MST)
+by_cluster <- aggregateAcrossCells(pc_sce, ids = colLabels(pc_sce))
+centroids <- reducedDim(by_cluster, "HARMONY")[, 1:30]
+mst <- createClusterMST(centroids, clusters = NULL)
+mst
+line_data <- reportEdges(
+  by_cluster,
+  mst = mst,
+  clusters = NULL,
+  use.dimred = "UMAP"
+)
+plotUMAP(pc_sce, colour_by = "names_level_5_clusters") + 
+  geom_line(data = line_data, mapping = aes(x = UMAP_1, y = UMAP_2, group = edge))
+
+
+# Predict pseudotime
+map_tscan <- mapCellsToEdges(
+  reducedDim(pc_sce, "HARMONY")[, 1:30],
+  mst = mst,
+  clusters = colLabels(pc_sce)
+)
+tscan_pseudo <- orderCells(map_tscan, mst, start = "LZ-GC B cells")
+head(tscan_pseudo)
+common_pseudo <- averagePseudotime(tscan_pseudo) 
+plotUMAP(pc_sce, colour_by = I(common_pseudo)) +
+  geom_line(data=line_data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+```
+
+
+# Trajectory-based DEA
+
+```{r}
+# Fit a model for each gene
+pseudotime_igha <- pathStat(tscan_pseudo)[, "Mature IgA+ 2"]
+plotUMAP(pc_sce, colour_by = I(pseudotime_igha)) +
+  geom_line(data=line_data, mapping=aes(x=UMAP_1, y=UMAP_2, group=edge))
+pseudo <- testPseudotime(pc_sce, pseudotime = pseudotime_igha)
+pseudo$symbol <- rownames(pseudo)
+pseudo[order(pseudo$p.value), ]
+
+
+# Make a copy of SCE to include pseudotimes to colData
+pc_sce2 <- pc_sce
+pc_sce2$pseudotime_main_trajectory <- pseudotime_igha
+pseudo <- as.data.frame(pseudo)
+sorted_up <- pseudo[pseudo$logFC > 0 & pseudo$FDR < 1e-4, ]
+sorted_down <- pseudo[pseudo$logFC < 0 & pseudo$FDR < 1e-4, ]
+sorted_up <- sorted_up[order(sorted_up$logFC, decreasing = TRUE), ]
+sorted_down <- sorted_down[order(sorted_down$logFC, decreasing = FALSE), ]
+rowData(pc_sce2)$symbol <- rownames(pc_sce2)
+
+
+# Plot relevant TF
+tf <- c("BCL6", "PRDM1", "PRDM2", "XBP1", "IRF4", "IRF1", "IRF8")
+plotExpression(
+  pc_sce2,
+  features = tf,
+  swap_rownames = "symbol",
+  x = "pseudotime_main_trajectory",
+  colour_by = "names_level_5_clusters"
+) +
+  theme(legend.position = "none")
+plotExpression(
+  pc_sce2,
+  features = str_subset(sorted_up$symbol, "^IRF"),
+  swap_rownames = "symbol",
+  x = "pseudotime_main_trajectory",
+  colour_by = "names_level_5_clusters"
+) +
+  geom_smooth() +
+  theme(legend.position = "none")
+```
+
+```{r}
+tfs_down <- c("BCL6", "PAX5", "IRF8", "SPIB", "BACH2", "CIITA", "SPI1", "ID3")
+tfs_up <- c("FOS", "XBP1", "PRDM1", "IRF4", "POU2AF1", "ZBTB20")
+tfs <- c(tfs_down, tfs_up)
+tf_dfs <- purrr::map(tfs, function(x) {
+  df <- data.frame(
+    pseudotime = pc_sce2$pseudotime_main_trajectory,
+    expression = scale(logcounts(pc_sce)[x, ], center = TRUE, scale = TRUE)[, 1],
+    gene = x
+  )
+  df
+})
+tf_df <- bind_rows(tf_dfs)
+tf_df$gene <- factor(tf_df$gene, levels = tfs)
+tf_df$direction <- ifelse(tf_df$gene %in% tfs_up, "activated", "repressed")
+(tf_gg <- tf_df %>%
+    ggplot(aes(pseudotime, expression, color = direction)) +
+    geom_smooth() +
+    facet_wrap(~gene, ncol = 4, dir = "v")) +
+    scale_color_manual(values = c("#e9003a", "#285ba1")) +
+    theme(legend.title = element_blank())
+```
+
+
+## Gene Ontology enrichment analysis (GO)
+
+```{r}
+set.seed(1234)
+top_list <- list(
+  down = sorted_down$symbol[1:500], 
+  up = sorted_up$symbol[1:500], 
+  universe = rownames(sorted)
+)
+top_entrez <- purrr::map(top_list, function(x) {
+  entrez <- AnnotationDbi::select(
+    x = org.Hs.eg.db, 
+    keys = x, 
+    keytype = "SYMBOL",
+    columns = "ENTREZID"
+  )$ENTREZID
+  entrez <- entrez[!is.na(entrez)]
+  entrez
+})
+top_go <- purrr::map(top_entrez[c("down", "up")], function(x) {
+  out <- enrichGO(
+    gene = x,
+    universe = top_entrez$universe,
+    OrgDb = org.Hs.eg.db,
+    ont = "BP",
+    pAdjustMethod = "BH",
+    pvalueCutoff = 0.01,
+    qvalueCutoff = 0.05,
+    readable = TRUE
+  )
+  out
+})
+selected_terms_down <- c(
+  "MHC protein complex assembly",
+  "B cell activation"
+)
+selected_terms_up <- c(
+  "response to endoplasmic reticulum stress",
+  "ubiquitin-dependent ERAD pathway",
+  "protein N-linked glycosylation",
+  "Golgi vesicle transport",
+  "protein folding",
+  "COPII-coated vesicle budding",
+  "regulation of B cell activation"
+)
+
+
+# Plot
+go_df_down <- top_go$down@result[top_go$down@result$Description %in% selected_terms_down, ]
+go_df_up <- top_go$up@result[top_go$up@result$Description %in% selected_terms_up, ]
+go_df_down$direction <- "down"
+go_df_up$direction <- "up"
+go_df <- bind_rows(go_df_down, go_df_up)
+DT::datatable(go_df)
+go_df <- go_df %>% arrange(direction, p.adjust)
+go_df$Description <- factor(go_df$Description, levels = rev(go_df$Description))
+go_gg <- go_df %>% 
+  ggplot(aes(Description, -1 * log10(p.adjust), color = direction)) +
+    geom_segment(aes(x = Description, xend = Description, y = 0, yend = -1 * log10(p.adjust))) +
+    geom_point() +
+    scale_color_manual("", values = c("dodgerblue3", "firebrick3")) +
+    labs(x = "", y = "-log10 (adjusted p-value)", color = "") +
+    theme_light() +
+    coord_flip()
+```
+
+
+Heatmap
+
+```{r}
+# Select genes of interest (GOI)
+goi <- str_split(go_df$geneID, "/")
+names(goi) <- go_df$Description
+goi_dfs <- purrr::map2(goi, names(goi), function(l, x) {
+  df <- data.frame(
+    gene = l,
+    term = x
+  )
+  df
+})
+goi_df <- bind_rows(goi_dfs)
+```
+
+Plot heatmap
+
+```{r}
+# Define matrix and sort cells by increasing pseudotime
+pc_sce3 <- pc_sce2[, !is.na(pc_sce2$pseudotime_main_trajectory)]
+pc_sce3 <- pc_sce3[, order(pc_sce3$pseudotime_main_trajectory)]
+input_mat <- logcounts(pc_sce3)[goi_df$gene, ]
+input_mat <- t(scale(t(input_mat), center = TRUE, scale = TRUE))
+
+
+# Create column annotation
+column_annot_df <- data.frame(
+  cluster = pc_sce3$names_level_5_clusters,
+  pseudotime = pc_sce3$pseudotime_main_trajectory
+)
+clusters <- unique(pc_sce3$names_level_5_clusters)
+colors_clusters <- color_palette[1:length(clusters)]
+names(colors_clusters) <- clusters
+breaks_colors <- c(
+  min(pc_sce3$pseudotime_main_trajectory),
+  (min(pc_sce3$pseudotime_main_trajectory) + max(pc_sce3$pseudotime_main_trajectory)) / 2,
+  max(pc_sce3$pseudotime_main_trajectory)
+)
+col_fun = colorRamp2(breaks_colors, c("#f4e653", "#498b8c", "#3f145a"))
+col_annot <- HeatmapAnnotation(
+  df = column_annot_df,
+  col = list(
+    cluster = colors_clusters,
+    pseudotime = col_fun
+  ),
+  annotation_legend_param = list(
+    labels_gp = gpar(fontsize = 7)
+  )
+)
+
+
+# Create row annotation
+row_annot_df <- goi_df[, "term", drop = FALSE]
+colors_row_annot <- c("#a6cee3","#1f78b4","#b2df8a", "#33a02c", "#fb9a99",
+                      "#e31a1c", "#fdbf6f", "#ff7f00", "#cab2d6")
+names(colors_row_annot) <- unique(row_annot_df$term)
+row_annot <- rowAnnotation(
+  df = row_annot_df,
+  col = list(term = colors_row_annot),
+  annotation_legend_param = list(
+    labels_gp = gpar(fontsize = 7)
+  )
+)
+
+
+# Plot and save heatmap 
+heatmap <- Heatmap(
+  as.matrix(input_mat),
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  show_column_names = FALSE,
+  row_names_gp = gpar(fontsize = 4),
+  top_annotation = col_annot,
+  right_annotation = row_annot,
+  heatmap_legend_param = list(
+    labels_gp = gpar(fontsize = 7)
+  )
+)
+in2mm <- 25.4
+pdf("~/Desktop/diogenes/PC_with_csMBC_and_AIDcells_analysis/pc_heatmap_pseudo_time.pdf", width = 210/in2mm, height = 260/in2mm)
+heatmap
+dev.off()
+```
+
+
+TODO tomorrow: generate heatmap with ComplexHeatmap:
+
+- Order cells by pseudotime
+- Group genes by GO term
+- Include GO annotations in rows
+- Include cluster info in columns
+
++ generate lollipop plot GO
+
+
+
+

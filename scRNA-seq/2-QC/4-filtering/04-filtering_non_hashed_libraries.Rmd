@@ -1,0 +1,325 @@
+---
+title: 'Quality Control: Non-hashed cells'
+author: "Ramon Massoni-Badosa"
+date: "4/20/2020"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+
+# Introduction
+
+According to [Luecken MD et al.](https://www.embopress.org/doi/10.15252/msb.20188746), "if the distribution of QC covariates differ between samples, QC thresholds should be determined separately for each sample". As hashed and non-hashed samples have different library size distributions, the thresholds that separate good- from poor-quality cells will therefore be different. In this notebook, we will filter out low-quality cells and genes for non-hashed samples.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_merged <- here::here("scRNA-seq/results/R_objects/seurat_non_hashed_merged.rds")
+path_to_project_metadata <- here::here("scRNA-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv")
+path_to_donor_metadata <- here::here("data/tonsil_atlas_donor_metadata.csv")
+path_to_save_obj <- here::here("scRNA-seq/results/R_objects/seurat_non_hashed_merged_filtered.rds")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Thresholds
+min_lib_size <- 1000
+max_lib_size <- 40000
+min_n_genes <- 250
+max_n_genes <- 6000
+max_pct_mt <- 20
+min_cells <- 5
+```
+
+
+## Load data
+
+```{r}
+# Read merged Seurat object
+tonsil_non_hashed <- readRDS(path_to_merged)
+tonsil_non_hashed
+
+
+# Read project and donor metadata
+metadata_df <- read_csv(path_to_project_metadata)
+DT::datatable(metadata_df)
+donor_id_df <- read_csv(path_to_donor_metadata)
+DT::datatable(donor_id_df)
+```
+
+
+# Distribution of QC variables
+
+First, we want to see how the main QC variables distribute across samples. This will help us interpret the results downstream, as we will know which are the samples with lower quality.
+
+
+## Library complexity
+
+```{r}
+# Calculate mean library size
+n_features_means_df <- tonsil_non_hashed@meta.data %>%
+  dplyr::group_by(library_name) %>%
+  dplyr::summarise(
+    mean_n_features = round(mean(nFeature_RNA), 2),
+    sd_n_features = round(sd(nFeature_RNA), 2)) %>%
+  dplyr::arrange(mean_n_features)
+DT::datatable(n_features_means_df)
+
+
+# Plot library size distribution
+n_features_gg <- tonsil_non_hashed@meta.data %>%
+  horizontal_boxplot(
+    categorical_var = "library_name",
+    continuous_var = "nFeature_RNA",
+    fill = "hospital",
+    ylab = "Number of Detected Genes",
+    decreasing = TRUE
+  ) +
+  scale_y_log10()
+n_features_gg
+```
+
+
+
+# Filter out cells
+
+We aim to detect and exclude empty droplets or lysed cells. Lysed cells have 3 hallmarks: (1) low library size (total UMI), (2) low library complexity (number of detected genes) and (3) high fraction of mitochondrial expression (cytosolic mRNA leaks out of the cell). Let us start by visualizing their univariate distributions.
+
+
+## Library Size
+
+```{r fig.wide=TRUE}
+lib_size_hist <- tonsil_non_hashed@meta.data %>%
+  plot_histogram_qc(x = "nCount_RNA", x_lab = "Library Size (log10(total UMI))") +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red")
+lib_size_hist1 <- lib_size_hist +
+    scale_x_log10() +
+    geom_vline(xintercept = max_lib_size, linetype = "dashed", color = "red")
+lib_size_hist2 <- lib_size_hist +
+    scale_x_continuous(limits = c(0, 4000)) +
+    xlab("Library Size (total UMI)") +
+    theme_pubr()
+lib_size_hist1 + lib_size_hist2
+```
+
+
+## Number of detected genes
+
+```{r fig.wide=TRUE}
+n_genes_hist1 <- tonsil_non_hashed@meta.data %>%
+  plot_histogram_qc(x = "nFeature_RNA", x_lab = "Number of Detected Genes") +
+  geom_vline(xintercept = min_n_genes, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = max_n_genes, linetype = "dashed", color = "red")
+n_genes_hist2 <- n_genes_hist1 +
+  scale_x_continuous(limits = c(0, 2000)) 
+n_genes_hist1 + n_genes_hist2
+```
+
+
+## Fraction of mitochondrial expression
+
+```{r}
+tonsil_non_hashed$pct_mt <- PercentageFeatureSet(
+  tonsil_non_hashed,
+  pattern = "^MT-"
+)
+pct_mt_hist <- tonsil_non_hashed@meta.data %>%
+  plot_histogram_qc(x = "pct_mt", x_lab = "% Mitochondrial Expression") +
+  geom_vline(xintercept = max_pct_mt, linetype = "dashed", color = "red") +
+  scale_x_continuous(limits = c(0, 100))
+pct_mt_hist
+```
+
+
+## Fraction of ribosomal expression
+
+Let us also calculate and visualize the proportion of ribosomal expression:
+
+```{r}
+tonsil_non_hashed$pct_ribosomal <- PercentageFeatureSet(
+  tonsil_non_hashed,
+  pattern = "^RPS"
+)
+pct_ribosomal_hist <- tonsil_non_hashed@meta.data %>%
+  plot_histogram_qc(x = "pct_ribosomal", x_lab = "% Ribosomal Expression")
+pct_ribosomal_hist
+```
+
+
+## Joint QC metrics
+
+It is important to assess how these variables covary, since metabolically active cells might also have a high mitochondrial expression:
+
+```{r}
+# number of detected genes VS library size
+n_genes_vs_lib_size <- FeatureScatter(
+  tonsil_non_hashed,
+  feature1 = "nCount_RNA",
+  feature2 = "nFeature_RNA",
+  pt.size = 0.15,
+  cols = rep("black", length(levels(Idents(tonsil_non_hashed))))
+)
+n_genes_vs_lib_size <- n_genes_vs_lib_size +
+  labs(x = "Library Size (total UMI)", y = "Number of Detected Genes") +
+  theme(legend.position = "none", plot.title = element_blank())
+n_genes_vs_lib_size +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = min_n_genes, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = max_lib_size, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = max_n_genes, linetype = "dashed", color = "red")
+
+
+# % mitochondrial expression VS library size
+pct_mt_vs_lib_size <- FeatureScatter(
+  tonsil_non_hashed,
+  feature1 = "nCount_RNA",
+  feature2 = "pct_mt",
+  pt.size = 0.15,
+  cols = rep("black", length(levels(Idents(tonsil_non_hashed))))
+)
+pct_mt_vs_lib_size <- pct_mt_vs_lib_size +
+  labs(x = "Library Size (total UMI)", y = "% Mitochondrial Expression") +
+  theme(legend.position = "none", plot.title = element_blank())
+pct_mt_vs_lib_size +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = max_pct_mt, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = max_lib_size, linetype = "dashed", color = "red")
+```
+
+
+## Subset empty droplets and lysed cells
+
+```{r}
+metadata_before_qc <- tonsil_non_hashed@meta.data
+is_low_quality <- 
+  tonsil_non_hashed$nCount_RNA < min_lib_size |
+  tonsil_non_hashed$nFeature_RNA < min_n_genes |
+  tonsil_non_hashed$pct_mt > max_pct_mt
+table(is_low_quality)
+tonsil_non_hashed$keep_cells <- !is_low_quality
+Idents(tonsil_non_hashed) <- "keep_cells"
+tonsil_non_hashed <- subset(tonsil_non_hashed, idents = TRUE)
+metadata_after_qc <- tonsil_non_hashed@meta.data
+```
+
+
+## Annotate potential doublets
+
+To aid in the detection and exclusion of doublets, we will identify those outlier cell barcodes that have an abnormally high number of detected genes or library size. Downstream, we will leverage this annotation together with the ones from [scrublet](https://linkinghub.elsevier.com/retrieve/pii/S2405-4712(18)30474-5) and [cell hashing](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-018-1603-1) to discard clusters composed of a high number of doublets.
+
+
+```{r}
+has_high_lib_size <- 
+  tonsil_non_hashed$nCount_RNA > max_lib_size |
+  tonsil_non_hashed$nFeature_RNA > max_n_genes
+tonsil_non_hashed$has_high_lib_size <- ifelse(has_high_lib_size, TRUE, FALSE)
+table(tonsil_non_hashed$has_high_lib_size)
+```
+
+
+## QC summary table
+
+```{r}
+qc_before <- metadata_before_qc %>%
+  group_by(gem_id) %>% 
+  summarise(num_cells_before_qc = n())
+qc_after <- metadata_after_qc %>%
+  group_by(gem_id) %>%
+  summarise(
+    num_cells_after_qc = n(),
+    average_library_size = mean(nCount_RNA),
+    average_num_detected_genes = mean(nFeature_RNA),
+    average_mitochondrial_fraction = mean(pct_mt)
+  )
+qc_table <- left_join(qc_before, qc_after, by = "gem_id")
+DT::datatable(qc_table)
+```
+
+
+# Filter out genes
+
+According to [Luecken MD et al.](https://www.embopress.org/doi/10.15252/msb.20188746): "A guideline to setting this threshold is to use the minimum cell cluster size that is of interest and leaving some leeway for dropout effects. For example, filtering out genes expressed in fewer than 20 cells may make it difficult to detect cell clusters with fewer than 20 cells. For datasets with high dropout rates, this threshold may also complicate the detection of larger clusters. The choice of threshold should scale with the number of cells in the dataset and the intended downstream analysis."
+
+Since we want to detect rare cell types in the tonsil, we will be very permissive and retain genes that are expressed in at least `r min_cells` cells.
+
+
+## Set threshold
+
+```{r fig.wide=TRUE}
+n_cells <- Matrix::rowSums(tonsil_non_hashed[["RNA"]]@counts > 0)
+gene_qc <- n_cells %>% 
+  as.data.frame() %>% 
+  ggplot(aes(n_cells)) + 
+    geom_histogram(bins = 100, alpha = 0.75) +
+    scale_x_log10("Number of cells") +
+    theme_bw() 
+gene_qc +
+  geom_vline(xintercept = min_cells, linetype = "dashed", color = "red")
+```
+
+
+## Plot genes with highest expression
+
+```{r fig.height=10}
+top_50_genes <- sort(n_cells, decreasing = TRUE)[1:50]
+top_50_genes_df <- data.frame(
+  gene = names(top_50_genes),
+  n_cells = top_50_genes
+)
+top_50_genes_df %>%
+  ggplot(aes(fct_reorder(gene, n_cells), n_cells)) +
+    geom_point() +
+    labs(x = "", y = "Number of expressing cells") +
+    coord_flip()
+```
+
+
+## Filter
+
+```{r}
+kept_genes <- rownames(tonsil_non_hashed)[n_cells > min_cells]
+table(n_cells > min_cells)
+tonsil_non_hashed <- subset(tonsil_non_hashed, features = kept_genes)
+tonsil_non_hashed
+```
+
+
+# Save filtered Seurat object
+
+```{r}
+saveRDS(tonsil_non_hashed, path_to_save_obj)
+```
+    
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+

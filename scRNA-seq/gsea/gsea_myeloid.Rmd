@@ -1,0 +1,189 @@
+---
+title: 'Gene set enrichment analysis (myeloid)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will run a gene set enrichment analysis ([Gene set enrichment analysis](https://yulab-smu.top/clusterProfiler-book/chapter5.html#go-gene-set-enrichment-analysis)) 
+ with [clusterProfiler](https://yulab-smu.top/clusterProfiler-book/index.html) for the different subsets of Slan+ cells. We want to see the distribution of the GO terms reported by [Bianchetto-Aguilera et al.](https://faseb.onlinelibrary.wiley.com/doi/full/10.1096/fj.202000181R).
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(UpSetR)
+library(tidyverse)
+library(here)
+```
+
+
+## Define parameters
+
+```{r}
+# Source functions
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+
+
+# Thresholds
+alpha <- 0.05
+GO_max_total_genes <- 250
+GO_min_enriched_genes <- 3
+GO_p_adj_threshold <- 0.01
+GO_min_odds_ratio <- 2.5
+max_gs_size <- 250
+min_gs_size <- 10
+simplify_cutoff <- 0.5
+```
+
+
+## Load data
+
+```{r}
+# Load Seurat object
+seurat <- readRDS(path_to_save_myeloid)
+slan_levels <- c("ITGAX ZEB2 macrophages", "SELENOP FUCA1 PTGDS macrophages",
+                 "C1Q HLA macrophages", "IL7R MMP12 macrophages")
+seurat <- subset(seurat, idents = slan_levels)
+
+
+# Plot
+DimPlot(seurat)
+```
+
+
+# Differential expression analysis
+
+```{r}
+markers_slan <- purrr::map(slan_levels, function(x) {
+  df <- FindMarkers(seurat, ident.1 = x, only.pos = FALSE, logfc.threshold = 0)
+  df
+})
+markers_slan <- purrr::map(markers_slan, function(df) {
+  df <- df %>%
+    rownames_to_column("gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_slan) <- slan_levels
+```
+
+
+# GSEA
+
+```{r}
+set.seed(1234)
+gsea_list <- purrr::map(markers_slan, function(df) {
+  gene_list <- df$avg_log2FC
+  names(gene_list) <- df$gene
+  gsea_results <- gseGO(
+    gene_list,
+    ont = "BP",
+    OrgDb = org.Hs.eg.db,
+    keyType = "SYMBOL",
+    minGSSize = min_gs_size,
+    maxGSSize = max_gs_size,
+    seed = TRUE
+  )
+  gsea_results
+})
+gsea_sorted <- purrr::map(gsea_list, function(x) {
+  df <- x@result %>%
+    dplyr::filter(p.adjust < alpha) %>%
+    dplyr::arrange(desc(NES))
+  df
+})
+DT::datatable(gsea_sorted$`ITGAX ZEB2 macrophages`, options = list(scrollX = TRUE))
+DT::datatable(gsea_sorted$`SELENOP FUCA1 PTGDS macrophages`, options = list(scrollX = TRUE))
+DT::datatable(gsea_sorted$`C1Q HLA macrophages`, options = list(scrollX = TRUE))
+DT::datatable(gsea_sorted$`IL7R MMP12 macrophages`, options = list(scrollX = TRUE))
+```
+
+
+PLOT:
+
+```{r}
+sel_terms <- c(
+  "oxidative phosphorylation" = "GO:0006119",
+  "MHC class II protein complex assembly" = "GO:0002399",
+  "extracellular matrix disassembly" = "GO:0022617",
+  "complement activation, classical pathway" = "GO:0006958",
+  "tumor necrosis factor superfamily cytokine production "= "GO:0071706"
+)
+
+# Plot
+gsea_plots <- purrr::map(names(sel_terms), function(x) {
+  plots <- purrr::map(gsea_list, function(obj) {
+    p <- gseaplot(obj, by = "runningScore", geneSetID = sel_terms[x])
+    p<- p +
+      scale_y_continuous(limits = c(-1, 1)) +
+      theme(
+        axis.text.x = element_text(size = 5),
+        axis.text.y = element_text(size = 5),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()
+      )
+    rasterize(p, dpi = 300)
+  })
+  patchwork::wrap_plots(plots, ncol = 4)
+})
+gsea_arranged <- patchwork::wrap_plots(gsea_plots, nrow = 5)
+```
+
+
+# Visualize intersections
+
+```{r}
+upregulated_terms <- purrr::map(gsea_sorted, function(df) {
+  x <- df$ID[df$NES > 0]
+  x
+})
+downregulated_terms <- purrr::map(gsea_sorted, function(df) {
+  x <- df$ID[df$NES < 0]
+  x
+})
+upset_upregulated <- upset(fromList(upregulated_terms), order.by = "freq")
+upset_downregulated <- upset(fromList(downregulated_terms), order.by = "freq")
+upset_upregulated
+upset_downregulated
+```
+
+
+# Save
+
+```{r}
+# saveRDS(gsea_sorted, path_to_save_rds)
+saveRDS(gsea_list, here("scRNA-seq/results/R_objects/gsea_list_slancytes.rds"))
+# openxlsx::write.xlsx(
+#   gsea_sorted,
+#   here("results/paper/tables/supplementary_table_slancytes_GO.xlsx")
+# )
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

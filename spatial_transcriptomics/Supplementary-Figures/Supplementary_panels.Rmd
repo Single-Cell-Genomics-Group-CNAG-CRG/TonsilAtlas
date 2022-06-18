@@ -1,0 +1,130 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 1 - Spatial Panels"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to create the spatial pannels necessary for Figure 1.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig_s}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig_s}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+# merged_se <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+merged_se <- "/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/results/R_objects/final_clusters/20220215/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Clustering + HE
+
+```{r fig.width=30, fig.height=30}
+size_dict <- list()
+size_dict[["tarwe1_xott6q"]] <- 1.75
+size_dict[["c28w2r_7jne4i"]] <- 2
+size_dict[["esvq52_nluss5"]] <- 1.5
+size_dict[["p7hv1g_tjgmyj"]] <- 1.5
+size_dict[["gcyl7c_cec61b"]] <- 2.5
+size_dict[["zrt7gl_lhyyar"]] <- 1.75
+size_dict[["qvwc8t_2vsr67"]] <- 1.5
+size_dict[["exvyh1_66caqq"]] <- 1.75
+
+# Color palettes
+palette <- c("#ff6db6", "#db6d00", "#924900", "#009292", "#004949", 
+    "#006ddb", "#b66dff", "#920000", "#490092")
+
+names(palette) <- c("T cell zone", "Epithelial-1", "Epithelial-2", "Germinal Center", 
+    "Proliferating Follicle", "Inter-Follicular Zone", "T:B Border", "Muscle", "Subepithelial")
+
+img_vec <- c("tarwe1_xott6q", "c28w2r_7jne4i", "p7hv1g_tjgmyj",
+    "gcyl7c_cec61b", "zrt7gl_lhyyar", "qvwc8t_2vsr67", "exvyh1_66caqq")
+
+plt_ls <- lapply(img_vec, function(i) {
+    # Clustering plots
+    sp_plt <- SpatialDimPlot(
+        object = merged_se,
+        group.by = "annotation.general",
+        cols = palette,
+        image.alpha = 0,
+        stroke = 0,
+        images = i,
+        pt.size.factor = size_dict[[i]]) +
+        labs(fill = "") +
+        theme(
+            legend.box.background = element_blank(),
+            legend.key = element_blank()) + 
+        guides(fill = guide_legend(override.aes = list(size = 4)))
+    
+    # HE image
+    he_plt <- SpatialDimPlot(
+        object = merged_se,
+        group.by = "annotation.general",
+        image.alpha = 1,
+        alpha = c(0, 0),
+        images = i) + NoLegend()
+    
+    # Combine plots
+    tmp <- (he_plt + sp_plt) +
+        plot_annotation(
+            title = id_sp_df[id_sp_df$gem_id == i, "donor_id"])
+    
+    tmp
+})
+
+# Wrap the plots together
+(plt_grid <- cowplot::plot_grid(plotlist = plt_ls, ncol = 2))
+
+## Save plot
+"{fig_s}/{plt_dir}/he_clustered_spatial.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+        filename = ., plot = plt_grid, base_height = 20, base_width = 20)
+```
+

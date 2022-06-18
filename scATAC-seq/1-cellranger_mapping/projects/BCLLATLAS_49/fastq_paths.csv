@@ -1,0 +1,13 @@
+library_id,fastq_path,read,pair_id
+186746,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-G9_1.fastq.gz,R1,P1
+186746,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-G9_UMI2.fastq.gz,R2,P1
+186746,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-G9_2.fastq.gz,R3,P1
+186746,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-G9_1.fastq.gz,R1,P2
+186746,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-G9_UMI2.fastq.gz,R2,P2
+186746,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-G9_2.fastq.gz,R3,P2
+186747,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-H9_1.fastq.gz,R1,P3
+186747,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-H9_UMI2.fastq.gz,R2,P3
+186747,/scratch/project/production/fastq/HVLYTDRXX/1/fastq/HVLYTDRXX_1_SI-NA-H9_2.fastq.gz,R3,P3
+186747,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-H9_1.fastq.gz,R1,P4
+186747,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-H9_UMI2.fastq.gz,R2,P4
+186747,/scratch/project/production/fastq/HVLYTDRXX/2/fastq/HVLYTDRXX_2_SI-NA-H9_2.fastq.gz,R3,P4

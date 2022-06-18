@@ -1,0 +1,611 @@
+---
+title: "Cytotoxic: Level 4"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will include the annotation of the Cytotoxic cells (level 4).
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_3/Cytotoxic/Cytotoxic_clustered_level_3.rds"
+path_to_naive_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/CD4_T/naive_CD8_T_subsetted_level_4.rds"
+path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/Cytotoxic_annotated_level_4.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette)
+naive_cd8 <- readRDS(path_to_naive_cd8)
+```
+
+
+# Important literature
+
+* [A human memory T cell subset with stem cell-like properties](https://www.nature.com/articles/nm.2446)
+* [CD8+ T cell differentiation and dysfunction in cancer](https://www.nature.com/articles/s41577-021-00574-3)
+* [Dissecting the multicellular ecosystem of metastatic melanoma by single-cell RNA-seq](https://science.sciencemag.org/content/352/6282/189.long)
+* [Dysfunctional CD8 T Cells Form a Proliferative, Dynamically Regulated Compartment within Human Melanoma](https://www.cell.com/cell/fulltext/S0092-8674(18)31568-X?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS009286741831568X%3Fshowall%3Dtrue)
+* [Defining T cell states associated with response to checkpoint immunotherapy in melanoma](https://www.cell.com/cell/fulltext/S0092-8674(18)31394-1?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS0092867418313941%3Fshowall%3Dtrue)
+* [Resident memory CD8 T cells occupy frontline niches in secondary lymphoid organs](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3965619/)
+* [Cutting Edge: Resident Memory CD8 T Cells Occupy Frontline Niches in Secondary Lymphoid Organs](https://www.jimmunol.org/content/192/7/2961)
+* [Delineating spatiotemporal and hierarchical development of human fetal innate lymphoid cells](https://www.nature.com/articles/s41422-021-00529-2)
+* [Transcriptional control of innate lymphoid cells](https://onlinelibrary.wiley.com/doi/10.1002/eji.201242639)
+
+# Key steps
+
+* Isolate CD8 T cells, Including the naive CD8 T cells that clustered with CD4 T. This will help us differentiate between LEF1+SELL+IL7R+ from LEF1+SELL+IL7R-. Subcluster 13 to find CD8 T effector cytotoxic and CD16+ NK. Watch out with doublets with CD4 T.
+* Subcluster TIM3 DN into two clusters.
+* Subset NK and ILC and annotate.
+* Differential expression analysis (6 vs 11, 2 vs 6, 2 vs 11).
+* Subcluster cluster 7 (exhausted) into 2.
+* Subcluster cluster 5 (MAIT) into 2.
+
+
+# Preliminar annotation
+
+https://www.nature.com/articles/s41467-018-06318-7
+s
+* 0:
+* 1: CD8 T effector memory
+* 2: CD8 T naive-like (Li H) OR CD8 T memory (Sade-Feldman) OR CD8 T stem cell-like (Gattinoni)
+* 3: CD8 T stem cell-like? (PTPRC)
+* 4: TIM3 DN
+* 5: MAIT cells https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3192229/. CD69+ --> tissue-resident MAIT cells? 
+* 6: gamma-delta T cells effector?
+* 7: CD8 T exhausted
+* 8: ILC
+* 9: CD16- NK   
+* 10: gamma-delta T cells
+* 11: TSHZ2+CD130+_doublets
+* 12: CD226 effector?
+* 13: CD8 T cytotoxic effector + CD16+ NK
+* 14: interferon
+* 15: Doublets
+* 16: poor-quality
+
+
+Resident cells? Central memory?
+
+
+# Subcluster
+
+## Cluster 4 (TIM3 DN)
+
+```{r}
+Idents(seurat) <- "seurat_clusters"
+seurat <- FindSubCluster(seurat, "4", "RNA_snn", "TIM3", resolution = 0.2)
+Idents(seurat) <- "TIM3"
+DimPlot(seurat, group.by = "TIM3", cols = color_palette)
+markers_tim3 <- find_markers_subclusters(seurat, "TIM3", "^4_")
+DT::datatable(markers_tim3$`4_0`)
+DT::datatable(markers_tim3$`4_1`)
+seurat$annotation_level_3 <- seurat$TIM3
+seurat$annotation_level_3[seurat$annotation_level_3 == "4_0"] <- "4_CD200-TIM3+ DN"
+seurat$annotation_level_3[seurat$annotation_level_3 == "4_1"] <- "4_CD200+TIM3+ DN"
+```
+
+
+## Cluster 5 (MAIT cells)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "5", "RNA_snn", "MAIT", resolution = 0.2)
+Idents(seurat) <- "MAIT"
+DimPlot(seurat, group.by = "MAIT", cols = color_palette)
+markers_mait <- find_markers_subclusters(seurat, "MAIT", "^5_")
+DT::datatable(markers_mait$`5_0`)
+DT::datatable(markers_mait$`5_1`)
+DT::datatable(markers_mait$`5_2`)
+seurat$annotation_level_3 <- seurat$MAIT
+seurat$annotation_level_3[seurat$annotation_level_3 == "5_0"] <- "5_MAIT1_NK_KLRF1"
+seurat$annotation_level_3[seurat$annotation_level_3 == "5_1"] <- "5_MAIT2_NK_KLRF1"
+seurat$annotation_level_3[seurat$annotation_level_3 == "5_2"] <- "5_MAIT3"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+
+## Cluster 6 (effector gamma-delta T cells)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "6", "RNA_snn", "gamma_delta", resolution = 0.2)
+Idents(seurat) <- "gamma_delta"
+DimPlot(seurat, group.by = "gamma_delta", cols = color_palette)
+markers_gamma_delta <- find_markers_subclusters(seurat, "gamma_delta", "^6_")
+DT::datatable(markers_gamma_delta$`6_0`)
+DT::datatable(markers_gamma_delta$`6_1`)
+DT::datatable(markers_gamma_delta$`6_2`)
+seurat$annotation_level_3 <- seurat$gamma_delta
+seurat$annotation_level_3[seurat$annotation_level_3 == "6_0"] <- "6_effector_gamma_delta/NKT 1"
+seurat$annotation_level_3[seurat$annotation_level_3 == "6_1"] <- "6_effector_gamma_delta/NKT 2"
+seurat$annotation_level_3[seurat$annotation_level_3 == "6_2"] <- "6_effector_gamma_delta/NKT 3"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+
+## Cluster 7 (exhausted + doublets)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "7", "RNA_snn", "exhausted_and_doublets", resolution = 0.1)
+Idents(seurat) <- "exhausted_and_doublets"
+DimPlot(seurat, group.by = "exhausted_and_doublets", cols = color_palette)
+markers_exh_doubl <- find_markers_subclusters(seurat, "exhausted_and_doublets", "^7_")
+DT::datatable(markers_exh_doubl$`7_0`)
+DT::datatable(markers_exh_doubl$`7_1`)
+seurat$annotation_level_3 <- seurat$exhausted_and_doublets
+seurat$annotation_level_3[seurat$annotation_level_3 == "7_0"] <- "7_CD8 T exhausted"
+seurat$annotation_level_3[seurat$annotation_level_3 == "7_1"] <- "7_doublets"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+
+## Cluster 8 (ILC)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "8", "RNA_snn", "ilc", resolution = 0.6)
+Idents(seurat) <- "ilc"
+DimPlot(seurat, group.by = "ilc", cols = color_palette)
+markers_ilc <- find_markers_subclusters(seurat, "ilc", "^8_")
+DT::datatable(markers_ilc$`8_0`)
+DT::datatable(markers_ilc$`8_1`)
+DT::datatable(markers_ilc$`8_2`)
+seurat$annotation_level_3 <- seurat$ilc
+seurat$annotation_level_3[seurat$annotation_level_3 == "8_0"] <- "8_ILC2_RORA"
+seurat$annotation_level_3[seurat$annotation_level_3 == "8_1"] <- "8_ILC1_CD200R1"
+seurat$annotation_level_3[seurat$annotation_level_3 == "8_2"] <- "8_ILC3_RORC"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+
+## Cluster 9 (NK)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "9", "RNA_snn", "nk", resolution = 0.6)
+Idents(seurat) <- "nk"
+DimPlot(seurat, group.by = "nk", cols = color_palette)
+markers_nk <- find_markers_subclusters(seurat, "nk", "^9_")
+DT::datatable(markers_nk$`9_0`)
+DT::datatable(markers_nk$`9_1`)
+seurat$annotation_level_3 <- seurat$nk
+seurat$annotation_level_3[seurat$annotation_level_3 == "9_0"] <- "9_CD16+CD56- NK"
+seurat$annotation_level_3[seurat$annotation_level_3 == "9_1"] <- "9_CD16+CD56+ NK"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+## Cluster 13 (CTL + CD16+ NK)
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(seurat, "13", "RNA_snn", "ctl_cd16_nk", resolution = 0.3)
+Idents(seurat) <- "ctl_cd16_nk"
+DimPlot(seurat, group.by = "ctl_cd16_nk", cols = color_palette)
+markers_ctl_cd16_nk <- find_markers_subclusters(seurat, "ctl_cd16_nk", "^13_")
+DT::datatable(markers_ctl_cd16_nk$`13_0`)
+DT::datatable(markers_ctl_cd16_nk$`13_1`)
+seurat$annotation_level_3 <- seurat$ctl_cd16_nk
+seurat$annotation_level_3[seurat$annotation_level_3 == "13_0"] <- "13_CTL"
+seurat$annotation_level_3[seurat$annotation_level_3 == "13_1"] <- "13_CD16_NK"
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+## Finish annotation at this level
+
+```{r}
+seurat$annotation_level_3[seurat$annotation_level_3 == "0"] <- "0_TBD"
+seurat$annotation_level_3[seurat$annotation_level_3 == "1"] <- "1_CD8_T_effector_memory"
+seurat$annotation_level_3[seurat$annotation_level_3 == "2"] <- "2_naive_like/memory/stem-like"
+seurat$annotation_level_3[seurat$annotation_level_3 == "3"] <- "3_naive_like/memory/stem-like"
+seurat$annotation_level_3[seurat$annotation_level_3 == "10"] <- "10_gamma_delta_T"
+seurat$annotation_level_3[seurat$annotation_level_3 == "11"] <- "11_TSHZ2_CD130_doublets"
+seurat$annotation_level_3[seurat$annotation_level_3 == "12"] <- "12_CD226_CD55"
+seurat$annotation_level_3[seurat$annotation_level_3 == "14"] <- "14_IFNG_CD8_T"
+seurat$annotation_level_3[seurat$annotation_level_3 == "15"] <- "15_doublets"
+seurat$annotation_level_3[seurat$annotation_level_3 == "16"] <- "16_poor_quality"
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, group.by = "annotation_level_3", pt.size = 0.75, cols = color_palette)
+```
+
+
+# Exclude cells
+
+We will exclude:
+
+1. Cluster 15: doublets
+2. Cluster 16: poor-quality
+3. A subset of cluster 7 which are doublets with CD4
+4. Cells from King et al. or multiome+old adult (decided jointly with other omics).
+
+
+
+```{r}
+donors_to_exclude <- str_subset(unique(seurat$donor_id) , "BCP")
+to_exclude <- 
+  (seurat$annotation_level_3 %in% c("15_doublets", "16_poor_quality", "7_doublets")) |
+  (seurat$assay == "5P") |
+  (seurat$assay == "multiome" & seurat$donor_id == "BCLL-2-T") |
+  (seurat$donor_id %in% donors_to_exclude)
+seurat <- subset(seurat, cells = colnames(seurat)[!to_exclude])
+seurat
+DimPlot(seurat, cols = color_palette, group.by = "annotation_level_3")
+```
+
+
+# Create datasets level 4
+
+## CD8 T cells
+
+```{r}
+seurat <- subset(seurat, annotation_level_3 != "0_TBD")
+cd8_levels <- c(
+  "1_CD8_T_effector_memory",
+  "10_gamma_delta_T",
+  "11_TSHZ2_CD130_doublets",
+  "12_CD226_CD55",
+  "13_CTL",
+  "14_IFNG_CD8_T",
+  "2_naive_like/memory/stem-like",
+  "3_naive_like/memory/stem-like",
+  "5_MAIT1_NK_KLRF1",
+  "5_MAIT2_NK_KLRF1",
+  "5_MAIT3",
+  "6_effector_gamma_delta/NKT 1",
+  "6_effector_gamma_delta/NKT 2",
+  "6_effector_gamma_delta/NKT 3",
+  "7_CD8 T exhausted"
+)
+Idents(seurat) <- "annotation_level_3"
+cd8 <- subset(seurat, idents = cd8_levels)
+
+
+# Reprocess
+cd8_list <- SplitObject(cd8, split.by = "assay")
+cd8_list <- cd8_list[c("3P", "multiome")]
+cd8_list <- purrr::map(
+  cd8_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(cd8_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+cd8 <- cd8 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:25) %>%
+  RunUMAP(reduction = "harmony", dims = 1:25)
+DimPlot(cd8, group.by = "annotation_level_3", cols = color_palette)
+
+
+# Recluster
+cd8 <- FindNeighbors(cd8, reduction = "harmony", dims = 1:25)
+cd8 <- FindClusters(cd8, resolution = 1.1)
+DimPlot(cd8, cols = color_palette, pt.size = 0.75)
+
+
+# Visualize proportions
+proportions_cd8_df <- find_proportions_df(
+  cd8,
+  x = "seurat_clusters",
+  fill = "annotation_level_3"
+)
+proportions_cd8_gg <- plot_stacked_barplot(
+  proportions_cd8_df,
+  x = "seurat_clusters",
+  fill = "annotation_level_3",
+  colors = color_palette
+)
+proportions_cd8_gg
+
+
+# Markers
+markers_cd8 <- FindAllMarkers(
+  cd8,
+  only.pos = TRUE,
+  logfc.threshold = 0.6
+)
+markers_cd8 <- markers_cd8 %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), .by_group = TRUE)
+DT::datatable(markers_cd8)
+```
+  
+
+Clusters 9, 10 and 11 are doublets and/or poor-quality cells:
+
+```{r}
+selected_cells <- colnames(cd8)[!(cd8$seurat_clusters %in% c("9", "10", "11"))]
+cd8 <- subset(cd8, cells = selected_cells)
+DimPlot(cd8, cols = color_palette)
+
+
+# Reprocess
+cd8_list <- SplitObject(cd8, split.by = "assay")
+cd8_list <- cd8_list[c("3P", "multiome")]
+cd8_list <- purrr::map(
+  cd8_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(cd8_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+cd8 <- cd8 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:25) %>%
+  RunUMAP(reduction = "harmony", dims = 1:25)
+DimPlot(cd8, group.by = "annotation_level_3", cols = color_palette)
+
+
+# Recluster
+cd8 <- FindNeighbors(cd8, reduction = "harmony", dims = 1:25)
+cd8 <- FindClusters(cd8, resolution = 1)
+DimPlot(cd8, cols = color_palette, pt.size = 0.75)
+
+
+# Visualize proportions
+proportions_cd8_df <- find_proportions_df(
+  cd8,
+  x = "seurat_clusters",
+  fill = "annotation_level_3"
+)
+proportions_cd8_gg <- plot_stacked_barplot(
+  proportions_cd8_df,
+  x = "seurat_clusters",
+  fill = "annotation_level_3",
+  colors = color_palette
+)+ ggtitle ("")
+proportions_cd8_gg
+
+
+# Markers
+markers_cd8 <- FindAllMarkers(
+  cd8,
+  only.pos = TRUE,
+  logfc.threshold = 0.6
+)
+markers_cd8 <- markers_cd8 %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), .by_group = TRUE)
+DT::datatable(markers_cd8)
+markers_cd8_list <- purrr::map(unique(markers_cd8$cluster), function(x) {
+  df <- markers_cd8[markers_cd8$cluster == x, ]
+  df
+})
+names(markers_cd8_list) <- unique(markers_cd8$cluster)
+```
+
+
+
+## ILC/NK
+
+```{r}
+ilc_nk_levels <- c(
+  "8_ILC1_CD200R1",
+  "8_ILC2_RORA",
+  "8_ILC3_RORC",
+  "9_CD16+CD56+ NK",
+  "9_CD16+CD56- NK",
+  "13_CD16_NK"
+)
+Idents(seurat) <- "annotation_level_3"
+ilc_nk <- subset(seurat, idents = ilc_nk_levels)
+DimPlot(ilc_nk)
+ilc_nk_list <- SplitObject(ilc_nk, split.by = "assay")
+ilc_nk_list <- ilc_nk_list[c("3P", "multiome")]
+ilc_nk_list <- purrr::map(
+  ilc_nk_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(ilc_nk_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+ilc_nk <- ilc_nk %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:20) %>%
+  RunUMAP(reduction = "harmony", dims = 1:20)
+DimPlot(ilc_nk, group.by = "annotation_level_3", cols = color_palette)
+ilc_nk <- FindNeighbors(ilc_nk, dims = 1:20, reduction = "harmony")
+ilc_nk <- FindClusters(ilc_nk, resolution = 0.6)
+DimPlot(ilc_nk)
+
+
+# Visualize proportions
+proportions_ilc_nk_df <- find_proportions_df(
+  ilc_nk,
+  x = "seurat_clusters",
+  fill = "annotation_level_3"
+)
+proportions_ilc_nk_gg <- plot_stacked_barplot(
+  proportions_ilc_nk_df,
+  x = "seurat_clusters",
+  fill = "annotation_level_3",
+  colors = color_palette
+)
+proportions_ilc_nk_gg
+
+
+FeaturePlot(ilc_nk, "CD3D")
+```
+
+We can subset cluster 5 (doublets with T cells):
+
+
+```{r}
+ilc_nk <- subset(ilc_nk, seurat_clusters != "5")
+DimPlot(ilc_nk, cols = color_palette, group.by = "seurat_clusters")
+ilc_nk <- FindNeighbors(ilc_nk, reduction = "harmony", dims = 1:20)
+Idents(ilc_nk) <- "seurat_clusters"
+ilc_nk <- FindSubCluster(ilc_nk, "1", "RNA_snn", "ilc_nk_1", resolution = 0.2)
+Idents(ilc_nk) <- "ilc_nk_1"
+DimPlot(ilc_nk, group.by = "ilc_nk_1", cols = color_palette)
+ilc_nk$seurat_clusters <- factor(
+  ilc_nk$ilc_nk_1,
+  levels = c("0", "1_0", "1_1", "2", "3", "4", "6")
+)
+Idents(ilc_nk) <- "seurat_clusters"
+
+
+# Visualize proportions
+proportions_ilc_nk_df <- find_proportions_df(
+  ilc_nk,
+  x = "seurat_clusters",
+  fill = "annotation_level_3"
+)
+proportions_ilc_nk_gg <- plot_stacked_barplot(
+  proportions_ilc_nk_df,
+  x = "seurat_clusters",
+  fill = "annotation_level_3",
+  colors = color_palette
+) + ggtitle ("")
+proportions_ilc_nk_gg
+
+
+# Markers
+markers_ilc_nk <- FindAllMarkers(
+  ilc_nk,
+  only.pos = TRUE,
+  logfc.threshold = 0.6
+)
+markers_ilc_nk <- markers_ilc_nk %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), .by_group = TRUE)
+DT::datatable(markers_ilc_nk)
+markers_ilc_nk_list <- purrr::map(unique(markers_ilc_nk$cluster), function(x) {
+  df <- markers_ilc_nk[markers_ilc_nk$cluster == x, ]
+  df
+})
+names(markers_ilc_nk_list) <- unique(markers_ilc_nk$cluster)
+```
+
+
+# Save
+
+```{r}
+# CD8 T
+input_shiny_cd8 <- seurat2shiny(cd8, slot = "data", reduction = "umap")
+saveRDS(
+  input_shiny_cd8$expression,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/CD8_T/CD8_T_expression_to_shiny_app_level_4.rds"
+)
+saveRDS(
+  input_shiny_cd8$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/CD8_T/CD8_T_metadata_to_shiny_app_level_4.rds"
+)
+saveRDS(cd8, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/CD8_T/CD8_T_clustered_level_4.rds")
+openxlsx::write.xlsx(
+  markers_cd8_list,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/CD8_T_markers.xlsx"
+)
+umap_level_4_cd8 <- DimPlot(cd8, cols = color_palette, pt.size = 1)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/CD8_T_umap_level_4.png",
+  plot = umap_level_4_cd8,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/CD8_T_stacked_barplot_preliminar_annotation_level_4.png",
+  plot = proportions_cd8_gg,
+  width = 16,
+  height = 12,
+  units = "cm"
+)
+
+# ILC/NK
+input_shiny_ilc_nk <- seurat2shiny(ilc_nk, slot = "data", reduction = "umap")
+saveRDS(
+  input_shiny_ilc_nk$expression,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/ILC_NK/ILC_NK_expression_to_shiny_app_level_4.rds"
+)
+saveRDS(
+  input_shiny_ilc_nk$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/ILC_NK/ILC_NK_metadata_to_shiny_app_level_4.rds"
+)
+saveRDS(ilc_nk, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/ILC_NK/ILC_NK_clustered_level_4.rds")
+openxlsx::write.xlsx(
+  markers_ilc_nk_list,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/ILC_NK_markers.xlsx"
+)
+umap_level_4_ilc_nk <- DimPlot(ilc_nk, cols = color_palette, pt.size = 1)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/ILC_NK_umap_level_4.png",
+  plot = umap_level_4_ilc_nk,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/Cytotoxic/tmp/ILC_NK_stacked_barplot_preliminar_annotation_level_4.png",
+  plot = proportions_ilc_nk_gg,
+  width = 16,
+  height = 12,
+  units = "cm"
+)
+
+# TIM3 DN
+tim3_dn <- subset(seurat, idents = c("4_CD200-TIM3+ DN", "4_CD200+TIM3+ DN"))
+saveRDS(tim3_dn, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/Cytotoxic/TIM3_DN/TIM3_DN_clustered_level_4.rds")
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

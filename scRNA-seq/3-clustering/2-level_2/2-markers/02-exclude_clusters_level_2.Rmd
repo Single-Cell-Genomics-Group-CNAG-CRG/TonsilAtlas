@@ -1,0 +1,159 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Exclude doublets and poor-quality cells (level 2):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+
+# Introduction
+
+The objective of this notebook is to exclude the clusters of doublets or poor-quality cells that we validated with the annotation team.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_dir <- here::here("scRNA-seq/results/R_objects/level_2/")
+path_to_obj <- str_c(
+  path_to_dir,
+  cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_2.rds",
+  sep = ""
+)
+path_to_save <- str_c(
+  path_to_dir,
+  cell_type,
+  "/",
+  cell_type,
+  "_clustered_filtered_level_2.rds",
+  sep = ""
+)
+path_to_tmp <- here::here("scRNA-seq/3-clustering/2-level_2/tmp/")
+path_to_save_multiome_doublets <- str_c(
+  path_to_tmp,
+  cell_type,
+  "_multiome_doublets_level_2.rds",
+  sep = ""
+)
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "chocolate1", "coral2", "blueviolet",
+                   "brown1", "darkmagenta", "deepskyblue1", "dimgray",
+                   "deeppink1", "green", "lightgray", "hotpink1",
+                   "indianred4", "khaki", "mediumorchid2")
+
+
+# Clusters to exclude
+cluster_to_exclude_all <- list(
+  NBC_MBC = c(""),
+  GCBC = c("2", "3", "4", "5"),
+  CD4_T = c("2", "5", "6"),
+  Cytotoxic = c("2", "5"),
+  PC = c("4"),
+  myeloid = c("2", "4", "6", "8", "9"),
+  FDC = c("1", "2", "3", "5", "7"),
+  PDC = c("1"),
+  epithelial = c("2", "3", "4", "7")
+)
+cluster_to_exclude <- cluster_to_exclude_all[[cell_type]]
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Visualize before filtering
+
+```{r}
+p1 <- DimPlot(seurat, cols = color_palette)
+p1
+```
+
+
+# Exclude doublets and poor-quality cells
+
+```{r}
+print("Clusters to exclude")
+cluster_to_exclude
+
+seurat
+doublets_cells <- colnames(seurat)[seurat$seurat_clusters %in% cluster_to_exclude]
+assay_doublets_cells <- seurat$assay[seurat$seurat_clusters %in% cluster_to_exclude]
+selected_cells <- colnames(seurat)[!(seurat$seurat_clusters %in% cluster_to_exclude)]
+if (cell_type != "NBC_MBC") {
+  seurat <- subset(seurat, cells = selected_cells)
+}
+seurat
+```
+
+
+# Visualize after filtering
+
+```{r}
+p2 <- DimPlot(seurat, cols = color_palette)
+p2
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+
+
+if (cell_type != "NBC_MBC") {
+  doublets_multiome_df <- data.frame(
+    barcode = doublets_cells,
+    cell_type = cell_type,
+    assay = assay_doublets_cells
+  )
+  saveRDS(doublets_multiome_df, path_to_save_multiome_doublets)
+}
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,143 @@
+---
+title: "Merge and integrate all B cells"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The purpose of this notebook is to integrate all B cells into a single Seurat object. 
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+  
+
+## Parameters
+
+```{r}
+path_to_NBC_MBC <- here::here("scRNA-seq/results/R_objects/level_4/NBC_MBC/NBC_MBC_subsetted_level_4.rds")
+path_to_GCBC <- here::here("scRNA-seq/results/R_objects/level_4/GCBC/GCBC_integrated_level_4.rds")
+path_to_PC_level_3 <- here::here("scRNA-seq/results/R_objects/level_3/PC/PC_clustered_level_3_with_pre_freeze.rds")
+path_to_pc_annotation <- here::here("scRNA-seq/3-clustering/B_cells/tmp/annotation_plasma_cells_level_3.rds")
+path_to_save <- here::here("scRNA-seq/results/R_objects/B_cells_integrated.rds")
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+```
+
+
+## Load data
+
+```{r}
+nbc_mbc <- readRDS(path_to_NBC_MBC)
+gcbc <- readRDS(path_to_GCBC)
+pc <- readRDS(path_to_PC_level_3)
+
+
+# Read annotation plasma cells
+pc_annotation <- readRDS(path_to_pc_annotation)
+```
+
+
+# Merge
+
+```{r}
+# Subset BCLL-2-T (multiome) from PC cells
+pc <- subset(pc, cells = pc_annotation$barcode)
+annotation <- pc_annotation$annotation_level_3 
+names(annotation) <- pc_annotation$barcode
+pc$annotation_level_3 <- annotation[colnames(pc)]
+keep_pc <- colnames(pc)[!(pc$assay == "multiome" & pc$donor_id == "BCLL-2-T")]
+pc <- subset(pc, cells = keep_pc)
+
+
+# Homogenize metadata
+pc_metadata_columns <- str_subset(
+  colnames(pc@meta.data),
+  "prediction.score",
+  negate = TRUE
+)
+pc@meta.data <- pc@meta.data[, pc_metadata_columns]
+```
+```{r}
+# Merge
+b_cells <- merge(x = nbc_mbc, y = c(gcbc, pc))
+```
+
+
+# Find shared highly variable genes (HVG)
+
+```{r}
+seurat_list <- SplitObject(b_cells, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+print(length(shared_hvg))
+```
+
+
+# Integrate
+
+```{r}
+b_cells <- b_cells %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction = "pca", dims = 1:30)
+b_cells <- RunUMAP(b_cells, reduction = "harmony", dims = 1:30)
+b_cells <- FindNeighbors(b_cells, reduction = "harmony", dims = 1:30)
+DimPlot(
+  b_cells,
+  cols = color_palette,
+  pt.size = 0.2,
+  group.by = "annotation_level_3"
+)
+```
+
+
+# Save
+
+```{r}
+saveRDS(b_cells, path_to_save)
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

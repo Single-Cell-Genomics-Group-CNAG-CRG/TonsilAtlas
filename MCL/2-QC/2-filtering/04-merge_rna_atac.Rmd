@@ -1,0 +1,179 @@
+---
+title: "Merge scRNA-seq and scATAC-seq"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+After filtering out poor-quality cells independently, we can merge scRNA-seq and scATAC-seq for each donor.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+path_to_rna_102 <- here::here("MCL/results/R_objects/1.seurat_object_filtered_102_rna.rds")
+path_to_rna_413 <- here::here("MCL/results/R_objects/1.seurat_object_filtered_413_rna.rds")
+path_to_atac_102 <- here::here("MCL/results/R_objects/2.seurat_merged_atac_102.rds")
+path_to_atac_413 <- here::here("MCL/results/R_objects/2.seurat_merged_atac_413.rds")
+path_to_save_102 <- here::here("MCL/results/R_objects/3.seurat_merged_rna_atac_102.rds")
+path_to_save_413 <- here::here("MCL/results/R_objects/3.seurat_merged_rna_atac_413.rds")
+```
+
+
+## Gene annotation
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+
+# Case 102
+
+## Read data
+
+```{r}
+seurat_rna_102 <- readRDS(path_to_rna_102)
+seurat_atac_102 <- readRDS(path_to_atac_102)
+```
+
+
+## Merge
+
+```{r}
+# Merge
+shared_cells_102 <- intersect(colnames(seurat_rna_102), colnames(seurat_atac_102))
+seurat_rna_102 <- subset(seurat_rna_102, cells = shared_cells_102)
+seurat_atac_102 <- subset(seurat_atac_102, cells = shared_cells_102)
+seurat_102 <- seurat_rna_102
+rm(seurat_rna_102)
+seurat_102[["ATAC"]] <- seurat_atac_102[["peaks"]]
+metadata_atac_102 <- seurat_atac_102@meta.data
+rm(seurat_atac_102)
+
+
+# Homogenize metadata
+selected_cols <- c("nCount_peaks", "nFeature_peaks", "nucleosome_signal",
+                   "nucleosome_percentile", "TSS.enrichment", "TSS.percentile")
+metadata_atac_102 <- metadata_atac_102[, selected_cols]
+metadata_atac_102$cell_barcode <- rownames(metadata_atac_102)
+seurat_102$cell_barcode <- colnames(seurat_102)
+new_metadata_102 <- left_join(
+  seurat_102@meta.data,
+  metadata_atac_102,
+  by = "cell_barcode"
+)
+new_metadata_102 <- as.data.frame(new_metadata_102)
+rownames(new_metadata_102) <- new_metadata_102$cell_barcode
+seurat_102@meta.data <- new_metadata_102
+seurat_102$cell_barcode <- NULL
+
+
+# Rename cells
+seurat_102 <- RenameCells(
+  seurat_102,
+  str_c(seurat_102$gem_id, colnames(seurat_102), sep = "_")
+)
+```
+
+
+## Save
+
+```{r}
+saveRDS(seurat_102, path_to_save_102)
+rm(seurat_102)
+```
+
+
+# Case 413
+
+## Read data
+
+```{r}
+seurat_rna_413 <- readRDS(path_to_rna_413)
+seurat_atac_413 <- readRDS(path_to_atac_413)
+```
+
+
+## Merge
+
+```{r}
+# Merge
+shared_cells_413 <- intersect(colnames(seurat_rna_413), colnames(seurat_atac_413))
+seurat_rna_413 <- subset(seurat_rna_413, cells = shared_cells_413)
+seurat_atac_413 <- subset(seurat_atac_413, cells = shared_cells_413)
+seurat_413 <- seurat_rna_413
+rm(seurat_rna_413)
+seurat_413[["ATAC"]] <- seurat_atac_413[["peaks"]]
+metadata_atac_413 <- seurat_atac_413@meta.data
+rm(seurat_atac_413)
+
+
+# Homogenize metadata
+selected_cols <- c("nCount_peaks", "nFeature_peaks", "nucleosome_signal",
+                   "nucleosome_percentile", "TSS.enrichment", "TSS.percentile")
+metadata_atac_413 <- metadata_atac_413[, selected_cols]
+metadata_atac_413$cell_barcode <- rownames(metadata_atac_413)
+seurat_413$cell_barcode <- colnames(seurat_413)
+new_metadata_413 <- left_join(
+  seurat_413@meta.data,
+  metadata_atac_413,
+  by = "cell_barcode"
+)
+new_metadata_413 <- as.data.frame(new_metadata_413)
+rownames(new_metadata_413) <- new_metadata_413$cell_barcode
+seurat_413@meta.data <- new_metadata_413
+seurat_413$cell_barcode <- NULL
+
+
+# Rename cells
+seurat_413 <- RenameCells(
+  seurat_413,
+  str_c(seurat_413$gem_id, colnames(seurat_413), sep = "_")
+)
+```
+
+
+## Save
+
+```{r}
+saveRDS(seurat_413, path_to_save_413)
+rm(seurat_413)
+```
+
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

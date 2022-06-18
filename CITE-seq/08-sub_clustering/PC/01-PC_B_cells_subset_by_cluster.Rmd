@@ -1,0 +1,89 @@
+---
+title: "PC B cell clusters"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+setwd("/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/")
+```
+
+# Define parameters
+
+## Load packages
+
+```{r } 
+library(Seurat)
+library(flexclust)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(harmony)
+```
+
+
+## Define variables and functions
+
+```{r}
+path_to_save_obj <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/results"
+path_to_save_citeseq_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_annotated_filtered.rds",
+  sep = "/"
+)
+path_to_save_seurat_obj <- str_c(
+  "objects/seurat_object_cite_seq_pc_positive_object.rds",
+  sep = "/"
+)
+```
+
+## Load data
+
+```{r data}
+seurat_obj <- readRDS(path_to_save_citeseq_seurat_obj)
+```
+
+## get metadata
+
+```{r get metadata}
+metadata <- seurat_obj@meta.data 
+```
+
+# Extract PC cells
+
+```{r}
+PC_pos_cells <- rownames(subset(metadata, metadata$annotation == "PC"))
+PC_pos_clusters_obj = subset(seurat_obj,cells = PC_pos_cells)
+```
+
+
+# QC of PC enriched clusters
+
+```{r}
+DimPlot(PC_pos_clusters_obj)
+```
+
+```{r}
+FeaturePlot(PC_pos_clusters_obj, features = c("CD19","CD3","CD79"), ncol = 2)
+```
+
+
+# Save the seurat object 
+
+```{r}
+saveRDS(PC_pos_clusters_obj, file = path_to_save_seurat_obj)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,133 @@
+---
+title: "Normalization and Batch Effect Correction (without doublets)"
+author: "Ramon Massoni-Badosa"
+date: "2021/01/29"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In previous notebooks and scripts, we excluded doublets and merged our Seurat object with the scRNA-seq dataset of tonsillar cells from [Hamish et al.](https://immunology.sciencemag.org/content/6/56/eabe6291). Here, we will correct for batch effects with [Harmony](https://www.nature.com/articles/s41592-019-0619-0), and visualize the intermixing of different potential confounders pre- and post-integration.
+
+In addition, we will save the dimensionality reduction (PCA) matrices before and after integration to further quantify the effect of the aforementioned confounders in high dimensional space. 
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/seurat_merged_with_king_et_al.rds")
+path_to_save_obj <- here::here("scRNA-seq/results/R_objects/seurat_merged_with_king_et_al_integrated.rds")
+path_tmp_dir <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/2-data_integration_king_et_al/tmp/")
+path_to_save_dimred_uncorrect <- str_c(path_tmp_dir, "batch_uncorrected_pca.rds", sep = "")
+path_to_save_dimred_correct <- str_c(path_tmp_dir, "batch_corrected_pca.rds", sep = "")
+path_to_save_confounders_df <- str_c(path_tmp_dir, "confounders_df.rds", sep = "") 
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+tonsil
+```
+
+
+# Visualize UMAP without batch effect correction
+
+```{r}
+# Process Seurat object
+tonsil <- tonsil %>%
+  NormalizeData(normalization.method = "LogNormalize", scale.factor = 1e4) %>% 
+  FindVariableFeatures(nfeatures = 3000) %>%
+  ScaleData() %>% 
+  RunPCA() %>%
+  RunUMAP(reduction = "pca", dims = 1:30)
+
+
+# Visualize UMAP
+confounders <- c("library_name", "sex", "age_group", "is_hashed",
+                 "hospital", "assay")
+umaps_before_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(tonsil, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_before_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_before_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_before_integration[2:length(umaps_before_integration)]
+```
+
+
+# Run and visualize Harmony's integration
+
+```{r}
+tonsil <- tonsil %>%
+  RunHarmony(reduction = "pca", dims = 1:30, group.by.vars = "gem_id") %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+umaps_after_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(tonsil, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_after_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_after_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_after_integration[2:length(umaps_before_integration)]
+```
+
+
+# Save
+
+```{r}
+# If it doesn't exist create temporal directory
+dir.create(path_tmp_dir, showWarnings = FALSE) 
+
+
+# Save integrated Seurat object
+saveRDS(tonsil, path_to_save_obj)
+
+
+# Save PCA matrices to compute the Local Inverse Simpson Index (LISI)
+confounders_df <- tonsil@meta.data[, confounders]
+saveRDS(confounders_df, path_to_save_confounders_df)
+saveRDS(
+  tonsil@reductions$pca@cell.embeddings[, 1:30],
+  path_to_save_dimred_uncorrect
+)
+saveRDS(
+  tonsil@reductions$harmony@cell.embeddings[, 1:30],
+  path_to_save_dimred_correct
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

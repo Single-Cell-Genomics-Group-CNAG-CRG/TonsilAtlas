@@ -1,0 +1,395 @@
+---
+title: "Quality control and filtering"
+author: "Paula Soler-Vila"
+output: 
+    BiocStyle::html_document:
+    toc: true
+toc_float: true
+number_sections: true
+---
+
+ ```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Objective
+
+The objective of this notebook is to create a Seurat object, assess the quality of the data and filter out the low-quality cells. We followed the procedure described by a specific Signac's vignette entitled ["Joint RNA and ATAC analysis: 10x multiomic"](https://satijalab.org/signac/articles/pbmc_multiomic.html).
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(ggplot2)
+library(ggpubr)
+library(tidyverse)
+library(plyr)
+library(reshape2)
+library(data.table)
+library(GenomicRanges)
+library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+library(hdf5r)
+library(stringr)
+set.seed(173)
+```
+
+## Parameters
+```{r}
+# Thresholds
+TSS_enrichment <- 2 
+nucleosome_signal_atac <- 2
+min_lib_size_atac<- 500
+max_lib_size_atac <- 100000
+
+min_lib_size_rna <- 550
+max_lib_size_rna <- 40000
+min_n_genes <- 250
+max_n_genes <- 6000
+max_pct_mt <- 20
+```
+
+## Parameters
+
+```{r}
+# Paths
+path_to_data_exp1 <- here::here("multiome/results/Experiment_1/")
+path_to_data_exp2 <- here::here("multiome/results/Experiment_2/")
+path_to_save <- here::here("multiome/results/R_objects/")
+```
+
+## Functions
+
+```{r}
+plot_histogram_qc <- function(df, x, x_lab) {
+  df %>%
+    ggplot(aes_string(x)) +
+    geom_histogram(bins = 100) +
+    labs(x = x_lab, y = "Number of Cells") +
+    theme_pubr()
+}
+```
+
+## Gene annotation
+Extraction of gene annotations from EnsDb using hg38 as the reference assembly.
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+# Load data
+Signac uses information from three related input files (created using CellRanger ARC):
+
+1. Count matrix in h5 format 
+2. ATAC Fragment file
+3. ATAC Fragment file index
+
+```{r}
+read_atac_data <- function(url_project,library_name) {
+  counts <- Seurat::Read10X_h5(filename = paste0(url_project, "filtered_feature_bc_matrix.h5"))
+  
+  # create a Seurat object containing the scRNA adata
+  tonsil <- Seurat::CreateSeuratObject(
+  counts = counts$`Gene Expression`,
+  assay = "RNA")
+
+  # create a Seurat object containing the scATAC adata
+  tonsil[["ATAC"]] <- Signac::CreateChromatinAssay(
+    counts = counts$Peaks,
+    sep = c(":", "-"),
+    genome = "hg38",
+    fragments = paste0(url_project, "atac_fragments.tsv.gz"),
+    annotation = annotation)
+  
+  tonsil$library_name = library_name
+  return(tonsil)
+}
+```
+
+## Read samples from Experiment 1 and assign them to a proper library name
+```{r}
+BCLL_9_T_1 <- read_atac_data(paste0(path_to_data_exp1,"co7dzuup_xuczw9vc/"),"BCLL_9_T_1")
+BCLL_9_T_2 <- read_atac_data(paste0(path_to_data_exp1,"qmzb59ew_t11l8dzm/"),"BCLL_9_T_2")
+BCLL_8_T_1 <- read_atac_data(paste0(path_to_data_exp1,"ulx1v6sz_8a2nvf1c/"),"BCLL_8_T_1")
+BCLL_8_T_2 <- read_atac_data(paste0(path_to_data_exp1,"wdp0p728_jf6w68km/"),"BCLL_8_T_2")
+```
+
+## Read samples from Experiment 2 and assign them to a proper library name
+```{r}
+BCLL_14_T_1 <- read_atac_data(paste0(path_to_data_exp2,"pd9avu0k_kf9ft6kk/"),"BCLL_14_T_1")
+BCLL_14_T_2 <- read_atac_data(paste0(path_to_data_exp2,"vuuqir4h_wfkyb5v8/"),"BCLL_14_T_2")
+BCLL_15_T_1 <- read_atac_data(paste0(path_to_data_exp2,"admae8w2_89i88tvv/"),"BCLL_15_T_1")
+BCLL_15_T_2 <- read_atac_data(paste0(path_to_data_exp2,"sr20954q_yiuuoxng/"),"BCLL_15_T_2")
+BCLL_2_T_1 <- read_atac_data(paste0(path_to_data_exp2,"kmbfo1ab_ie02b4ny/"),"BCLL_2_T_1")
+BCLL_2_T_2 <- read_atac_data(paste0(path_to_data_exp2,"ryh4el3i_biv0w7ca/"),"BCLL_2_T_2")
+BCLL_2_T_3 <- read_atac_data(paste0(path_to_data_exp2,"bs2e7lr7_mdfwypvz/"),"BCLL_2_T_3")
+```
+
+```{r}
+libraries <- c(BCLL_9_T_1,BCLL_9_T_2,BCLL_8_T_1,BCLL_8_T_2,
+               BCLL_14_T_1,BCLL_14_T_2,BCLL_15_T_1,BCLL_15_T_2,
+               BCLL_2_T_1,BCLL_2_T_2,BCLL_2_T_3)
+```
+
+# Quality control
+
+We can compute per-cell quality metrics taking in account three specifics from DNA accessibility such as TSS.enrichment, nucleosome signal and nCount_ATAC and nCount_RNA from gene expression data.
+
+```{r}
+quality_control <- function(seurat_object) {
+  
+  DefaultAssay(seurat_object) <- "ATAC"
+  seurat_object <- NucleosomeSignal(object = seurat_object)
+  seurat_object <- TSSEnrichment(object = seurat_object, fast = FALSE)
+  seurat_object$high.tss <- ifelse(seurat_object$TSS.enrichment > 2, "High", "Low")
+  
+  DefaultAssay(seurat_object) <- "RNA"
+  seurat_object[["pct_mt"]] <- PercentageFeatureSet(seurat_object, pattern = "^MT-")
+  seurat_object[["pct_ribosomal"]] <- PercentageFeatureSet(seurat_object, pattern = "^RPS")
+  
+  return(seurat_object)
+}
+```
+
+```{r}
+all_data = lapply(libraries, quality_control)
+metadata_QC = data.frame()
+
+for (dat in all_data)
+  {
+    metadata_QC = rbind(metadata_QC,dat@meta.data)
+  }
+
+saveRDS(all_data,paste0(path_to_save,"1.tonsil_multiome_QC.rds"))
+```
+
+## scATAC parameters
+
+### Number of detected peaks
+
+```{r fig.wide=TRUE}
+np <- ggviolin(metadata_QC,
+  x = "library_name", fill = "gray70", x.text.angle = 45,
+  y = "nFeature_ATAC") + scale_y_log10()
+np
+
+print(paste("The median of total number of peaks is:", median(metadata_QC$nFeature_ATAC)))
+print("The summary of total number of peaks per library")
+aggregate(nFeature_ATAC ~ library_name, data = metadata_QC, median)
+```
+
+### Nucleosome banding pattern
+Quantification of the ratio of mononucleosomal (fragment lengths between 147 and 294bp) to nucleosome-free fragments(less than 147).The red dashed line represent the upper threshold applied. 
+
+```{r}
+nbp <- function(seurat_object) {
+  DefaultAssay(seurat_object) <- "ATAC"
+  f <- FragmentHistogram(object = seurat_object)
+
+  NFR <- length(which(f$data$length < 147)) / nrow(f$data) * 100
+  MONO <- length(which(f$data$length > 147 & f$data$length < 294)) / nrow(f$data) * 100
+  DI <- length(which(f$data$length > 294)) / nrow(f$data) * 100
+
+  min.threshold <- 147
+  max.threshold <- 294
+
+  # options(repr.plot.width=7, repr.plot.height=2)
+  options(repr.plot.width = 17, repr.plot.height = 8)
+  p <- ggplot(f$data, aes(length)) + ggtitle(unique(seurat_object$library_name)) +
+    geom_histogram(binwidth = 1, alpha = .5, fill = "blue") +
+    geom_density(aes(y = ..count..), bw = 1, alpha = 0, col = "black", lwd = 1) +
+    scale_x_continuous(limits = c(0, 500)) +
+    geom_vline(xintercept = c(min.threshold, max.threshold)) +
+    theme_minimal() +
+    geom_vline(xintercept = 39, color = "red") +
+    geom_text(x = 80, y = 20, label = round(NFR, 2), size = 8) +
+    geom_text(x = 200, y = 20, label = round(MONO, 2), size = 8) +
+    geom_text(x = 350, y = 20, label = round(DI, 2), size = 8)
+  print(p)
+}
+```
+
+```{r fig.wide=TRUE}
+plot_nbp = lapply(all_data, nbp)
+plot_nbp
+```
+
+```{r fig.wide=TRUE}
+ns <- ggviolin(metadata_QC,
+  x = "library_name", fill = "gray70", x.text.angle = 45,
+  y = "nucleosome_signal") + scale_y_log10() + geom_hline(yintercept = nucleosome_signal_atac, linetype='dashed', col = 'black')
+ns
+```
+
+### Transcriptional start site (TSS) enrichment score
+Here, we can see the plot of the normalized TSS enrichment score at each position relative to the TSS. The red dashed line represent the upper threshold applied. 
+
+
+```{r fig.wide=TRUE}
+plot_tss <- function(seurat_object){
+ DefaultAssay(seurat_object) <- "ATAC" 
+ Signac::TSSPlot(seurat_object, group.by = "high.tss") + 
+   ggtitle(paste("TSS enrichment score", unique(seurat_object$library_name)))
+}
+
+plots_tss_tonsil = lapply(all_data, plot_tss)
+plots_tss_tonsil
+```
+
+```{r fig.wide=TRUE}
+tss <- ggviolin(metadata_QC,
+  x = "library_name", fill = "gray70", x.text.angle = 45,
+  y = "TSS.enrichment") + geom_hline(yintercept = (2), linetype='dashed', col = 'black') + scale_y_log10()
+tss
+```
+
+### Library size
+
+The red dashed lines represent the lower and the upper thresholds applied. 
+
+```{r fig.wide=TRUE}
+ns <- ggviolin(metadata_QC,
+  x = "library_name", fill = "gray70", x.text.angle = 45,
+  y = "nCount_ATAC") +  scale_y_log10() + 
+  geom_hline(yintercept = c(min_lib_size_atac,max_lib_size_atac), linetype='dashed', col = 'black')
+ns
+```
+
+```{r fig.wide=TRUE}
+lib_size_hist <- metadata_QC  %>%
+  plot_histogram_qc(x = "nCount_ATAC", x_lab = "Library Size (log10)") +
+  geom_vline(xintercept = min_lib_size_atac, linetype = "dashed", color = "black")
+lib_size_hist1 <- lib_size_hist +
+    scale_x_log10() +
+    geom_vline(xintercept = max_lib_size_atac, linetype = "dashed", color = "black")
+lib_size_hist2 <- lib_size_hist +
+    scale_x_continuous(limits = c(0, 5000)) +
+    xlab("Library Size") +
+    theme_pubr()
+lib_size_hist1 + lib_size_hist2
+```
+
+## scRNA parameters
+We aim to detect and exclude empty droplets or lysed cells. Lysed cells have 3 hallmarks: (1) low library size (total UMI), (2) low library complexity (number of detected genes) and (3) high fraction of mitochondrial expression (cytosolic mRNA leaks out of the cell). Let us start by visualizing their univariate distributions.
+
+### Library Size
+The red dashed lines represent the lower and the upper thresholds applied. 
+
+```{r fig.wide=TRUE}
+nc <- ggviolin(metadata_QC,
+  x = "library_name", fill = "library_name", x.text.angle = 45,
+  y = "nCount_RNA") +  scale_y_log10() + 
+  geom_hline(yintercept = c(min_lib_size_rna,max_lib_size_rna), linetype='dashed', col = 'black')
+nc
+```
+
+```{r fig.wide=TRUE}
+lib_size_hist <- metadata_QC  %>%
+  plot_histogram_qc(x = "nCount_RNA", x_lab = "Library Size (log10(total UMI))") +
+  geom_vline(xintercept = min_lib_size_rna, linetype = "dashed", color = "black")
+lib_size_hist1 <- lib_size_hist +
+    scale_x_log10() +
+    geom_vline(xintercept = max_lib_size_rna, linetype = "dashed", color = "black")
+lib_size_hist2 <- lib_size_hist +
+    scale_x_continuous(limits = c(0, 2000)) +
+    xlab("Library Size (total UMI)") +
+    theme_pubr()
+lib_size_hist1 + lib_size_hist2
+```
+
+### Number of detected genes
+The red dashed lines represent the lower and upper thresholds applied. 
+However, cells with a value higher than the upper threshold will be kept for the downstream analysis.
+
+```{r}
+metadata_QC$has_high_lib_size <- 
+  metadata_QC$nCount_RNA > max_lib_size_rna |
+  metadata_QC$nFeature_RNA > max_n_genes
+```
+
+```{r fig.wide=TRUE}
+ns <- ggviolin(metadata_QC,
+  x = "library_name", fill = "gray70", x.text.angle = 45,
+  y = "nFeature_RNA") +  scale_y_log10() + 
+  geom_hline(yintercept = c(min_n_genes,max_n_genes), linetype='dashed', col = 'black')
+ns
+```
+
+```{r fig.wide=TRUE}
+n_genes_hist1 <- metadata_QC %>%
+  plot_histogram_qc(x = "nFeature_RNA", x_lab = "Number of Detected Genes") +
+  geom_vline(xintercept = min_n_genes, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = max_n_genes, linetype = "dashed", color = "black")
+n_genes_hist2 <- n_genes_hist1 +
+  scale_x_continuous(limits = c(0, 2000)) 
+n_genes_hist1 + n_genes_hist2
+
+print(paste("The median of total number of genes is:", median(metadata_QC$nFeature_RNA)))
+print("The summary of total number of genes per library")
+aggregate(nFeature_RNA ~ library_name, data = metadata_QC, median)
+```
+
+### Library Size vs library complexity
+```{r fig.wide=TRUE}
+ggscatter(metadata_QC, x = "nCount_RNA", y = "nFeature_RNA",
+  color = "library_name") 
+```
+
+### Fraction of mitochondrial expression
+
+```{r fig.wide=TRUE}
+pct_mt_hist <- metadata_QC %>%
+  plot_histogram_qc(x = "pct_mt", x_lab = "% Mitochondrial Expression") +
+  geom_vline(xintercept = max_pct_mt, linetype = "dashed", color = "black") +
+  scale_x_continuous(limits = c(0, 100))
+
+pct_mt_hist
+```
+
+### Fraction of ribosomal expression
+Let us also calculate and visualize the proportion of ribosomal expression:
+
+```{r fig.wide=TRUE}
+metadata_QC %>% plot_histogram_qc(x = "pct_ribosomal", x_lab = "% Ribosomal Expression")
+```
+
+# Filtering
+
+Finally we remove cells that are outliers for these QC metrics. 
+```{r}
+
+filtering_QC <- function(seurat_object) {
+  seurat_object <- subset(
+    x = seurat_object, 
+    nCount_ATAC < max_lib_size_atac &
+    pct_mt < max_pct_mt &
+    nCount_ATAC > min_lib_size_atac &
+    nCount_RNA > min_lib_size_rna &
+    nFeature_RNA > min_n_genes &
+    nucleosome_signal < nucleosome_signal_atac &
+    TSS.enrichment > TSS_enrichment)
+  
+  return(seurat_object)
+}
+```
+
+```{r}
+tonsil_data_filtered = lapply(all_data, filtering_QC)
+saveRDS(tonsil_data_filtered,paste0(path_to_save,"2.tonsil_multiome_filtered.rds"))
+
+print(paste("Number of total filtered cells:", sum(melt(lapply(tonsil_data_filtered, ncol))$value)))
+```
+
+#  Session info
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,206 @@
+---
+author: "Paula Soler-Vila & Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Visualize integration (level 1):")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+The objectives of this notebook are:
+
+- Visualize how well we could remove technical variability associated with the assay (scATAC or multiome). We should see a high degree of intermixing between the 2 assays.
+
+- Plot several markers of potential doublets or problematic cells: 
+       - scRNAseq doublets determined by 10X Multiome
+       - Scrublet doublet predictions
+       - nCount and nFeatures of scATAC
+       - Chromatin Signature
+       
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+```
+
+
+## Parameters
+```{r}
+# Paths
+path_to_obj <- here::here("scATAC-seq/results/R_objects/8.3.tonsil_peakcalling_annotation_level1_signature.rds")
+path_to_obj_RNA <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_annotated_level_1.rds")
+
+path_to_doublets <- here::here("scRNA-seq/3-clustering/2-level_2/tmp/doublets_multiome_df_all.rds")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+
+tonsil_RNA_annotation <- seurat_RNA@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode", "seurat_clusters")
+```
+
+
+### Visualization of the data
+```{r fig.wide=TRUE}
+p1 <- DimPlot(seurat,
+  pt.size = 0.1)
+
+p2 <- DimPlot(seurat_RNA,
+  group.by = "seurat_clusters",
+  pt.size = 0.1, label = T) + NoLegend()
+
+p1 + p2
+```
+
+# Assess integration
+
+## Technical variability |
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "assay")
+p_assay
+```
+
+## Technical variability ||
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "hospital")
+p_assay
+```
+
+## Biological variability | 
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "age_group")
+p_assay
+```
+
+## Biological variability || 
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "sex")
+p_assay
+```
+
+# Spot potential doublets
+
+## Multiome scRNA-seq data
+
+### Doublets detected in scRNA-seq data from Multiome.
+Here, we can see the count of doublets detected by cell-type. Note that for the level1 annotation there are not doublets detected in the Naive and Memory B cell cluster. 
+
+```{r fig.wide=TRUE}
+multiome_doublets <- readRDS(path_to_doublets)
+
+dfm = melt(table(multiome_doublets$cell_type))
+dfm$value = as.numeric(as.character(dfm$value))
+ggbarplot(dfm, x = "Var1", y = "value",
+          fill = "Var1",   
+          palette = "jco",
+          sort.val = "desc",         
+          sort.by.groups = FALSE,    
+          x.text.angle = 90          
+          )
+```
+
+
+```{r}
+doublets_cells <- colnames(seurat)[which(colnames(seurat) %in% multiome_doublets$barcode)]
+length(doublets_cells)
+```
+
+## Visualize the projection of the doublets cells onto the scATAC-seq UMAP
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat, reduction = "umap",
+  cols.highlight = "darkred", cols= "grey",
+  cells.highlight= doublets_cells,
+  pt.size = 0.1
+)
+
+```
+## Scrublet prediction
+
+```{r}
+# Scrublet
+DimPlot(seurat, group.by = "scrublet_predicted_doublet_atac")
+table(seurat$scrublet_predicted_doublet_atac)
+```
+
+## QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_peaks",
+  "nFeature_peaks"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x)
+  p
+})
+qc_gg
+```
+
+## Annotation probability
+
+```{r}
+qc_vars <- c(
+  "annotation_prob")
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x)
+  p
+})
+qc_gg
+```
+
+## Chromatin Signature
+
+```{r}
+qc_vars <- c("NBC.MBC", "GCBC", "PC", "CD4.T", "Cytotoxic",
+             "myeloid", "FDC", "PDC")
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, feature = x, max.cutoff = 4, min.cutoff = -4) + scale_color_viridis_c(option = "magma")
+  p
+})
+qc_gg
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

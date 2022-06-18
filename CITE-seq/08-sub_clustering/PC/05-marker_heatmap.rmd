@@ -1,0 +1,78 @@
+---
+title: "Bulk Heatmap CITEseq marker"
+author: "Sonal Rashmi"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries}
+library(Seurat)
+```
+
+## Parameters
+
+```{r parameters}
+path_to_save_annotated_citeseq <- "objects/PC_tonsil_cite_seq_annotated.rds"
+```
+
+## Variables
+
+## Load data
+
+```{r}
+tonsil_citeseq <- readRDS(path_to_save_annotated_citeseq)
+```
+
+
+## CITEseq Markers
+
+```{r}
+DefaultAssay(tonsil_citeseq) <- "ADT"
+Idents(tonsil_citeseq) <- tonsil_citeseq@meta.data$PC_annotation_level_5
+marker_gene = c("CD33.1", "CD10", "CD49b", "CD49d", "CD49f", "CD44.1", "CD29", "CD31", "CD32", "CD27.1", "CD11a", "CD18", "CD193-(CCR3)", "CD21", "CD39", "CD73-(Ecto-5-nucleotidase)", "CD224", "CD22.1", "CD38.1", "CD19.1")
+```
+
+## Normalise object
+
+```{r}
+tonsil_citeseq@reductions$wnn.umap@cell.embeddings[,1] <- tonsil_citeseq$PC_UMAP1
+tonsil_citeseq@reductions$wnn.umap@cell.embeddings[,2] <- tonsil_citeseq$PC_UMAP2
+DefaultAssay(tonsil_citeseq) <- "ADT"
+Idents(tonsil_citeseq) <- tonsil_citeseq@meta.data$PC_annotation_level_5
+```
+
+## Find all markers 
+
+```{r}
+plotBulkHeatmap <- function(x){
+  x <- intersect(x, rownames(GetAssayData(tonsil_citeseq, slot = 'data')))
+  mat <- AverageExpression(tonsil_citeseq, features = marker_gene, slot = 'data', assays = "ADT")
+  mat1 <- t(scale(t(mat$ADT)))
+  re <- pheatmap::pheatmap(mat1, angle_col = 45, border = NA)
+  return(re)
+}
+
+plotBulkHeatmap(marker_gene)
+```
+
+
+
+# Session Information
+```{r session}
+sessionInfo()
+```

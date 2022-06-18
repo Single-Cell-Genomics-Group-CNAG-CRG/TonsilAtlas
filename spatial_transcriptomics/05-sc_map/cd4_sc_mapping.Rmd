@@ -1,0 +1,269 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "`r sprintf('%s T cells SC mapping', params$donor_id)`"
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to map T-cell subtypes onto the Visium slides.
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+dir.create(path = here::here(sprintf("%s/%s", decon_32, plt_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+
+dir.create(path =here::here(sprintf("%s/%s", decon_32, robj_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+sample_id <- params$sample_id
+# sample_id <- "esvq52_nluss5"
+donor_id <- id_df[id_df$gem_id == sample_id, "BCLL_ID"]
+```
+
+## Load data
+We have 4 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering.Rmd* while the sc data can be found in Ramon's scRNAseq analysis: **/scratch/devel/rmassoni/tonsil_atlas_private/2-DOWNSTREAM_PROCESSING/results/R_objects/processed_seurat_objects/processed_seurat_objects/tonsil_integrated_with_harmony_scrublet_annotated.rds**. We will also load the metadata of a l2 annotation of CD4 so that we can have the annotation. \
+In each Rmarkdown notebook we analyze 1 dataset. \
+```{r}
+sp_obj <- readRDS(
+  file = here::here(glue::glue("{clust_32}/{robj_dir}/clust_se_{sample_id}.RDS")))
+
+sc_obj <- readRDS(
+  file = here::here(glue::glue("{decon_32}/{robj_dir}/tonsil_integrated_with_harmony_scrublet_annotated.rds")))
+
+metadata_cd4 <- readRDS(
+  file = here::here(glue::glue("{decon_32}/{robj_dir}/CD4+_T_metadata.rds"))) %>%
+  tibble::column_to_rownames("barcode")
+```
+
+## Analysis
+We are going to use SPOTlight to deconvolute the spatial spots and map the cell types.
+
+We will start by adding the labels to the clusters as Juan Nieto proposes
+```{r}
+metadata_cd4 <- metadata_cd4 %>%
+  dplyr::mutate(
+    seurat_clusters = as.character(seurat_clusters),
+    l2_annotation = dplyr::case_when(
+      seurat_clusters == 0 ~ "CD4 follicular",
+      seurat_clusters == 1 ~ "CD4 CM",
+      seurat_clusters == 2 ~ "CD4 naive",
+      seurat_clusters == 3 ~ "CD4 EM/reg/h17",
+      seurat_clusters == 4 ~ "CD8",
+      seurat_clusters == 5 ~ "Doublet",
+      seurat_clusters == 6 ~ "Doublet",
+      seurat_clusters == 7 ~ "Follicular proliferating T cells",
+      seurat_clusters == 8 ~ "Doublet",
+      seurat_clusters == 9 ~ "Unkown-9",
+      TRUE ~ seurat_clusters)
+  ) %>%
+  tibble::column_to_rownames("cell_barcode")
+
+metadata_cd4 %>%
+  dplyr::count(l2_annotation)
+```
+
+Next we subset the the CD4+ T cells and adding the relevant metadata...
+```{r}
+sc_obj <- sc_obj[, sc_obj$annotation_level1 == "CD4+ T"]
+
+sc_obj@meta.data <- metadata_cd4
+
+sc_obj <- sc_obj[, sc_obj$l2_annotation != "Doublet"]
+```
+
+Since the normalization was carried out with the entire dataset we are going to do normalization again within this subset
+```{r}
+sc_obj <- sc_obj %>%
+  Seurat::NormalizeData(.,
+                normalization.method = "LogNormalize",
+                scale.factor = 10000,
+                verbose = FALSE) %>%
+  Seurat::FindVariableFeatures(.,
+                               nfeatures = 3000,
+                               verbose = FALSE) %>% 
+  Seurat::ScaleData(.,
+                    verbose = FALSE)
+```
+
+1st we need to determine the marker genes for each high-level cluster
+```{r}
+if (file.exists(here::here(glue::glue("{decon_32}/{robj_dir}/markers_cd4.RDS")))) {
+  
+  markers <- readRDS(file = here::here(glue::glue("{decon_32}/{robj_dir}/markers_cd4.RDS")))
+  
+} else {
+  #### Extract marker genes from each cluster ####
+  Seurat::Idents(object = sc_obj) <- sc_obj@meta.data$l2_annotation
+  markers <- Seurat::FindAllMarkers(
+    object = sc_obj, 
+    assay = "RNA",
+    slot = "data",
+    verbose = TRUE, 
+    only.pos = TRUE,
+    max.cells.per.ident = 200)
+  
+  saveRDS(object = markers,
+          file = here::here(glue::glue("{decon_32}/{robj_dir}/markers_cd4.RDS")))
+}
+```
+
+2nd run deconvolution
+```{r}
+Seurat::Idents(object = sc_obj) <- as.character(sc_obj@meta.data$l2_annotation)
+# sc_obj@meta.data <- sc_obj@meta.data %>% tibble::column_to_rownames("cell_barcode")
+
+spotlight_ls <- spotlight_deconvolution(
+  se_sc = sc_obj,
+  counts_spatial = sp_obj@assays$Spatial@counts,
+  clust_vr = "l2_annotation",
+  cluster_markers = markers,
+  cl_n = 75,
+  hvg = 3000,
+  ntop = NULL,
+  transf = "uv",
+  method = "nsNMF",
+  min_cont = 0)
+```
+
+## Save data
+```{r}
+decon_fn <- here::here(glue::glue("{decon_32}/{robj_dir}/spotlight_ls_cd4_{sample_id}.rds"))
+if (! file.exists(decon_fn) ) {
+  saveRDS(
+    object = spotlight_ls,
+    file = here::here(glue::glue("{decon_32}/{robj_dir}/spotlight_ls_cd4_{sample_id}.rds")))
+} else {
+  spotlight_ls <- readRDS(file = here::here(glue::glue("{decon_32}/{robj_dir}/spotlight_ls_cd4_{sample_id}.rds")))
+}
+
+```
+
+3rd Check Topic profiles
+```{r fig.height=8, fig.width=8}
+nmf_mod_ls <- spotlight_ls[[1]]
+nmf_mod <- nmf_mod_ls[[1]]
+
+h <- NMF::coef(nmf_mod)
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod_ls[[2]])
+
+topic_profile_plts[[2]] + theme(axis.text.x = element_text(angle = 90), 
+                                axis.text = element_text(size = 12))
+```
+
+
+
+## Visualize deconvolution results
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 1 % of the spot
+decon_mtrx[decon_mtrx < 0.07] <- 0
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+metadata <- cbind(sp_obj@meta.data, decon_mtrx)
+sp_obj@meta.data <- metadata
+```
+
+Look at cells topic profile
+```{r}
+basis_spotlight <- data.frame(NMF::basis(spotlight_ls[[1]][[1]]))
+
+colnames(basis_spotlight) <- unique(stringr::str_wrap(train_labs, width = 30))
+
+basis_spotlight[basis_spotlight < 0.0000001] <- 0
+
+DT::datatable(basis_spotlight)
+```
+
+#### Cell type location
+Look at the location of each cell type in each slice separately
+```{r fig.height=25, fig.width=25}
+# Iterate over cell types
+ct <- colnames(decon_mtrx)
+ct_plt_ls <- lapply(ct, function(i) {
+  tmp_plt <- Seurat::SpatialFeaturePlot(object = sp_obj,
+                                        features = i,
+                                        alpha = c(0, 1)) +
+    scale_fill_gradientn(
+      colors = heat.colors(10, rev = TRUE)) +
+    scale_alpha(range = c(0, 1)) +
+    labs(title = stringr::str_wrap(string = i,
+                                   width = 25),
+         fill = "") +
+    theme(plot.title = element_text(hjust = 0.5,
+                                    size = 20,
+                                    face = "bold"))
+  
+  if (sum(sp_obj@meta.data[, i]) == 0) {
+    tmp_plt <- suppressMessages(tmp_plt + scale_alpha(range = c(0,0)))
+  }
+  
+  return(tmp_plt)
+})
+
+plt_arr <- cowplot::plot_grid(
+  plotlist = ct_plt_ls,
+  axis = "trbl",
+  align = "hv",
+  nrow = 4,
+  ncol = 3)
+
+plt_arr
+
+cowplot::save_plot(
+  filename = here::here(glue::glue("{decon_32}/{plt_dir}/
+                                   cell_type_location_cd4_{donor_id}.pdf")),
+  plot = plt_arr,
+  base_height = 25,
+  base_width = 18)
+```
+
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

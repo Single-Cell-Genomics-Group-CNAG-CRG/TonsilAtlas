@@ -1,0 +1,136 @@
+---
+title: 'Doublet Detection with Scrublet (Multiome)'
+author: "Ramon Massoni-Badosa"
+date: "2/23/2021"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we summarize the doublet detection results obtained after running [Scrublet](https://www.sciencedirect.com/science/article/pii/S2405471218304745) for the [multiome](https://www.10xgenomics.com/products/single-cell-multiome-atac-plus-gene-expression) data.
+
+Importantly, we observed that cells from the donor BCLL-2-T had a lower quality (less total counts and detected features). In addition, BCLL-2-T is the only old adult in the cohort, which we know that displayed a markedly different cell type composition. To balance these two points, we ran scrublet for BCLL-2-T and non-BCLL-2-T cells for both RNA and ATAC.
+
+
+# Histograms
+
+We start by plotting the doublet score histograms for observed transcriptomes and simulated doublets. We should visualize a bimodal distribution in the simulated doublets that allows to set an accurate theshold:
+
+
+## BCLL-2-T (RNA)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/histograms/scrublet_doublet_prediction_histograms_rna_sparse_matrix_with_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## BCLL-2-T (ATAC)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/histograms/scrublet_doublet_prediction_histograms_atac_sparse_matrix_with_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## non-BCLL-2-T (RNA)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/histograms/scrublet_doublet_prediction_histograms_rna_sparse_matrix_without_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## non-BCLL-2-T (ATAC)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/histograms/scrublet_doublet_prediction_histograms_atac_sparse_matrix_without_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+# UMAPs
+
+As described in the best practices "Visualize the doublet predictions in a 2-D embedding (e.g., UMAP or t-SNE). Predicted doublets should mostly co-localize (possibly in multiple clusters). If they do not, you may need to adjust the doublet score threshold, or change the pre-processing parameters to better resolve the cell states present in your data".
+
+## BCLL-2-T (RNA)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/umaps/scrublet_doublet_prediction_umaps_rna_sparse_matrix_with_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## BCLL-2-T (ATAC)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/umaps/scrublet_doublet_prediction_umaps_atac_sparse_matrix_with_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## non-BCLL-2-T (RNA)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/umaps/scrublet_doublet_prediction_umaps_rna_sparse_matrix_without_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+## non-BCLL-2-T (ATAC)
+`r path_to_image <- paste(path_to_knit, "/multiome/2-QC/3-doublet_detection/tmp/umaps/scrublet_doublet_prediction_umaps_atac_sparse_matrix_without_BCLL_2.png", sep = ""); sprintf("![](%s)", path_to_image)`
+
+
+# Visualize correlation RNA vs ATAC
+
+Since we have gene expression (RNA) and chromatin accessibility (ATAC) data for each cell, we could run scrublet twice and obtain two predictions and doublet scores for each cell. Here we visualize the correlation between both modalities
+
+
+## Load data
+
+```{r}
+library(tidyverse)
+
+path_to_scrublet_dfs <- here::here("multiome/results/tables/scrublet/")
+files_to_load <- list.files(path_to_scrublet_dfs)
+files_to_load <- str_c(path_to_scrublet_dfs, files_to_load, sep = "")
+all_data <- purrr::map(files_to_load, read_csv)
+names(all_data) <- str_remove(list.files(path_to_scrublet_dfs), ".csv")
+```
+
+
+## Plot
+
+## BCLL-2-T
+
+```{r}
+bcll2_scrublet_df <- data.frame(
+  doublet_score_rna = all_data$scrublet_doublet_prediction_rna_sparse_matrix_with_BCLL_2$scrublet_doublet_scores,
+  doublet_score_atac = all_data$scrublet_doublet_prediction_atac_sparse_matrix_with_BCLL_2$scrublet_doublet_scores
+)
+bcll2_scrublet_gg <- bcll2_scrublet_df %>%
+  ggplot(aes(doublet_score_rna, doublet_score_atac)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = "BCLL-2-T", x = "Doublet Score (RNA)", y = "Doublet Score (ATAC)") +
+    theme_bw() +
+    theme(
+      plot.title = element_text(size = 14, color = "black", hjust = 0.5),
+      axis.title = element_text(size = 13, color = "black"),
+      axis.text = element_text(size = 11, color = "black")
+    )
+bcll2_scrublet_gg
+```
+
+
+## non-BCLL-2-T
+
+```{r}
+non_bcll2_scrublet_df <- data.frame(
+  doublet_score_rna = all_data$scrublet_doublet_prediction_rna_sparse_matrix_without_BCLL_2$scrublet_doublet_scores,
+  doublet_score_atac = all_data$scrublet_doublet_prediction_atac_sparse_matrix_without_BCLL_2$scrublet_doublet_scores
+)
+non_bcll2_scrublet_gg <- non_bcll2_scrublet_df %>%
+  ggplot(aes(doublet_score_rna, doublet_score_atac)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    labs(title = "non-BCLL-2-T", x = "Doublet Score (RNA)", y = "Doublet Score (ATAC)") +
+    theme_bw() +
+    theme(
+      plot.title = element_text(size = 14, color = "black", hjust = 0.5),
+      axis.title = element_text(size = 13, color = "black"),
+      axis.text = element_text(size = 11, color = "black")
+    )
+non_bcll2_scrublet_gg
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

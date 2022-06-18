@@ -1,0 +1,221 @@
+---
+title: "Filter out poor-quality cells (scATAC-seq)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+TO IMPROVE:
+
+- Quantify fractions of fragments in peaks
+- Correlate TSS enrichment and total counts, as shown in [this video](https://www.youtube.com/watch?v=r39Ux0vKDgU) (timestamp: 13:48).
+# Introduction
+
+Here, we will filter out poor-quality cells using scATAC-seq-based metrics.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+# Paths
+path_to_data <- here::here("MCL/1-cellranger_mapping/projects/experiment_1/jobs")
+paths_to_files <- list.files(
+  path_to_data,
+  pattern = "filtered_feature_bc_matrix.h5",
+  recursive = TRUE,
+  full.names = TRUE
+)
+paths_to_fragments <- list.files(
+  path_to_data,
+  pattern = "atac_fragments.tsv.gz$",
+  recursive = TRUE,
+  full.names = TRUE
+)
+gem_ids <- list.dirs(path_to_data, full.names = FALSE, recursive = FALSE)
+names(paths_to_files) <- gem_ids
+names(paths_to_fragments) <- gem_ids
+path_to_sequencing_metadata <- here::here("MCL/1-cellranger_mapping/data/sequencing_metadata.csv")
+path_to_save_102 <- here::here("MCL/results/R_objects/1.seurat_objects_atac_filtered_102.rds")
+path_to_save_413 <- here::here("MCL/results/R_objects/1.seurat_objects_atac_filtered_413.rds")
+
+
+# Thresholds
+min_n_counts_atac <- 500
+max_n_counts_atac <- 250000
+max_nucleosome_signal <- 1.5
+min_tss_enrichment <- 1
+```
+
+
+## Gene annotation
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+
+# Load data and create Seurat object
+
+Signac uses information from three related input files (created using CellRanger ARC):
+
+1. Count matrix in h5 format 
+2. ATAC Fragment file
+3. ATAC Fragment file index
+
+```{r}
+# Read data
+counts <- purrr::map(paths_to_files, Seurat::Read10X_h5)
+
+
+# Create a Seurat object containing the scATAC adata
+seurat_list <- purrr::map2(counts, gem_ids, function(l, x) {
+  chrom_assay <- Signac::CreateChromatinAssay(
+    counts = l$Peaks,
+    sep = c(":", "-"),
+    genome = "hg38",
+    fragments = paths_to_fragments[x],
+    annotation = annotation
+  )
+  seurat_obj <- CreateSeuratObject(counts = chrom_assay, assay = "ATAC")
+  seurat_obj$gem_id <- x
+  seurat_obj
+})
+names(seurat_list) <- gem_ids
+rm(counts)
+
+
+# Read sequencing metadata
+sequencing_metadata <- read_csv(path_to_sequencing_metadata)
+DT::datatable(sequencing_metadata, options = list(scrollX = TRUE))
+
+
+# Include metadata
+sequencing_metadata <- sequencing_metadata[sequencing_metadata$type == "RNA", ]
+seurat_list <- purrr::map(seurat_list, function(seurat_obj) {
+  new_metadata <- left_join(
+    seurat_obj@meta.data,
+    sequencing_metadata,
+    by = "gem_id"
+  )
+  rownames(new_metadata) <- colnames(seurat_obj)
+  seurat_obj@meta.data <- new_metadata
+  seurat_obj
+})
+```
+
+
+# Calculate basic QC metrics
+
+```{r}
+seurat_list <- purrr::map(seurat_list, function(seurat_obj) {
+  seurat_obj <- NucleosomeSignal(seurat_obj)
+  seurat_obj <- TSSEnrichment(seurat_obj, fast = TRUE)
+  seurat_obj
+})
+```
+
+
+# Visualize
+
+```{r}
+# RNA
+qc_dfs <- purrr::map(seurat_list, function(seurat_obj) {
+  df <- seurat_obj@meta.data
+  df
+})
+qc_df <- bind_rows(qc_dfs)
+qc_metrics_atac <- c("nCount_ATAC", "nFeature_ATAC", "nucleosome_signal",
+                     "TSS.enrichment")
+qc_ggs_atac <- purrr::map(qc_metrics_atac, function(x) {
+  p <- ggplot(qc_df, aes_string("library_name", x, fill = "donor_id")) +
+    geom_violin() +
+    xlab("") +
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+  p
+})
+qc_ggs_atac[[1]] <- qc_ggs_atac[[1]] +
+  scale_y_log10() +
+  geom_hline(yintercept = min_n_counts_atac, color = "red", linetype = "dashed") +
+  geom_hline(yintercept = max_n_counts_atac, color = "red", linetype = "dashed")
+qc_ggs_atac[[2]] <- qc_ggs_atac[[2]] + scale_y_log10()
+qc_ggs_atac[[3]] <- qc_ggs_atac[[3]] +
+  geom_hline(yintercept = max_nucleosome_signal, color = "red", linetype = "dashed")
+qc_ggs_atac[[4]] <- qc_ggs_atac[[4]] +
+  geom_hline(yintercept = min_tss_enrichment, color = "red", linetype = "dashed")
+
+ggarrange(plotlist = qc_ggs_atac, ncol = 2, nrow = 2, common.legend = TRUE)
+```
+
+Let us visualize the fragment length periodicity for all the cells:
+
+```{r}
+purrr::map(seurat_list, FragmentHistogram)
+```
+
+
+
+# Subset
+
+```{r}
+seurat_list
+seurat_list <- purrr::map(seurat_list, function(seurat_obj) {
+  seurat_obj <- subset(
+  x = seurat_obj,
+    subset = nCount_ATAC < max_n_counts_atac &
+      nCount_ATAC > min_n_counts_atac &
+      nucleosome_signal < max_nucleosome_signal &
+      TSS.enrichment > min_tss_enrichment
+  )
+  seurat_obj
+})
+seurat_list
+```
+
+
+# Save
+
+```{r}
+saveRDS(
+  seurat_list[c("kpi1zxjo_542l3n1f", "poba5cxi_qte0l4uh", "rvnas5hf_wfkqdmhy")],
+  path_to_save_102
+)
+saveRDS(
+  seurat_list[c("jt18zlyw_fy97xnbm", "wsz3j4g1_27jak0zo", "ywt2m1v6_16u4fqig")],
+  path_to_save_413
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

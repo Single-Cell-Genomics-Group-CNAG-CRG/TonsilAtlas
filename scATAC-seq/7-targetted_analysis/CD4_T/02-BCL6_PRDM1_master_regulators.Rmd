@@ -1,0 +1,475 @@
+---
+title: "CD4-T II: PRDM1 & BCL6 as a master regulators"
+author: "Paula Soler-Vila & Juan Nieto"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+Multiples factors play an important function during the naive CD4-T cell differentiation where Blimp1 (encoded by Prdm1) and Bcl6 are the masters. In this notebook, we are going to characterize the accessibility pattern of these regulators.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(GenomicRanges)
+library(pheatmap)
+library(JASPAR2020)
+library(TFBSTools)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(writexl)
+library(plyr)
+library(stringr)
+library(rio)
+library(biomaRt)
+```
+
+## Parameters
+```{r parameters}
+cell_type <- "CD4_T"
+
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+path_to_RNA <- paste0(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_subseted_annotated_level_5.rds",
+  sep = ""
+)
+
+upstream <- 2000
+
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0",
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA",
+                    "#FBE426", "#16FF32",  "black",  "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3", 
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", 
+                    "#822E1C", "coral2",  "#1CFFCE", "#1CBE4F", 
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B", 
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", 
+                    "#FBE426", "Brown")
+```
+
+## Functions
+
+```{r functions}
+plot_dim <- function(seurat, group){
+  DimPlot(seurat, 
+  group.by = group,
+  cols = color_palette,
+  pt.size = 0.1,raster=FALSE)
+}
+
+mat_heatmap <- function(seurat, features, group,
+                        cutree_ncols,cutree_nrows){
+  
+my_sample_col <- data.frame(Group = rep(c("Naive", "Central Memory",
+                                          "Central Memory","Non-Tfh",
+                                          "Non-Tfh","Non-Tfh",
+                                          "Non-Tfh","Non-Tfh",
+                                          "Non-Tfh","Tfh",
+                                          "Tfh","Tfh",
+                                          "Tfh","Tfh")))
+
+rownames(my_sample_col) = c("Naive", "CM Pre-non-Tfh","CM PreTfh",
+                            "T-Trans-Mem","T-Eff-Mem","T-helper",
+                            "Eff-Tregs","non-GC-Tf-regs","GC-Tf-regs" ,
+                            "B border_Tfh T", "Tfh-LZ-GC",
+                            "GC-Tfh-SAP","GC-Tfh-0X40","Tfh-Mem")
+
+annoCol<-list(Group=c("Naive"="grey", "Central Memory"="black", 
+                      "Non-Tfh"="red", "Tfh"="yellow"))
+
+avgexpr_mat <- AverageExpression(
+features = features,
+seurat,
+assays = "peaks_level_5",
+return.seurat = F,
+group.by = group,
+slot = "data")
+
+p1 <- pheatmap(avgexpr_mat$peaks_level_5[,c(rownames(my_sample_col))], 
+        scale = "row",
+        angle_col = 45,
+        show_rownames=T,
+        annotation_col = my_sample_col,
+        annotation_colors = annoCol,
+        border_color = "white",
+        cluster_rows = T,
+        cluster_cols = F,
+        fontsize_col = 10,
+        clustering_distance_rows = "euclidean",
+        clustering_method = "ward.D2",
+        cutree_rows = cutree_nrows) 
+
+return(p1)}
+```
+
+
+# Load Gene reference data
+```{r}
+ensembl <- useMart(biomart = "ensembl",dataset="hsapiens_gene_ensembl")
+Datasets <- listDatasets(ensembl)
+Datasets[grep("hsapiens_gene_ensembl",Datasets$dataset),]
+
+hg38.gene.annot <- getBM(attributes = c("ensembl_gene_id",
+                                        "entrezgene_id",
+                                        "hgnc_symbol",
+                                        "chromosome_name",
+                                        "start_position",
+                                        "end_position",
+                                        "strand","band",
+                                        "gene_biotype"),
+                         mart = ensembl)
+
+## Arrange also strand info.
+hg38.gene.annot$chromosome_name <- paste0("chr",hg38.gene.annot$chromosome_name)
+hg38.gene.annot$strand[which(hg38.gene.annot$strand==1)] <- "+"
+hg38.gene.annot$strand[which(hg38.gene.annot$strand=="-1")] <- "-"
+
+##polish gene annotation
+hg38.gene.annot$hgnc_symbol[which(hg38.gene.annot$hgnc_symbol=="")] <- NA
+
+##make GRange object
+hg38.gene.annot.GR <- GRanges(seqnames = hg38.gene.annot$chromosome_name,
+                              ranges = IRanges(hg38.gene.annot$start_position,
+                                               end = hg38.gene.annot$end_position),
+                              strand = hg38.gene.annot$strand)
+
+mcols(hg38.gene.annot.GR) <- hg38.gene.annot[,grep("^chromosome_name$|^start_position$|^end_position|^strand$$",
+                                                   colnames(hg38.gene.annot),value = T,invert = T)]
+hg38.gene.annot.GR <- sort(sortSeqlevels(hg38.gene.annot.GR))
+
+## Extend 2,000bps upstream of promoters
+hg38.gene.annot.2000.GR <- punion(promoters(x = hg38.gene.annot.GR,
+                                            upstream = 2000,
+                                            downstream = 0),
+                                  hg38.gene.annot.GR)
+
+hg38.gene.annot.2000.GR$gene_name <- hg38.gene.annot.GR$hgnc_symbol
+```
+
+## CD4-T cells data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat_peaks <- seurat@assays$peaks_level_5@ranges
+seurat
+
+plot_dim(seurat, group = "annotation_paper") 
+
+seurat_RNA <- readRDS(path_to_RNA)
+seurat_RNA
+
+plot_dim(seurat_RNA, group = "annotation_paper") 
+```
+
+### Grouping the cells in Non-Tfh & Tfh groups
+At low level of resolution, we want to detect the main epigenomic changes between Non-Tfh vs Tfh. For this reason, we decide to group the cells in 4 clusters: Non-Tfh, Tfh, Central Memory and Naive.
+
+```{r}
+seurat@meta.data <- seurat@meta.data %>% mutate(Group =
+  case_when(annotation_paper == "Naive" ~ "Naive",
+    annotation_paper == "CM Pre-non-Tfh" ~ "Central Memory",
+    annotation_paper == "CM PreTfh" ~ "Central Memory",
+    annotation_paper == "T-Trans-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-Eff-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-helper" ~ "Non-Tfh",
+    annotation_paper == "Tfh T:B border" ~ "Tfh",
+    annotation_paper == "Tfh-LZ-GC" ~ "Tfh",
+    annotation_paper == "GC-Tfh-SAP" ~ "Tfh",
+    annotation_paper == "GC-Tfh-0X40" ~ "Tfh",
+    annotation_paper == "Tfh-Mem" ~ "Tfh",
+    annotation_paper == "Memory T cells" ~ "Non-Tfh",
+    annotation_paper == "Eff-Tregs" ~ "Non-Tfh",
+    annotation_paper == "non-GC-Tf-regs" ~ "Non-Tfh",
+    annotation_paper == "GC-Tf-regs" ~ "Non-Tfh"))
+
+plot_dim(seurat, group = "Group") 
+
+seurat_RNA@meta.data <- seurat_RNA@meta.data %>% mutate(Group =
+  case_when(annotation_paper == "Naive" ~ "Naive",
+    annotation_paper == "CM Pre-non-Tfh" ~ "Central Memory",
+    annotation_paper == "CM PreTfh" ~ "Central Memory",
+    annotation_paper == "T-Trans-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-Eff-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-helper" ~ "Non-Tfh",
+    annotation_paper == "Tfh T:B border" ~ "Tfh",
+    annotation_paper == "Tfh-LZ-GC" ~ "Tfh",
+    annotation_paper == "GC-Tfh-SAP" ~ "Tfh",
+    annotation_paper == "GC-Tfh-0X40" ~ "Tfh",
+    annotation_paper == "Tfh-Mem" ~ "Tfh",
+    annotation_paper == "Memory T cells" ~ "Non-Tfh",
+    annotation_paper == "Eff-Tregs" ~ "Non-Tfh",
+    annotation_paper == "non-GC-Tf-regs" ~ "Non-Tfh",
+    annotation_paper == "GC-Tf-regs" ~ "Non-Tfh"))
+
+plot_dim(seurat_RNA, group = "Group") 
+```
+
+
+# Finding differentially expressed genes (DE)
+The main goal of this analisys is to extract the differential expressed genes between the groups previously defined.
+
+```{r}
+Idents(seurat_RNA) <- "Group"
+
+#DE <- FindAllMarkers(
+ # object = seurat_RNA,
+  #logfc.threshold = 0.25,
+  #test.use = "wilcox")
+
+#output <- split(DE, DE$cluster)
+path_to_save_DE <- here::here("scATAC-seq/results/files/CD4_T/DE_4_groups.xlsx")
+#write_xlsx(output, path_to_save_DE)
+
+#DT::datatable(DE)
+```
+
+## Manual selection of genes candidates.
+```{r}
+DE <- import_list(path_to_save_DE, setclass = "tbl", rbind = TRUE)
+
+colnames(DE) <- c("p_val", "avg_log2FC", 
+                  "pct.1" , "pct.2",  "p_val_adj",
+                  "cluster", "gene_name", "_file")
+```
+
+```{r}
+Tfh_genes <- c("TOX2", "PDCD1","CXCL13","TOX","BCL6",
+              "GNG4","IL21","SH2D1A","CD200","CXCR5","POU2AF1")
+
+Naive_genes <- c("BACH2","LEF1","CCR7","NOSIP","KLF2","SELL")
+
+Central_memory_genes <- c("ANK3","IL7R","TXNIP","ANXA1",
+                          "ZBTB16","GPR183","TIGIT","IL21")
+
+Non_Tfh_genes <- c("LAG3","RORA","IKZF2","KLRB1",
+                   "IL2RA","PRDM1","IL1R1","CTLA4",
+                   "FOXP3","CCR6","MAF","CCL20","IL1R2") 
+
+target_genes <- c(Naive_genes,Central_memory_genes,
+                  Tfh_genes,Non_Tfh_genes)
+```
+
+# Study the chromatin dynamics in the DE genes
+
+## Extraction of the DE genes coordinates
+```{r}
+expr_mat <- AverageExpression(
+features = target_genes,
+seurat_RNA,
+return.seurat = F,
+group.by = "Group",
+slot = "data")
+
+pheatmap(expr_mat$RNA[target_genes,],
+   scale = "row",
+   annotation_names_row = F,
+   border_color = "white",
+   cluster_rows = F,
+   cluster_cols = T,
+   fontsize_row = 10,
+   clustering_distance_rows = "euclidean",
+   clustering_distance_cols = "euclidean", 
+   clustering_method = "ward.D2") 
+
+#write.table(unique(expr_mat$RNA[target_genes,]), 
+ #           quote = F, 
+  #          here::here("scATAC-seq/results/plots/CD4-T/files_plots/matrix_RNA_genes.tsv"))
+```  
+
+# Study the chromatin dynamics in the DE genes
+
+## Extraction of the DE genes coordinates
+```{r}
+hg38.gene.annot_targetted <- hg38.gene.annot.2000.GR[which(hg38.gene.annot.2000.GR$gene_name %in% target_genes),]
+
+## Overlapping of the DE genes coordinates with the total number of peaks detected.
+gr1 <- seurat_peaks
+gr2 <- hg38.gene.annot_targetted
+m <- findOverlaps(gr1, gr2)
+gr1.matched <- gr1[queryHits(m)]
+# Add the metadata from gr2
+mcols(gr1.matched) <- cbind.data.frame(
+    mcols(gr1.matched),
+    mcols(gr2[subjectHits(m)]));
+
+gr1.matched
+gr1.matched$peaks <- paste0(seqnames(gr1.matched),"-",
+                             start(gr1.matched),"-",
+                             end(gr1.matched))
+
+gr1.matched_df <- as.data.frame(gr1.matched)
+
+my_sample_col <- data.frame(Gene = c(gr1.matched$gene_name))
+rownames(my_sample_col) = unique(gr1.matched$peaks)
+
+avgexpr_mat <- AverageExpression(
+features = unique(gr1.matched$peaks),
+seurat,
+assays = "peaks_level_5",
+return.seurat = F,
+group.by = "Group",
+slot = "data")
+
+avgexpr_df <- as.data.frame(avgexpr_mat$peaks_level_5)
+avgexpr_df$peaks <- row.names(avgexpr_df)
+
+DA_DE_merge <- merge(avgexpr_df,
+                       gr1.matched_df[c("peaks","gene_name")],
+                       by=c("peaks"))  
+
+DA_DE_merge_melt <- melt(DA_DE_merge)
+
+# Computing the mean accessibility/expression per gene 
+mean_accessibility <- tapply(DA_DE_merge_melt$value,
+                               list(DA_DE_merge_melt$gene_name, DA_DE_merge_melt$variable),
+                                    mean)
+
+
+out <- pheatmap(mean_accessibility[target_genes,],
+         scale = "row",
+         border_color = "white",
+         cluster_rows = F,
+         cluster_cols = T,
+         fontsize_row = 10,
+         clustering_distance_cols = "euclidean", 
+         clustering_method = "ward.D2")
+
+
+#write.table(unique(mean_accessibility[target_genes,]), 
+ #           quote = F, 
+  #          here::here("scATAC-seq/results/plots/CD4-T/files_plots/matrix_ATAC_genes.tsv"))
+    
+DA_DE_merge <- merge(melt(mean_accessibility),
+                     melt(expr_mat$RNA),
+                           by=c("Var1","Var2"))   
+
+colnames(DA_DE_merge) <- c("Gene" ,"Clusters","Accesibility","Expresion")
+DA_DE_merge.melt <- melt(DA_DE_merge)
+
+# Filtering conditions
+df_Naive  <- filter(
+  DA_DE_merge.melt,Clusters == "Naive" & Gene %in% Naive_genes)
+df_CM  <- filter(
+  DA_DE_merge.melt,Clusters == "Central Memory" & Gene %in% Central_memory_genes)
+df_Tfh  <- filter(
+  DA_DE_merge.melt,Clusters == "Tfh" & Gene %in% Tfh_genes)
+df_Non_Tfn  <- filter(
+  DA_DE_merge.melt,Clusters == "Non-Tfh" & Gene %in% Non_Tfh_genes)
+
+selection_df <- rbind(df_Naive,df_CM,df_Tfh,df_Non_Tfn)
+selection_df$value <- scale(selection_df$value)
+  
+ ggdotchart(selection_df, 
+            x="Gene", 
+            y="value", 
+            add = "segments") +
+        coord_flip() + facet_grid(vars(Clusters), vars(variable), scales = "free_y")
+```       
+
+# Master regulators: BCL6 and PRDM1
+
+## BCL6
+
+```{r}
+bcl6 <- hg38.gene.annot.2000.GR[which(hg38.gene.annot.2000.GR$gene_name %in% "BCL6"),]
+bcl6_gr <- makeGRangesFromDataFrame(bcl6)
+
+bcl6_plot <- CoveragePlot(
+  object = seurat,
+  region = bcl6_gr)
+
+bcl6_plot
+```
+
+
+```{r}
+overlapping_bcl6 <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, 
+                                                        bcl6_gr)),]
+
+features <- paste0(seqnames(overlapping_bcl6),"-",
+                   start(overlapping_bcl6),"-",
+                   end(overlapping_bcl6))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/bcl6_heatmaps.pdf"), 
+ #   width = 10, 
+  #  height = 4)
+
+print(mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "annotation_paper",
+            cutree_ncols = 3,cutree_nrows = 1))
+
+#dev.off()
+```
+
+
+## PRDM1
+```{r}
+prdm1 <- hg38.gene.annot.2000.GR[which(hg38.gene.annot.2000.GR$gene_name %in% "PRDM1"),]
+prdm1_gr <- makeGRangesFromDataFrame(prdm1)
+
+prdm1_plot <-CoveragePlot(
+  object = seurat,
+  region = prdm1_gr)
+
+prdm1_plot
+```
+
+```{r}
+overlapping_prdm1 <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, prdm1_gr)),]
+
+features <- paste0(seqnames(overlapping_prdm1),"-",
+                   start(overlapping_prdm1),"-",
+                   end(overlapping_prdm1))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/prdm1_heatmaps.pdf"), 
+ #   width = 10, 
+  #  height = 4)
+
+print(mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "annotation_paper",
+            cutree_ncols = 3,cutree_nrows = 1))
+
+#dev.off()
+```
+
+
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,366 @@
+---
+title: "CD4 T: Level 5"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will work on the level 5 of the CD4 T cell, which entails:
+
+* Removal of 3 clusters: activated CD4 T cells, metabolic/poor-quality cells, and mitochondrial+ T cells.
+* Subcluster Follicular Th CXCL13+CBLB+ into 2 clusters
+* Recalculate the UMAP.
+* Subset the Th17, IL2RA+FOXP3+ Treg and Memory T to further stratify them (3P only).
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/level_4/CD4_T/CD4_T_integrated_level_4.rds")
+# path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/CD4_T/CD4_T_integrated_level_4.rds"
+path_to_save <- here::here("scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_subseted_annotated_level_5.rds")
+# path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_subseted_annotated_level_5.rds"
+path_to_save_th <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_Th_level_5_annotated.rds"
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+# source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+# source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/SLOcatoR_functions.R")
+source(here::here("scRNA-seq/bin/SLOcatoR_functions.R"))
+
+
+# Additional function
+plot_subcluster <- function(seurat_obj, pattern) {
+  p <- seurat_obj@reductions$umap@cell.embeddings %>%
+    as.data.frame() %>%
+    mutate(cluster = seurat_obj$annotation_level_3) %>%
+    filter(str_detect(cluster, pattern)) %>%
+    ggplot(aes(UMAP_1, UMAP_2, color = cluster)) +
+      geom_point(size = 0.1) +
+      theme_classic()
+  p
+}
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+```
+
+
+# Subcluster
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "Follicular Th CXCL13+CBLB+",
+  subcluster.name = "annotation_level_5",
+  resolution = 0.1,
+  graph.name = "RNA_snn"
+)
+DimPlot(seurat, group.by = "annotation_level_5", cols = color_palette)
+```
+
+## Markers
+
+```{r}
+Idents(seurat) <- "annotation_level_5"
+clusters_interest <- seurat$annotation_level_5 %>%
+  unique() %>%
+  str_subset("^Follicular Th CXCL13") %>%
+  sort()
+markers <- purrr::map(clusters_interest, function(x) {
+  group_1 <- clusters_interest[which(clusters_interest == x)]
+  group_2 <- clusters_interest[which(clusters_interest != x)]
+  print(group_1)
+  print(group_2)
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers) <- clusters_interest
+# path_save_markers <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/markers_Tfh_CXCL13_new.xlsx"
+path_save_markers <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/markers_Tfh_CXCL13_new.xlsx")
+openxlsx::write.xlsx(x = markers, file = path_save_markers, overwrite = TRUE)
+```
+
+
+# Subset
+
+```{r}
+clusters_to_exclude <- c("activated CD4 T", "Mitochondrial+ T cells",
+                         "metabolic/poor-quality")
+mask <- !(Idents(seurat) %in% clusters_to_exclude)
+table(mask)
+selected_cells <- colnames(seurat)[mask]
+seurat <- subset(seurat, cells = selected_cells)
+```
+
+
+Let us exclude all the cells from Royal London (discussed elsewhere):
+
+```{r}
+seurat <- subset(seurat, hospital != "Royal London")
+```
+
+
+# Reprocess
+
+```{r}
+hvg <- find_assay_specific_features(seurat)
+seurat <- integrate_assays(
+  seurat,
+  assay_specific = TRUE,
+  shared_hvg = hvg,
+  assay_var = "assay",
+  n_dim = 30
+)
+```
+
+
+# Recompute UMAP
+
+```{r}
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 1:30)
+DimPlot(seurat, cols = color_palette)
+```
+
+
+# Subset Th
+
+```{r}
+clusters_interest_2 <- "Th17"
+th <- subset(seurat, idents = clusters_interest_2)
+th <- subset(th, assay == "3P")
+th <- th %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "donor_id", reduction = "pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+markers_interest <- c("IFNG", "GATA3", "IL26", "IL21", "CCL3", "IL4")
+feat_plots <- purrr::map(markers_interest, function(x) {
+  p <- FeaturePlot(th, features = x) +
+    scale_color_viridis_c(option = "magma")
+  p
+})
+feat_plots
+DimPlot(th)
+
+
+# Cluster
+th <- FindNeighbors(th, dims = 1:30, reduction = "harmony")
+th <- FindClusters(th, resolution = 0.65)
+DimPlot(th)
+
+
+# Markers
+markers_th <- FindAllMarkers(th, only.pos = TRUE, logfc.threshold = 0.5)
+```
+
+
+# Annotation (as of 5th Nov, 2021)
+
+All CD4 T cells:
+
+```{r}
+seurat$annotation_paper <- case_when(
+  seurat$annotation_level_5 == "Naive" ~ "Naive",
+  seurat$annotation_level_5 == "Central Mem PASK+" ~ "CM Pre-non-Tfh",
+  seurat$annotation_level_5 == "Central Mem PASK-" ~ "CM PreTfh",
+  seurat$annotation_level_5 == "Memory T cells" ~ "T-Trans-Mem",
+  seurat$annotation_level_5 == "Follicular Th CXCL13+CBLB+_1" ~ "T-Eff-Mem",
+  seurat$annotation_level_5 == "Th17" ~ "T-helper",
+  seurat$annotation_level_5 == "Follicular Th CXCL13+CBLB+_2" ~ "Tfh T:B border",
+  seurat$annotation_level_5 == "Follicular Th CXCL13+CBLB+_0" ~ "Tfh-LZ-GC",
+  seurat$annotation_level_5 == "Follicular Th TOX2+" ~ "Tfh-LZ-GC",
+  seurat$annotation_level_5 == "Follicular Th CXCR5+" ~ "GC-Tfh-SAP",
+  seurat$annotation_level_5 == "CD200+TOX+" ~ "GC-Tfh-0X40",
+  seurat$annotation_level_5 == "CD4 Non-Tfh KLRB1+ " ~ "Tfh-Mem",
+  seurat$annotation_level_5 == "IL2RA+FOXP3+ Treg" ~ "Eff-Tregs",
+  seurat$annotation_level_5 == "Treg IKZF2+HPGD+" ~ "non-GC-Tf-regs",
+  seurat$annotation_level_5 == "naive Treg IKZF2+" ~ "GC-Tf-regs",
+)
+ordered_levels <- c("Naive", "CM Pre-non-Tfh", "CM PreTfh", "T-Trans-Mem",
+                    "T-Eff-Mem", "T-helper", "Tfh T:B border", "Tfh-LZ-GC",
+                    "GC-Tfh-SAP", "GC-Tfh-0X40", "Tfh-Mem", "Eff-Tregs", 
+                    "non-GC-Tf-regs", "GC-Tf-regs")
+seurat$annotation_paper <- factor(
+  seurat$annotation_paper,
+  levels = ordered_levels
+)
+Idents(seurat) <- "annotation_paper"
+```
+
+
+T helper subsets: since we found a cluster of Th22 cells, we will recluster to find it.
+
+```{r}
+th <- FindSubCluster(
+  th,
+  cluster = "3",
+  graph.name = "RNA_snn",
+  subcluster.name = "Th22", 
+  resolution = 0.25
+)
+th$annotation_paper <- case_when(
+  th$Th22 == "0" ~ "Th2",
+  th$Th22 == "1" ~ "Th0",
+  th$Th22 == "2" ~ "Th17",
+  th$Th22 == "3_0" ~ "Th1",
+  th$Th22 == "3_1" ~ "Th22",
+  th$Th22 == "4" ~ "Th1/Th17"
+)
+ordered_levels_th <- c("Th0", "Th1", "Th2", "Th17", "Th1/Th17", "Th22")
+th$annotation_paper <- factor(
+  th$annotation_paper,
+  levels = ordered_levels_th
+)
+Idents(th) <- "annotation_paper"
+DimPlot(th, cols = color_palette)
+```
+
+Find all markers
+
+```{r}
+# All CD4 T cells
+markers_all_cd4 <- FindAllMarkers(seurat, only.pos = TRUE, logfc.threshold = 0.6)
+markers_all_cd4 <- markers_all_cd4 %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), group_by = TRUE) %>%
+  ungroup()
+markers_all_dfs <- purrr::map(unique(markers_all_cd4$cluster), function(x) {
+  df <- markers_all_cd4[markers_all_cd4$cluster == x, ]
+  df <- df[, c(7, 1:6)]
+  df
+})
+names(markers_all_dfs) <- unique(markers_all_cd4$cluster)
+markers_all_dfs <- markers_all_dfs[levels(seurat$annotation_paper)]
+
+
+# Th cells
+markers_th <- FindAllMarkers(th, only.pos = TRUE, logfc.threshold = 0.45)
+markers_th <- markers_th %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), group_by = TRUE) %>%
+  ungroup()
+markers_th_dfs <- purrr::map(unique(markers_th$cluster), function(x) {
+  df <- markers_th[markers_th$cluster == x, ]
+  df <- df[, c(7, 1:6)]
+  df
+})
+names(markers_th_dfs) <- unique(markers_th$cluster)
+markers_th_dfs <- markers_th_dfs[levels(th$annotation_paper)]
+names(markers_th_dfs)[names(markers_th_dfs) == "Th1/Th17"] <- "Th1_Th17"
+```
+
+
+
+# Save
+
+```{r}
+# Save Seurat objects
+saveRDS(seurat, path_to_save)
+saveRDS(th, path_to_save_th)
+
+
+# Save markers
+# path_save_markers <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_markers_annotated_level_5.xlsx"
+names(markers_all_dfs)[names(markers_all_dfs) == "Tfh T:B border"] <- "Tfh T-B border"
+path_save_markers <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_markers_annotated_level_5.xlsx")
+openxlsx::write.xlsx(
+  x = markers_all_dfs,
+  file = path_save_markers,
+  overwrite = TRUE
+)
+# path_to_save_markers_th <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/markers_Th_subsets_annotated.xlsx"
+path_to_save_markers_th <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/markers_Th_subsets_annotated.xlsx")
+openxlsx::write.xlsx(
+  x = markers_th_dfs,
+  file = path_to_save_markers_th,
+  overwrite = TRUE
+)
+
+
+# Save UMAP
+umap_level_5 <- DimPlot(seurat, cols = color_palette)
+# path_to_save_umap1 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_umap_level_5_2_annotated.png"
+path_to_save_umap1 <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_umap_level_5_2_annotated.png")
+ggsave(
+  filename = path_to_save_umap1,
+  plot = umap_level_5,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+umap_level_5_th <- DimPlot(th, cols = color_palette)
+# path_to_save_umap2 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_Th_umap_annotated.png"
+path_to_save_umap2 <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_Th_umap_annotated.png")
+ggsave(
+  filename = path_to_save_umap2,
+  plot = umap_level_5_th,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+```
+
+
+# Session information
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,218 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 3 - Spatial Panels"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to create the spatial pannels necessary for Figure 3.
+This Figure contains data regarding Epithelial and non-lymphoid tissue.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig3}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig3}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+clust_vr <- "annotation_figure_1"
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **04-annotation/04-DE_markers_integrated** where the data was integrated.
+```{r}
+sp <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load deconvolution from **spatial_transcriptomics/epithelium_integration/epithelium-deconvolution.Rmd**
+```{r}
+# Load SPOTlight data
+spotlight_ls <- "{epithelium}/{robj_dir}/spotlight_ls_epithelium.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Set correspondance dataframe for the cell types
+```{r}
+nm_df <- "{epithelium}/{robj_dir}/epithelium_nm_df.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Add colors to cell types
+```{r}
+library(RColorBrewer)
+# Define the number of colors you want
+nb.cols <- nrow(nm_df)
+mycolors <- colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(nb.cols)
+# https://sashamaps.net/docs/resources/20-colors/
+color <- c('#e6194B', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4',
+           '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff',
+           '#9A6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffd8b1',
+           '#000075', '#a9a9a9', '#ffffff', '#000000', '#b00b69')
+
+col_df <- dplyr::bind_cols(nm_df, color = color[1:nrow(nm_df)])
+```
+
+## Analysis
+
+### Preprocess data
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 3 % of the spot
+decon_mtrx[decon_mtrx < 0.03] <- 0
+```
+
+Change column names
+```{r}
+new_cn <- data.frame(mod_nm = colnames(decon_mtrx)) %>%
+  dplyr::left_join(nm_df, by = "mod_nm") %>%
+  # Central.Mem.PASK. fives some trouble because it only changes between + an -
+  # negative goes first and distinct solves it automatically
+  dplyr::distinct() %>%
+  dplyr::pull(plt_nm)
+
+colnames(decon_mtrx) <- new_cn
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+sp@meta.data <- cbind(sp@meta.data, decon_mtrx)
+```
+
+### Panel
+Location of cell types of interest
+```{r}
+ct_int <- c("Surface epithelium", "Basal cells", "Crypt")
+
+# Decimal selectino for legend
+scaleFUN <- function(x) sprintf("%.2f", x)
+
+nm <- "tarwe1_xott6q"
+
+nm_donor <- id_sp_df %>%
+  dplyr::filter(gem_id == nm) %>%
+  dplyr::pull(donor_id)
+  
+# Subset seurat object
+se_sub <- subset(sp, subset = gem_id == nm)
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == nm]
+
+"{fig3}/{plt_dir}/Spatial-Epithelial-deconv-object.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = se_sub,
+    file = .)
+
+# First make a plot with just the image
+tmp_plt <- Seurat::SpatialPlot(
+    object = se_sub,
+    features = "nCount_Spatial",
+    alpha = c(0, 0),
+    images = nm,
+    image.alpha = 1) +
+  Seurat::NoLegend()
+  
+# Iterate over cell types
+ct_plt_ls <- lapply(ct_int, function(i) {
+  tmp_plt <- Seurat::SpatialPlot(
+    object = se_sub,
+    features = i,
+    alpha = c(0, 1),
+    images = nm,
+    image.alpha = 0) +
+    ggplot2::scale_fill_gradientn(
+      colors = grDevices::heat.colors(10, rev = TRUE),
+      # Same number of breaks for all plots
+      breaks = seq(min(se_sub@meta.data[, i]),
+                   max(se_sub@meta.data[, i]),
+                   length.out = 4),
+      # 2 decimals in the legend
+      labels = scaleFUN) +
+    ggplot2::scale_alpha(range = c(0, 1)) +
+    ggplot2::labs(
+      title = stringr::str_wrap(string = i,
+                                width = 25),
+      fill = "") +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(
+        hjust = 0.5,
+        size = 20,
+        face = "bold"))
+  
+  return(tmp_plt)
+})
+
+ct_plt_ls[[4]] <- tmp_plt
+
+(plt_arr <- cowplot::plot_grid(
+  plotlist = ct_plt_ls,
+  axis = "trbl",
+  align = "hv",
+  ncol = 2))
+
+"{fig3}/{plt_dir}/Spatial-Epithelial-deconv.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = plt_arr,
+    base_height = 12,
+    base_width = 10)
+
+"{fig3}/{plt_dir}/Spatial-Epithelial-deconv.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = plt_arr,
+    file = .)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

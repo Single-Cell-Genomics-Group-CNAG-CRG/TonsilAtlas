@@ -1,0 +1,21 @@
+[gene-expression],,,,
+reference,/scratch/groups/hheyn/data/reference/refdata-gex-GRCh38-2020-A,,,
+chemistry,SC5P-R2,,,
+no-bam,TRUE,,,
+,,,,
+[feature],,,,
+reference,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/data/tonsil_atlas_cite_seq_reference.csv,,,
+,,,,
+[vdj],,,,
+reference,/scratch/groups/hheyn/data/reference/refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0,,,
+,,,,
+[libraries],,,,
+fastq_id,fastqs,lanes,feature_types,subsample_rate
+HjqdPU0E_aGDmEY5F_csp,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/csp/lane2,2,Antibody Capture
+HjqdPU0E_aGDmEY5F_csp,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/csp/lane1,1,Antibody Capture
+HjqdPU0E_aGDmEY5F_tcr,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/tcr/lane2,2,vdj-t
+HjqdPU0E_aGDmEY5F_tcr,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/tcr/lane1,1,vdj-t
+HjqdPU0E_aGDmEY5F_gex,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/gex/lane2,2,Gene Expression
+HjqdPU0E_aGDmEY5F_gex,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/gex/lane1,1,Gene Expression
+HjqdPU0E_aGDmEY5F_bcr,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/bcr/lane2,2,vdj-b
+HjqdPU0E_aGDmEY5F_bcr,/home/devel/srashmi/tonsil_atlas/1-cellranger_mapping/projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/fastq/bcr/lane1,1,vdj-b

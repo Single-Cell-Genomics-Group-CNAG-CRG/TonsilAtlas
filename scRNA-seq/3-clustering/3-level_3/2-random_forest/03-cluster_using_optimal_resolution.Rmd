@@ -1,0 +1,257 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste(cell_type, ": Cluster level 3 (optimal resolution)", sep = "")
+```
+
+---
+title: "`r title`"
+---
+
+
+# Introduction
+
+In this notebook, we will cluster the `r cell_type` cells of the tonsil atlas (level 3) using the optimal resolution we predicted previously. We will save it to annotate it in the future.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_level_3 <- here::here("scRNA-seq/results/R_objects/level_3/")
+path_to_level_3_cell_type <- str_c(path_to_level_3, cell_type, sep = "")
+path_to_obj <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_integrated_level_3.rds",
+  sep = ""
+)
+path_to_save <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_3.rds",
+  sep = ""
+)
+path_to_tmp <- str_c(
+  here::here("scRNA-seq/3-clustering/3-level_3/tmp/"),
+  cell_type,
+  sep = ""
+)
+dir.create(path_to_tmp, showWarnings = FALSE)
+path <- str_c(
+  path_to_tmp,
+  "/",
+  cell_type,
+  sep = ""
+)
+path_to_save_shiny_metadata <- str_c(path, "_metadata_to_shiny_app.rds")
+path_to_save_shiny_expression <- str_c(path, "_expression_to_shiny_app.rds")
+path_to_save_umap <- str_c(path, "_umap_clusters_level_3.png")
+path_to_save_umap_king <- str_c(path, "_umap_annotation_king_et_al_level_3.png")
+path_to_save_umap_level_1 <- str_c(path, "_umap_clusters_level_1.png")
+path_to_save_barplot_king <- str_c(path, "_barplot_annotation_king_et_al_level_3.png")
+
+
+# Optimal resolution
+optimal_resolutions <- c(
+  NBC_MBC = 0.5,
+  GCBC = 0.45,
+  CD4_T = 0.6,
+  Cytotoxic = 0.8,
+  PC = 0.7,
+  myeloid = 1.1,
+  epithelial = 0.5,
+  PDC = 0.75,
+  FDC = 0.8
+)
+optimal_resolution <- optimal_resolutions[cell_type]
+
+
+# Point sizes
+pt_sizes <- c(
+  NBC_MBC = 0.15,
+  GCBC = 0.15,
+  CD4_T = 0.25,
+  Cytotoxic = 0.4,
+  PC = 0.5,
+  myeloid = 0.6,
+  FDC = 0.6,
+  PDC = 1,
+  epithelial = 1
+)
+pt_size <- pt_sizes[cell_type]
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "plum4", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "gold", "brown",
+                   "mediumvioletred", "mediumaquamarine")
+
+
+# Source functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Cluster
+
+```{r}
+seurat <- FindClusters(seurat, resolution = optimal_resolution)
+```
+
+
+# Visualize UMAP
+
+```{r}
+p <- DimPlot(
+  seurat,
+  group.by = "seurat_clusters",
+  pt.size = pt_size,
+  cols = color_palette
+)
+p
+```
+
+Let us plot the annotation of [King et al.](https://immunology.sciencemag.org/content/6/56/eabe6291):
+
+```{r}
+umap_king <- plot_annotation_king(
+  seurat,
+  pt_size = pt_size,
+  color_palette = color_palette
+)
+umap_king <- umap_king +
+  guides(colour = guide_legend(override.aes = list(size = 2)))
+umap_king
+
+
+# Stacked bar plot
+cell_type_pcts_df <- seurat@meta.data %>%
+  filter(assay == "5P") %>%
+  group_by(seurat_clusters, cell_type) %>%
+  summarise(n_cells_cell_type = n()) %>% 
+  group_by(seurat_clusters) %>%
+  mutate(
+    total_cells = sum(n_cells_cell_type),
+    pct_cells = n_cells_cell_type / total_cells * 100
+  )
+cell_type_pcts_gg <- cell_type_pcts_df %>%
+  ggplot(aes(seurat_clusters, pct_cells, fill = cell_type)) +
+    geom_col() +
+    labs(x = "Cluster", y = "Percentage of cells (%)", fill = "") +
+    scale_fill_manual(values = color_palette) +
+    theme_classic()
+cell_type_pcts_gg
+```
+
+
+To aid in the annotation even more, let us plot the cells in the UMAP of the level 1, which we saved in the metadata:
+
+```{r}
+umap_level_1 <- seurat@meta.data %>%
+  ggplot(aes(UMAP_1_level_1, UMAP_2_level_1, color = seurat_clusters)) +
+    geom_point(size = 0.5) +
+    scale_color_manual(values = color_palette) +
+    labs(x = "UMAP_1", y = "UMAP_2") +
+    theme_classic() +
+    theme(legend.title = element_blank()) +
+    guides(colour = guide_legend(override.aes = list(size = 2)))
+umap_level_1
+```
+
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+
+Save input to shiny app:
+
+```{r}
+input_shiny <- seurat2shiny(
+  seurat,
+  assay = "RNA",
+  slot = "data",
+  reduction = "umap"
+)
+saveRDS(input_shiny$metadata, path_to_save_shiny_metadata)
+saveRDS(input_shiny$expression, path_to_save_shiny_expression)
+```
+
+
+Save plots:
+
+```{r}
+ggsave(
+  filename = path_to_save_umap,
+  plot = p,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_umap_king,
+  plot = umap_king,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_umap_level_1,
+  plot = umap_level_1,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_barplot_king,
+  plot = cell_type_pcts_gg,
+  width = 16,
+  height = 11,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

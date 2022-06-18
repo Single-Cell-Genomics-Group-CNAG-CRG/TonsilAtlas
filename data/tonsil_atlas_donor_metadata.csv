@@ -1,0 +1,11 @@
+donor_id,hospital,sex,age,age_group
+BCLL-2-T,Clinic,male,65,old_adult
+BCLL-6-T,Clinic,male,35,young_adult
+BCLL-8-T,CIMA,male,4,kid
+BCLL-9-T,CIMA,male,5,kid
+BCLL-10-T,CIMA,male,3,kid
+BCLL-11-T,CIMA,female,5,kid
+BCLL-12-T,CIMA,female,3,kid
+BCLL-13-T,CIMA,female,5,kid
+BCLL-14-T,CIMA,male,26,young_adult
+BCLL-15-T,CIMA,male,33,young_adult

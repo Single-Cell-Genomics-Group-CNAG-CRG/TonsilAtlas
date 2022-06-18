@@ -1,0 +1,210 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Quality control metrics report (level 3):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+
+# Introduction
+
+The purpose of this notebook is to plot several quality control metrics across clusters, so that we can have an idea of which clusters might be problematic.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_level_3 <- here::here("scRNA-seq/results/R_objects/level_3/")
+path_to_level_3_cell_type <- str_c(path_to_level_3, cell_type, sep = "")
+path_to_obj <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_3.rds",
+  sep = ""
+)
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "plum4", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "gold", "brown",
+                   "mediumvioletred", "mediumaquamarine")
+
+
+# Point sizes
+pt_sizes <- c(
+  NBC_MBC = 0.15,
+  GCBC = 0.15,
+  CD4_T = 0.25,
+  Cytotoxic = 0.4,
+  PC = 0.4,
+  myeloid = 0.6,
+  FDC = 0.6,
+  PDC = 1,
+  epithelial = 1
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Visualize UMAP
+
+```{r}
+umap_clusters <- DimPlot(
+  seurat,
+  group.by = "seurat_clusters",
+  pt.size = pt_size,
+  cols = color_palette
+)
+umap_clusters
+```
+
+
+# Assess integration
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "assay")
+p_assay
+```
+
+
+# pDNN and scrublet prediction
+
+```{r}
+pDNN_vars <- c("pDNN_hashing", "pDNN_scrublet", "pDNN_union")
+pDNN_gg <- purrr::map(pDNN_vars, function(x) {
+  p <- plot_pDNN(seurat_obj = seurat, pDNN_var = x, pt_size = pt_size)
+  p
+})
+pDNN_gg
+
+
+# Violin plots
+pDNN_violins_gg <- purrr::map(pDNN_vars, function(x) {
+  p <- VlnPlot(
+    seurat,
+    features = x,
+    pt.size = 0,
+    group.by = "seurat_clusters",
+    cols = color_palette
+  ) +
+    xlab("") +
+    theme(legend.position = "none")
+  p
+})
+pDNN_violins_gg
+
+
+# Scrublet
+seurat$scrublet_predicted_doublet[seurat$scrublet_predicted_doublet == "True"] <- "TRUE"
+seurat$scrublet_predicted_doublet[seurat$scrublet_predicted_doublet == "False"] <- "FALSE"
+scrublet_gg <- DimPlot(seurat, group.by = "scrublet_predicted_doublet")
+scrublet_gg
+```
+
+
+# QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_RNA",
+  "nFeature_RNA",
+  "pct_mt",
+  "pct_ribosomal"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x, pt.size = pt_size)
+  p +
+    scale_color_viridis_c(option = "magma")
+})
+qc_gg
+
+
+# Violin plots
+qc_violins_gg <- purrr::map(qc_vars, function(x) {
+  p <- VlnPlot(
+    seurat,
+    features = x,
+    pt.size = 0,
+    group.by = "seurat_clusters",
+    cols = color_palette
+  ) +
+    xlab("") +
+    theme(legend.position = "none")
+  p
+})
+qc_violins_gg
+```
+
+
+# Cell cycle scoring
+
+```{r}
+s_gg <- FeaturePlot(seurat, features = "S.Score", pt.size = pt_size) +
+  scale_color_viridis_c(option = "magma")
+s_gg
+g2m_gg <- FeaturePlot(seurat, features = "G2M.Score", pt.size = pt_size) +
+  scale_color_viridis_c(option = "magma")
+g2m_gg
+
+
+# Violin Plots
+cc_violins_gg <- purrr::map(c("S.Score", "G2M.Score"), function(x) {
+  p <- VlnPlot(
+    seurat,
+    features = x,
+    pt.size = 0,
+    group.by = "seurat_clusters",
+    cols = color_palette
+  ) +
+    xlab("") +
+    theme(legend.position = "none")
+  p
+})
+cc_violins_gg
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

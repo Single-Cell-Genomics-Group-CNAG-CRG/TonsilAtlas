@@ -1,0 +1,198 @@
+---
+title: "CD4 T: Integrate scRNA-seq and CITE-seq"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will (1) integrate scRNA-seq and CITE-seq data for CD4 T cells, (2) transfer the UMAP coordinates and the annotation, and (3) find the protein markers for each cell type.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+library(caret)
+library(class)
+```
+
+
+## Parameters
+
+```{r}
+# path_to_cd4 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_subseted_annotated_level_5.rds"
+path_to_cd4 <- here::here("scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_subseted_annotated_level_5.rds")
+# path_to_cite_seq <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/CITE-seq/results/seurat_object_cite_seq_seurat_wnn.rds"
+path_to_cite_seq <- here::here("CITE-seq/results/seurat_object_cite_seq_seurat_wnn.rds")
+path_to_save_cite_seq <- here::here("scRNA-seq/results/R_objects/level_5/CD4_T/paper/CD4_T_subseted_annotated_level_5_cite_seq.rds")
+path_to_save_prot_markers <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_markers_annotated_level_5_cite_seq.xlsx")
+path_to_save_umap_cite_seq <- here::here("scRNA-seq/3-clustering/5-level_5/CD4_T/tmp/CD4_T_umap_level_5_2_annotated_cite_seq.png")
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+
+# Source functions
+# source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/SLOcatoR_functions.R")
+source(here::here("scRNA-seq/bin/SLOcatoR_functions.R"))
+```
+
+
+## Read data
+
+```{r}
+reference <- readRDS(path_to_cd4)
+cite_seq <- readRDS(path_to_cite_seq)
+query <- subset(cite_seq, idents = "2")
+rm(cite_seq)
+```
+
+
+# Project CITE-seq data
+
+```{r}
+reference$UMAP1 <- Embeddings(reference, "umap")[, "UMAP_1"]
+reference$UMAP2 <- Embeddings(reference, "umap")[, "UMAP_2"]
+reference_diet <- DietSeurat(reference)
+query_diet <- DietSeurat(query)
+reference_diet$type <- "reference"
+query_diet$type <- "query"
+query_diet$assay <- "CITEseq"
+integrated <- merge(x = reference_diet, y = query_diet)
+rm(query_diet, reference_diet, reference)
+integrated <- NormalizeData(integrated)
+hvg <- find_assay_specific_features(
+  integrated,
+  assay_var = "assay",
+  n_features = 5000
+)
+integrated <- integrate_assays(
+  integrated,
+  assay_specific = TRUE,
+  n_dim = 30,
+  shared_hvg = hvg
+)
+integrated <- RunUMAP(integrated, reduction = "harmony", dims = 1:30)
+DimPlot(integrated, split.by = "assay", group.by = "assay")
+data_sets <- split_training_and_test_sets(
+  integrated,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+annotation_data  <- transfer_label(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 15,
+  response_var = "annotation_paper"
+)
+umap_coords <- transfer_umap_coords(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 15,
+  umap1_var = "UMAP1",
+  umap2_var = "UMAP2"
+)
+integrated$UMAP1[umap_coords$query_cells] <- umap_coords$UMAP1
+integrated$UMAP2[umap_coords$query_cells] <- umap_coords$UMAP2
+integrated@reductions$umap@cell.embeddings[, "UMAP_1"] <- integrated$UMAP1
+integrated@reductions$umap@cell.embeddings[, "UMAP_2"] <- integrated$UMAP2
+integrated$annotation_paper[annotation_data$query_cells] <- annotation_data$annotation
+integrated$annotation_prob <- NA
+integrated$annotation_prob[annotation_data$query_cells] <- annotation_data$annotation_prob
+DimPlot(integrated, group.by = "annotation_paper", split.by = "assay", cols = color_palette)
+```
+
+
+# Find markers
+
+```{r}
+# Split
+integrated_rna_multi <- subset(integrated, assay != "CITEseq")
+integrated_cite_seq <- subset(integrated, assay == "CITEseq")
+
+
+# Markers protein
+Idents(integrated_cite_seq) <- "annotation_paper"
+DefaultAssay(integrated_cite_seq) <- "ADT"
+sorted_levels <- c("Naive", "CM Pre-non-Tfh", "CM PreTfh", "T-Trans-Mem",
+                    "T-Eff-Mem", "T-helper", "Tfh T:B border", "Tfh-LZ-GC",
+                    "GC-Tfh-SAP", "GC-Tfh-0X40", "Tfh-Mem", "Eff-Tregs", 
+                    "non-GC-Tf-regs", "GC-Tf-regs")
+markers_prot <- FindAllMarkers(
+  integrated_cite_seq,
+  only.pos = TRUE
+)
+markers_prot_dfs <- purrr::map(sorted_levels, function(x) {
+  df <- markers_prot[markers_prot$cluster == x, ]
+  df
+})
+names(markers_prot_dfs) <- sorted_levels
+```
+
+
+# Save
+
+```{r}
+# Seurat object
+saveRDS(integrated_cite_seq, path_to_save_cite_seq)
+
+
+# UMAP
+umap_cite_seq <- DimPlot(integrated_cite_seq, cols = color_palette)
+ggsave(
+  filename = path_to_save_umap_cite_seq,
+  plot = umap_cite_seq,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+
+
+# Markers
+names(markers_prot_dfs)[names(markers_prot_dfs) == "Tfh T:B border"] <- "Tfh T-B border"
+openxlsx::write.xlsx(
+  x = markers_prot_dfs,
+  file = path_to_save_prot_markers,
+  overwrite = TRUE
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

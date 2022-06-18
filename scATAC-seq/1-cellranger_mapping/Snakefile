@@ -1,0 +1,51 @@
+###############################################################################
+#######################Snakefile tonsil atlas scATAC-seq#######################
+###############################################################################
+
+# import modules
+import numpy as np
+import pandas as pd
+import os
+import sys
+sys.path.insert(1, "scripts/")
+import config_vars as cfg
+
+
+
+# define target files
+rule make_cellranger_all:
+    input:
+        cfg.ALL_TARGET_FILES
+
+
+
+# obtain library-specific information from laboratory information management system (lims)
+rule lims:
+    output:
+        "projects/{subproject}/info.txt"
+    shell:
+        "./scripts/1-lims.sh {wildcards.subproject}"
+
+
+
+# get fastq paths by combining flowcell, lane and index for each library
+rule write_fastqs:
+    input:
+        info_file="projects/{subproject}/info.txt",
+        metadata="data/tonsil_atlas_metadata_atac.csv"
+    output:
+        "projects/{subproject}/fastq_paths.csv"
+    shell:
+        "python scripts/2-write_fastq_paths.py --subproject {wildcards.subproject} --info_file {input.info_file} --metadata {input.metadata}"
+
+
+
+# create cellranger script and supporting files for each Gelbeads-in-Emulsion (GEM) well
+rule make_cellranger:
+    input:
+        fastq_paths="projects/{subproject}/fastq_paths.csv",
+        metadata="data/tonsil_atlas_metadata_atac.csv",
+    output:
+        "projects/{subproject}/jobs/{gem_id}/{gem_id}.cmd"
+    shell:
+        "python scripts/3-make_cellranger.py --subproject {wildcards.subproject} --gem_id {wildcards.gem_id} --metadata {input.metadata} --fastq_paths {input.fastq_paths}"

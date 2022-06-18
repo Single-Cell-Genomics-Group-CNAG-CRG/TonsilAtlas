@@ -1,0 +1,152 @@
+Library or Sample,Library Type,Grouped By,Group Name,Metric Name,Metric Value
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp,Number of reads,"21,185,771"
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp,Number of short reads skipped,0
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp,Q30 RNA read,96.9%
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp,Q30 UMI,98.1%
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp,Q30 barcodes,98.3%
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp (2),Number of reads,"21,512,079"
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp (2),Number of short reads skipped,0
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp (2),Q30 RNA read,97.0%
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp (2),Q30 UMI,98.1%
+Library,Antibody Capture,Fastq ID,rdFRFhrU_ZdYeOZlf_csp (2),Q30 barcodes,98.3%
+Library,Antibody Capture,Physical library ID,ABC_1,Estimated number of cells,"2,565"
+Library,Antibody Capture,Physical library ID,ABC_1,Fraction antibody reads,97.28%
+Library,Antibody Capture,Physical library ID,ABC_1,Fraction antibody reads in aggregate barcodes,6.90%
+Library,Antibody Capture,Physical library ID,ABC_1,Fraction antibody reads usable,5.47%
+Library,Antibody Capture,Physical library ID,ABC_1,Fraction reads in cells,5.72%
+Library,Antibody Capture,Physical library ID,ABC_1,Fraction unrecognized antibody,2.72%
+Library,Antibody Capture,Physical library ID,ABC_1,Mean reads per cell,"16,646"
+Library,Antibody Capture,Physical library ID,ABC_1,Number of reads,"42,697,850"
+Library,Antibody Capture,Physical library ID,ABC_1,Valid UMIs,100.00%
+Library,Antibody Capture,Physical library ID,ABC_1,Valid barcodes,98.49%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex,Number of reads,"9,438,398"
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex,Number of short reads skipped,0
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex,Q30 RNA read,90.8%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex,Q30 UMI,97.3%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex,Q30 barcodes,97.3%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (2),Number of reads,"9,546,303"
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (2),Number of short reads skipped,0
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (2),Q30 RNA read,90.9%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (2),Q30 UMI,97.3%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (2),Q30 barcodes,97.3%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (3),Number of reads,"60,630,301"
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (3),Number of short reads skipped,0
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (3),Q30 RNA read,90.7%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (3),Q30 UMI,97.6%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (3),Q30 barcodes,97.5%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (4),Number of reads,"58,953,760"
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (4),Number of short reads skipped,0
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (4),Q30 RNA read,90.3%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (4),Q30 UMI,97.6%
+Library,Gene Expression,Fastq ID,rdFRFhrU_ZdYeOZlf_gex (4),Q30 barcodes,97.6%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped antisense,17.26%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped to exonic regions,41.42%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped to genome,76.75%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped to intergenic regions,23.21%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped to intronic regions,12.12%
+Library,Gene Expression,Physical library ID,GEX_1,Confidently mapped to transcriptome,22.97%
+Library,Gene Expression,Physical library ID,GEX_1,Estimated number of cells,"2,565"
+Library,Gene Expression,Physical library ID,GEX_1,Fraction reads in cells,70.05%
+Library,Gene Expression,Physical library ID,GEX_1,Mapped to genome,91.71%
+Library,Gene Expression,Physical library ID,GEX_1,Mean reads per cell,"54,023"
+Library,Gene Expression,Physical library ID,GEX_1,Number of reads,"138,568,762"
+Library,Gene Expression,Physical library ID,GEX_1,Number of reads in the library,"138,568,762"
+Library,Gene Expression,Physical library ID,GEX_1,Sequencing saturation,82.73%
+Library,Gene Expression,Physical library ID,GEX_1,Valid UMIs,99.98%
+Library,Gene Expression,Physical library ID,GEX_1,Valid barcodes,63.94%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr,Number of reads,"10,053,380"
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr,Number of short reads skipped,0
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr,Q30 RNA read,90.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr,Q30 UMI,96.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr,Q30 barcodes,96.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (2),Number of reads,"9,392,624"
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (2),Number of short reads skipped,0
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (2),Q30 RNA read,90.2%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (2),Q30 UMI,97.0%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (2),Q30 barcodes,97.0%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (3),Number of reads,"9,832,703"
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (3),Number of short reads skipped,0
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (3),Q30 RNA read,90.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (3),Q30 UMI,96.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (3),Q30 barcodes,96.9%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (4),Number of reads,"9,656,603"
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (4),Number of short reads skipped,0
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (4),Q30 RNA read,90.8%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (4),Q30 UMI,97.0%
+Library,VDJ B,Fastq ID,rdFRFhrU_ZdYeOZlf_bcr (4),Q30 barcodes,97.0%
+Library,VDJ B,Physical library ID,VDJB_1,Estimated number of cells,822
+Library,VDJ B,Physical library ID,VDJB_1,Fraction reads in cells,78.42%
+Library,VDJ B,Physical library ID,VDJB_1,Mean reads per cell,"47,367"
+Library,VDJ B,Physical library ID,VDJB_1,Mean used reads per cell,"16,257"
+Library,VDJ B,Physical library ID,VDJB_1,Number of reads,"38,935,310"
+Library,VDJ B,Physical library ID,VDJB_1,Reads mapped to IGH,41.25%
+Library,VDJ B,Physical library ID,VDJB_1,Reads mapped to IGK,20.13%
+Library,VDJ B,Physical library ID,VDJB_1,Reads mapped to IGL,17.24%
+Library,VDJ B,Physical library ID,VDJB_1,Reads mapped to any V(D)J gene,78.69%
+Library,VDJ B,Physical library ID,VDJB_1,Valid barcodes,89.62%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr,Number of reads,"51,813,638"
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr,Number of short reads skipped,0
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr,Q30 RNA read,92.9%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr,Q30 UMI,97.2%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr,Q30 barcodes,97.2%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (2),Number of reads,"19,736,416"
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (2),Number of short reads skipped,0
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (2),Q30 RNA read,92.3%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (2),Q30 UMI,97.4%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (2),Q30 barcodes,97.4%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (3),Number of reads,"50,987,596"
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (3),Number of short reads skipped,0
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (3),Q30 RNA read,92.8%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (3),Q30 UMI,97.2%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (3),Q30 barcodes,97.2%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (4),Number of reads,"20,261,362"
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (4),Number of short reads skipped,0
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (4),Q30 RNA read,92.8%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (4),Q30 UMI,97.4%
+Library,VDJ T,Fastq ID,rdFRFhrU_ZdYeOZlf_tcr (4),Q30 barcodes,97.4%
+Library,VDJ T,Physical library ID,VDJT_1,Estimated number of cells,237
+Library,VDJ T,Physical library ID,VDJT_1,Fraction reads in cells,18.07%
+Library,VDJ T,Physical library ID,VDJT_1,Mean reads per cell,"602,527"
+Library,VDJ T,Physical library ID,VDJT_1,Mean used reads per cell,"42,757"
+Library,VDJ T,Physical library ID,VDJT_1,Number of reads,"142,799,012"
+Library,VDJ T,Physical library ID,VDJT_1,Reads mapped to TRA,17.61%
+Library,VDJ T,Physical library ID,VDJT_1,Reads mapped to TRB,21.56%
+Library,VDJ T,Physical library ID,VDJT_1,Reads mapped to any V(D)J gene,39.49%
+Library,VDJ T,Physical library ID,VDJT_1,Valid barcodes,78.57%
+Sample,Antibody Capture,,,Antibody reads usable per cell,911
+Sample,Antibody Capture,,,Cells,"2,565"
+Sample,Antibody Capture,,,Median UMI counts per cell,528
+Sample,Gene Expression,,,Cells,"2,565"
+Sample,Gene Expression,,,Confidently mapped antisense,8.99%
+Sample,Gene Expression,,,Confidently mapped to exonic regions,53.02%
+Sample,Gene Expression,,,Confidently mapped to genome,86.89%
+Sample,Gene Expression,,,Confidently mapped to intergenic regions,18.56%
+Sample,Gene Expression,,,Confidently mapped to intronic regions,15.31%
+Sample,Gene Expression,,,Confidently mapped to transcriptome,42.47%
+Sample,Gene Expression,,,Mapped to genome,93.81%
+Sample,Gene Expression,,,Median UMI counts per cell,925
+Sample,Gene Expression,,,Median genes per cell,484
+Sample,Gene Expression,,,Median reads per cell,"11,493"
+Sample,Gene Expression,,,Number of reads assigned to the sample,"47,808,004"
+Sample,Gene Expression,,,Total genes detected,"16,855"
+Sample,VDJ B,,,Cells with productive IGH contig,86.98%
+Sample,VDJ B,,,Cells with productive IGK contig,41.73%
+Sample,VDJ B,,,Cells with productive IGL contig,55.35%
+Sample,VDJ B,,,"Cells with productive V-J spanning (IGK, IGH) pair",34.43%
+Sample,VDJ B,,,"Cells with productive V-J spanning (IGL, IGH) pair",49.64%
+Sample,VDJ B,,,Cells with productive V-J spanning pair,82.60%
+Sample,VDJ B,,,Estimated number of cells,822
+Sample,VDJ B,,,Median IGH UMIs per Cell,16
+Sample,VDJ B,,,Median IGK UMIs per Cell,74
+Sample,VDJ B,,,Median IGL UMIs per Cell,91
+Sample,VDJ B,,,Number of cells with productive V-J spanning pair,679
+Sample,VDJ B,,,Paired clonotype diversity,766.08
+Sample,VDJ T,,,Cells with productive TRA contig,92.41%
+Sample,VDJ T,,,Cells with productive TRB contig,99.58%
+Sample,VDJ T,,,"Cells with productive V-J spanning (TRA, TRB) pair",91.98%
+Sample,VDJ T,,,Cells with productive V-J spanning pair,91.98%
+Sample,VDJ T,,,Estimated number of cells,237
+Sample,VDJ T,,,Median TRA UMIs per Cell,8
+Sample,VDJ T,,,Median TRB UMIs per Cell,25
+Sample,VDJ T,,,Number of cells with productive V-J spanning pair,218
+Sample,VDJ T,,,Paired clonotype diversity,235.02

@@ -1,0 +1,195 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste(cell_type, ": Pre-data freeze annotation", sep = "")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+In this notebook, we will plot the annotation that we established before the data freeze.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_level_3 <- here::here("scRNA-seq/results/R_objects/level_3/")
+path_to_level_3_cell_type <- str_c(path_to_level_3, cell_type, sep = "")
+path_to_obj <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_3.rds",
+  sep = ""
+)
+path_to_save <- str_c(
+  path_to_level_3_cell_type,
+  "/",
+  cell_type,
+  "_clustered_level_3_with_pre_freeze.rds",
+  sep = ""
+)
+path_to_annotation_pre_freeze <- here::here("scRNA-seq/3-clustering/3-level_3/tmp/annotation_df_pre_data_freeze_barcodes_all.rds") 
+path_to_tmp <- str_c(
+  here::here("scRNA-seq/3-clustering/3-level_3/tmp/"),
+  cell_type,
+  sep = ""
+)
+path <- str_c(
+  path_to_tmp,
+  "/",
+  cell_type,
+  sep = ""
+)
+path_to_save_umap_pre_freeze <- str_c(path, "_umap_annotation_pre_freeze.png")
+path_to_save_barplot_pre_freeze <- str_c(path, "_barplot_annotation_pre_freeze.png")
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "plum4", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "gold", "brown",
+                   "mediumvioletred", "mediumaquamarine")
+
+
+# Point sizes
+pt_sizes <- c(
+  NBC_MBC = 0.15,
+  GCBC = 0.15,
+  CD4_T = 0.25,
+  Cytotoxic = 0.4,
+  PC = 0.4,
+  myeloid = 0.6,
+  FDC = 0.6,
+  PDC = 1,
+  epithelial = 1
+)
+pt_size <- pt_sizes[cell_type]
+
+
+# Source functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+annotation_df <- readRDS(path_to_annotation_pre_freeze)
+annotation_df <- annotation_df[[cell_type]]
+head(annotation_df)
+```
+
+
+# Transfer and visualize annotation pre-data freeze
+
+```{r}
+# Transfer
+annotation_df2 <- data.frame(barcode = annotation_df$barcode)
+annotation_df2$annotation_pre_freeze <- annotation_df$annotation_level_2
+seurat$barcode <- colnames(seurat)
+new_metadata <- left_join(
+  x = seurat@meta.data,
+  y = annotation_df2,
+  by = "barcode"
+)
+if (all(rownames(seurat@meta.data) == new_metadata$barcode)) {
+  seurat$annotation_pre_freeze <- new_metadata$annotation_pre_freeze
+}
+
+
+# UMAP
+umap_pre_freeze <- seurat@reductions$umap@cell.embeddings %>%
+  as.data.frame() %>%
+  mutate(annotation_pre_freeze = seurat$annotation_pre_freeze) %>%
+  filter(!is.na(annotation_pre_freeze)) %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = annotation_pre_freeze)) +
+    geom_point(size = pt_size) +
+    scale_color_manual(values = color_palette) +
+    labs(x = "UMAP_1", y = "UMAP_2") +
+    theme_classic() +
+    theme(legend.title = element_blank()) +
+    guides(colour = guide_legend(override.aes = list(size = 2)))
+umap_pre_freeze
+
+
+# Stacked bar plot
+cell_type_pcts_df <- seurat@meta.data %>%
+  filter(!is.na(annotation_pre_freeze)) %>%
+  group_by(seurat_clusters, annotation_pre_freeze) %>%
+  summarise(n_cells_cell_type = n()) %>% 
+  group_by(seurat_clusters) %>%
+  mutate(
+    total_cells = sum(n_cells_cell_type),
+    pct_cells = n_cells_cell_type / total_cells * 100
+  )
+cell_type_pcts_gg <- cell_type_pcts_df %>%
+  ggplot(aes(seurat_clusters, pct_cells, fill = annotation_pre_freeze)) +
+    geom_col() +
+    labs(x = "Cluster", y = "Percentage of cells (%)", fill = "") +
+    scale_fill_manual(values = color_palette) +
+    theme_classic()
+cell_type_pcts_gg
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+
+Save plots:
+
+```{r}
+ggsave(
+  filename = path_to_save_umap_pre_freeze,
+  plot = umap_pre_freeze,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  filename = path_to_save_barplot_pre_freeze,
+  plot = cell_type_pcts_gg,
+  width = 16,
+  height = 11,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

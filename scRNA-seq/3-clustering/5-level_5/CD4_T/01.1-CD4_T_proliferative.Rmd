@@ -1,0 +1,163 @@
+---
+title: "CD4 T proliferative: Level 5"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here we will process the proliferative CD4 T cells
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/CD4_T/CD4_T_proliferative_subsetted_level_4.rds"
+path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/CD4_T/CD4_T_proliferative_subsetted_level_5.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+integrate_assays <- function(seurat_obj, n_features = 5000) {
+  # Find shared highly variable genes (HVG)
+  seurat_list <- SplitObject(seurat_obj, split.by = "assay")
+  seurat_list <- seurat_list[c("3P", "multiome")]
+  seurat_list <- purrr::map(
+    seurat_list,
+    FindVariableFeatures,
+    nfeatures = n_features
+  )
+  hvg <- purrr::map(seurat_list, VariableFeatures)
+  shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+  
+  
+  # Integrate
+  seurat_obj <- seurat_obj %>%
+    ScaleData(features = shared_hvg) %>%
+    RunPCA(features = shared_hvg) %>%
+    RunHarmony(group.by.vars = "assay", reduction = "pca", dims = 1:30)
+  
+  seurat_obj
+}
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+```
+
+
+# Reprocess
+
+```{r}
+# Remove 5P cells
+seurat <- subset(seurat, hospital != "Royal London")
+
+
+# Reprocess
+seurat <- integrate_assays(seurat)
+
+
+# Recompute UMAP
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 1:30)
+DimPlot(seurat, cols = color_palette)
+```
+
+
+# Exclude poor-quality cells
+
+```{r}
+FeaturePlot(
+  seurat,
+  features = c("S.Score", "G2M.Score", "CD79A", "CD8A", "IL7R")
+)
+DimPlot(seurat, group.by = "assay")
+DimPlot(seurat, group.by = "age_group")
+FeaturePlot(seurat, "pct_mt")
+seurat <- FindNeighbors(seurat, reduction = "harmony", dims = 1:30)
+seurat <- FindClusters(seurat, resolution = 0.25)
+DimPlot(seurat)
+
+
+markers_0 <- FindMarkers(
+  seurat,
+  ident.1 = "0",
+  logfc.threshold = 0.5,
+  only.pos = TRUE
+)
+DT::datatable(markers_0)
+
+
+# Subset
+seurat <- subset(seurat, seurat_clusters != "0")
+
+
+# Reprocess
+seurat <- integrate_assays(seurat)
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 1:15)
+DimPlot(seurat)
+FeaturePlot(seurat, c("S.Score", "G2M.Score"))
+
+
+# Remove doublets/poor-quality
+FeaturePlot(seurat, c("MS4A1", "CD3D"))
+DimPlot(seurat)
+seurat <- subset(seurat, subset = seurat_clusters != "4")
+DimPlot(seurat)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

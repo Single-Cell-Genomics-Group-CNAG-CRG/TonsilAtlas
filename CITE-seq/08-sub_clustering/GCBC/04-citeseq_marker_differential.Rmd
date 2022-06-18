@@ -1,0 +1,109 @@
+---
+title: "CITEseq marker Differential"
+author: "Sonal Rashmi"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries}
+library(Seurat)
+library(Signac)
+library(flexclust)
+library(tidyverse)
+library(plyr)
+library(harmony)
+library(class)
+library(ggplot2)
+library(reshape2)
+library(openxlsx)
+```
+
+## Parameters
+
+```{r parameters}
+path_to_save_annotated_citeseq <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/10-sub_cluster_annotation/GCBC/objects/GCBC_tonsil_cite_seq_annotated.rds"
+citeseq_marker <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/10-sub_cluster_annotation/GCBC/objects/GCBC_tonsil_atlas_citeseq_markers.xlsx"
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "greenyellow", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet", "indianred", "gold","coral", "orangered")
+```
+
+## Variables
+
+## Load data
+
+```{r}
+seurat_citeseq <- readRDS(path_to_save_annotated_citeseq)
+```
+
+
+## Find All CITEseq Markers
+
+```{r}
+DefaultAssay(seurat_citeseq) <- "ADT"
+Idents(seurat_citeseq) <- seurat_citeseq@meta.data$GCBC_annotation_level_5
+#seurat_citeseq <- NormalizeData(seurat_citeseq, normalization.method = 'CLR', margin = 2) %>% ScaleData()
+markers <- FindAllMarkers(seurat_citeseq, assay = "ADT")
+```
+
+## Save All Markers in Excel
+
+```{r}
+markers <- markers %>%
+  dplyr::arrange(cluster, desc(abs(avg_log2FC))) 
+#%>% dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.9)
+markers_list <- purrr::map(levels(markers$cluster), ~ markers[markers$cluster == .x, ])
+#detach("package:openxlsx", unload = TRUE)
+openxlsx::write.xlsx(
+  markers_list,
+  citeseq_marker
+)
+#detach("package:openxlsx", unload = TRUE)
+DT::datatable(markers, filter ="top")
+```
+
+## Find all markers 
+
+```{r}
+seurat_citeseq.markers <- FindAllMarkers(seurat_citeseq, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+top_marker_by_clusters <- seurat_citeseq.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC) 
+
+top5 <- seurat_citeseq.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_log2FC)
+
+DoHeatmap(seurat_citeseq, features = unique(top5$gene), label = F) 
+#DotPlot(object = seurat_citeseq, features = rev(x =  unique(top2$gene)), cols = c("blue", "red"), dot.scale = 8) + RotatedAxis()
+```
+
+```{r}
+plotBulkHeatmap <- function(x){
+  x <- intersect(x, rownames(GetAssayData(seurat_citeseq, slot = 'data')))
+  mat <- AverageExpression(seurat_citeseq, features = x, slot = 'data', assays = "ADT")
+  mat1 <- t(scale(t(mat$ADT)))
+  re <- pheatmap::pheatmap(mat1, angle_col = 45, border = NA)
+  return(re)
+}
+top10 <- seurat_citeseq.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+plotBulkHeatmap(unique(top10$gene))
+```
+
+
+# Session Information
+```{r session}
+sessionInfo()
+```

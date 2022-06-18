@@ -1,0 +1,312 @@
+---
+author: "Marc Elosua-Bayes"
+title: "mistyR BCL6"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE)
+options(width = 1200)
+```
+
+## mistyR Introduction
+mistyR can be used to analyze spatial transcriptomics data sets stored in SeuratObject with just a couple of functions. In this vignette we demonstrate how to build a user friendly workflow starting from data preprocessing, through running mistyR, to analysis of results, i.e., the spatial interactions between markers stored in alternative assays and specific locations.
+
+In principle mistyR can be used with data extracted from a SeuratObject only. For the sake of completeness of the process of modeling with mistyR we demonstrate a complete workflow, including data preprocessing with Seurat. The functions provided in this notebook can be adapted to the user preference but the main objective is to exploit as much as possible the flexibility of workflow creation from mistyR and object manipulation from Seurat.
+
+`mistyR` [vignette](https://saezlab.github.io/mistyR/articles/mistySeurat.html)
+
+## Biology Introduction
+
+In this Rmarkdown document we want to assess the importance of upstream transcription factors of BCL6, a key regulator in Tfh cell diferentiation as detailed in the following papers: \
+- [T Follicular Helper Cell Biology: A Decade of Discovery and Diseases](https://doi.org/10.1016/j.immuni.2019.04.011) \
+- [Bcl6-Mediated Transcriptional Regulation of Follicular Helper T cells (Tfh)](https://doi.org/10.1016/j.it.2021.02.002)
+
+## Loading Libraries
+
+```{r include=T,warning=F,message=F}
+# MISTy
+library(mistyR)
+library(future)
+
+# Seurat
+library(Seurat)
+
+# data manipulation
+library(Matrix)
+library(tibble)
+library(dplyr)
+library(purrr)
+
+# normalization
+library(sctransform)
+
+# resource
+library(progeny)
+library(dorothea)
+```
+
+```{r}
+# setup parallel execution
+options(future.globals.maxSize = 1024^3, future.seed = 123)
+future::plan(multisession)
+```
+
+## Parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+source(here::here("utils/mistyR_bin.R"))
+
+"{misty}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{misty}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Loading data
+
+We exemplify usage using Seurat objects, however, MISTy is not dependent on this.
+
+In our case, pathway activities are stored in the *progeny* assay and gene expression in the *SCT* assay
+
+```{r read_slide}
+merged_se <- "{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Subset for 1 Visium sample
+```{r}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+```
+
+## mistyR analysis
+
+Following the mistyR vignette
+
+###  Filtering genes that are expressed in at least 5% of spots
+```{r}
+gene.expression <- Seurat::GetAssayData(se_sub, assay = "Spatial")
+coverage <- rowSums(gene.expression > 0) / ncol(gene.expression)
+slide.markers <- names(which(coverage >= 0.05))
+```
+
+### SCTransform
+```{r}
+se_sub <- Seurat::SCTransform(object = se_sub, assay = "Spatial", verbose = FALSE)
+```
+
+### Define Upstream TF for BCL6
+
+For this first approach we only select high confidence TF, we will also look at TF upstream to PRDM1 which plays an antagonistic role in Tfh differentiation and is repressed by BCL6. 
+
+```{r}
+tf_df <- dorothea::dorothea_hs %>%
+  dplyr::filter(confidence %in% c("A"))
+
+tf_df %>% dplyr::filter(target == "BCL6")
+bcl6_preprint <- tf_df %>% dplyr::filter(target == "BCL6") %>% dplyr::pull(tf)
+bcl6_preprint <- c("BCL6", bcl6_preprint)
+  
+tf_df %>% dplyr::filter(target == "PRDM1")
+bcl6_antagonist <- tf_df %>% dplyr::filter(target == "PRDM1") %>% dplyr::pull(tf)
+
+bcl6_footprint <- c("PRDM1", "TBX21", "GATA3", "RORA", "RORC")
+signaling <- c("CCR7", "CXCR5", "IL12RB1", "IL23R", "IL4R", "IL23R", "TGFBR1")
+```
+
+### Define workflow parameters
+In this example we will explain the expression of TF upstream of BCL6 in terms of three different views:
+
+- Main (intrinsic) view (containing genes to be predicted): intrinsic expression of TF upstream of BCL6 genes. \
+- Paraview - hypoxia genes: expression of TF upstream of BCL6 in a significance radius of 5 spots. \
+- Paraview - estrogen genes: expression of TF upstream of PRDM1 in a significance radius of 5 spots. \
+
+```{r}
+# Define assay for each view
+view.assays <- list(
+  "main" = "SCT",
+  "para.preprint" = "SCT",
+  "para.antagonist" = "SCT"
+)
+
+# Define features for each view
+view.features <- list(
+  "main" = bcl6_preprint,
+  "para.preprint" = bcl6_preprint,
+  "para.antagonist" = bcl6_antagonist
+
+)
+
+# Define spatial context for each view
+view.types <- list(
+  "main" = "intra",
+  "para.preprint" = "para",
+  "para.antagonist" = "para"
+  )
+
+# Define additional parameters (l in the case of paraview)
+view.params <- list(
+  "main" = NULL,
+  "para.preprint" = 5,
+  "para.antagonist" = 5
+)
+
+misty.out <- "bcl6_test"
+```
+
+### Run mistyR
+Now that we have preprocessed the data and have decided on a question to analyze, we can create and run a mistyR workflow.
+```{r warning=TRUE, message=TRUE}
+misty.results <- run_misty_seurat(
+  visium.slide = se_sub,
+  view.assays = view.assays,
+  view.features = view.features,
+  view.types = view.types,
+  view.params = view.params,
+  spot.ids = NULL, # Using the whole slide
+  out.alias = misty.out
+) %>%
+  mistyR::collect_results()
+```
+
+### Interpretation
+
+**MISTy gives answers to three general questions:**
+
+**1. How much can the broader spatial context explain the expression of markers (in contrast to the intraview)?**
+
+To interpret this we need to take into account the R2 since it is the measure that tells us how much variance the different models explain.
+In this case we are looking at how much information the multiviews (all paraviews + juxtaviews) add to the main view.
+Therefore the higher the R2 more information is explained by the model - So when assessing the following plots we need to take into account the absolute value of R2 and the p value to see if a feature is indeed explained by the spatial environment or not. 
+
+This can be observed in the gain in R2 (or RMSE) of using the multiview model in contrast to the single main view model.
+```{r}
+p1 <- misty.results %>%
+  plot_improvement_stats_inhouse(misty.results = ., measure = "gain.R2")
+p2 <- misty.results %>%
+  plot_improvement_stats_inhouse(misty.results = ., measure = "gain.RMSE")
+
+p1 + p2
+```
+
+In this example, BCL6 is a marker whose expression can be explained better by modeling the broader spatial context around each spot.
+
+We can further inspect the significance of the gain in variance explained, by the assigned p-value of improvement based on cross-validation.
+```{r}
+misty.results$improvements %>%
+  tidyr::pivot_wider(names_from = measure) %>% 
+  dplyr::arrange(gain.R2) %>%
+  dplyr::select(-sample)
+```
+
+In general, the significant gain in R2 can be interpreted as the following:
+"*We can better explain the expression of marker X, when we consider additional views, other than the intrinsic view.*"
+
+**2. How much do different view components contribute to explaining the expression?**
+
+```{r}
+misty.results %>% mistyR::plot_view_contributions()
+```
+
+```{r}
+# misty.results$contributions.stats %>% dplyr::filter(target == "BCL6")
+misty.results$contributions.stats
+```
+
+In the case of BCL6, we observe that around 60% of the contribution in the final model comes from the expression of other markers of TF of BCL6 from the paraview while 35% comes the intrinsic view.
+
+**3. What are the specific relations that can explain the contributions?**
+
+To explain the contributions, we can visualize the importances of markers coming from each view separately as predictors of the expression of the intrinsic markers of BCL6
+
+First, the intrinsic importances of the BCL6 upstream transcription factors.
+```{r}
+misty.results %>% mistyR::plot_interaction_heatmap(
+  view = "intra",
+  cutoff = 0)
+```
+
+These importances are associated to the relationship between markers in the same spot. Let’s pick the best predictor of BCL6 to confirm this:
+```{r}
+misty.results$importances.aggregated[["intra"]] %>%
+  dplyr::select(Predictor, BCL6) %>%
+  dplyr::arrange(-BCL6)
+
+Seurat::SpatialFeaturePlot(se_sub, features = c("STAT1", "TP53", "STAT3"))
+
+```
+
+Second, the paraview importances of the hypoxia markers.
+```{r}
+misty.results %>% mistyR::plot_interaction_heatmap(
+  view = "para.preprint_5", cutoff = 0)
+
+misty.results$importances.aggregated[["para.preprint_5"]] %>%
+  dplyr::select(Predictor, BCL6) %>%
+  dplyr::arrange(-BCL6)
+
+```
+
+These importances are associated to the relationship between markers in the spot and markers in the neighborhood (controlled by our parameter l).
+```{r}
+Seurat::SpatialFeaturePlot(se_sub, features = c("BCL6"), alpha = c(0, 1))
+Seurat::SpatialFeaturePlot(se_sub, features = c("CTCF", "STAT1", "TP53", "FOXO3"), alpha = c(0, 1))
+
+```
+
+Third, the paraview importances of the antagonist TF markers. We will inspect the best predictor in this view.
+```{r}
+misty.results %>% mistyR::plot_interaction_heatmap(
+  view = "para.antagonist_5",
+  cutoff = 0)
+
+misty.results$importances.aggregated[["para.antagonist_5"]] %>%
+  dplyr::select(Predictor, BCL6) %>%
+  dplyr::arrange(-BCL6)
+
+Seurat::SpatialFeaturePlot(se_sub, features = c("BCL6", "E2F1", "TP53"))
+```
+
+### Important notes
+
+- The relationships captured in the importances are not to assumed or interpreted as linear or casual. \
+- 1-to-1 importances between predictor and markers should always be interpreted in the context of the other predictors, since training MISTy models is multivariate predictive task. \
+
+### Other notes
+
+From a conversation with Ricardo Omar Ramirez Flores from the saez lab he mentioned a couple of things that he has found when developing mistyR: \
+- Filter the importance by R2 to assess the degree of influence of the different views \
+- An important thing we can look at is the correlation between the intraview and a para/juxta view layer (he will send me the gaussian smoothing kernel they are using to obtain the signal for each spot). \
+- The previous smoothing, in short, is grabing a gaussian kernel and weighing the gene expression of the genes depending on the distance weighin higher those that are closer to the central spot. \
+- Using a large feature space we can detect very interesting patterns of importance that we may lose when looking at a handful of features.
+- Always interesting to look at L:R in the feature space. \
+- When there is one feature that is ubiquitously expressed it can eat up signal from other features introducing noise to the model, remove them if that is the case. \
+
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,183 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "Myeloid cells MAGIC denoising"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to use MAGIC to better visualize genes and ease with the annotation when using specific marker genes.
+[MAGIC](https://magic.readthedocs.io/en/stable/) was developed by Smita Krishnaswamy's lab to try to fill in the drop out reads in the spots. `MAGIC` is a Markov Affinity-based Graph Imputation of Cells used for denoising high-dimensional data most commonly applied to single-cell RNA sequencing data. MAGIC learns the manifold data, using the resultant graph to smooth the features and restore the structure of the data based on their k-nearest neighbors. 
+
+## Libraries
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+```
+
+Loading *Rmagic*
+```{r}
+library(reticulate)
+
+# conda create -n MAGIC python=3.7
+# conda install -c bioconda scprep
+# conda install matplotlib future tasklogger graphtools scipy pandas Deprecated pygsp pytz python-dateutil six threadpoolctl joblib decorator wrapt cycler kiwisolver pyparsing pillow
+# conda install -c anaconda zlib
+# ~/anaconda3/envs/MAGIC/bin/pip3 install magic-impute
+#
+# path_to_python <- "/media/data1/anaconda3/envs/MAGIC"
+path_to_python <- "/scratch/groups/hheyn/software/anaconda3/envs/spatial_r/"
+# reticulate::use_python(path_to_python, required = TRUE)
+reticulate::use_condaenv(path_to_python)
+reticulate::py_discover_config(required_module = "magic")
+reticulate::py_config()
+library(Rmagic)
+```
+
+## Parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{myeloid}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{myeloid}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+
+### MAGIC denoising
+
+We are going to use manually selected marker by the annotation team to try to spot specific myeloid cell related populations
+
+
+We're also going to use the following markers from these papers: \
+[A Spatially Resolved Dark- versus Light-Zone Microenvironment Signature Subdivides Germinal Center-Related Aggressive B Cell Lymphomas](10.1016/j.isci.2020.101562)
+- **Dark Zone**: OAZ1, AICDA, H3, MKI67, POLH
+- **Light Zone**: LAG3, ITGB8, PDCD1, TIGIT, BCL2, PECAM1, LY6E, B7-H3 (CD276), HLA-DRB1, PSMB10, TNF, ARG1, HLA-E, STAT1
+
+```{r}
+"{plasma}/gene_dict_plasma.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+
+plasma_vec
+
+"{cd4}/gene_dict.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+gene_vec
+
+"{myeloid}/gene_dict_myeloid.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+myeloid_vec
+
+gene_vec <- unique(c(plasma_vec, gene_vec, myeloid_vec))
+gene_vec <- intersect(gene_vec, rownames(merged_se))
+```
+
+Run MAGIC, it is recommended by the developers to run it within sample so we are going to run it separately for each one.
+This follows the same principle as why we want to run SCTransform in samples individually, we don't want information leaking from one dataset to another even if they are healthy tonsils that should be homogeneous.
+```{r}
+magic_ls <- lapply(id_sp_df$gem_id, function(id) {
+  print(id)
+  sub_se <- merged_se[, merged_se$gem_id == id]
+  # Remove 0 genes
+  sum_vec <- sparseMatrixStats::rowSums2(sub_se@assays$Spatial@counts[gene_vec, ])
+  
+  gene_tmp <- gene_vec[sum_vec > 0]
+  
+  data_magic <- Rmagic::magic(
+    data = sub_se,
+    assay = "Spatial",
+    counts = "data",
+    genes = gene_tmp,
+    knn = 2,
+    knn.max = NULL,
+    decay = 1,
+    # Set t = 2 for minimal diffusion
+    t = 5,
+    npca = 100,
+    init = NULL,
+    t.max = 20,
+    knn.dist.method = "euclidean",
+    verbose = 1,
+    n.jobs = 1,
+    seed = 123)
+  
+  tmp_mtrx <- data_magic@assays$MAGIC_Spatial@data
+  data.frame(tmp_mtrx, check.names = FALSE)
+})
+
+# Combine all the matrices
+# magic_df <- lapply(magic_ls, function(i) {
+#   i <- t(i)
+#   if (ncol(i) < length(gene_vec)) {
+#     # Add 0 to those genes not present in the slide
+#     g <- gene_vec[!gene_vec %in% colnames(i)]
+#     i[, g] <- 0
+#     tmp <- data.frame(i, check.names = FALSE)
+#   } else {
+#     tmp <- data.frame(i, check.names = FALSE)
+#   }
+#   tmp
+# } ) %>%
+#   dplyr::bind_cols()
+
+# https://stackoverflow.com/questions/14783606/merge-multiple-data-frame-by-row-in-r
+magic_df <- Reduce(function(a,b){
+        ans <- merge(a, b, by = "row.names", all = TRUE)
+        row.names(ans) <- ans[, "Row.names"]
+        ans[, !names(ans) %in% "Row.names"]
+        }, magic_ls)
+# Replace all NA for 0
+magic_df[is.na(magic_df)] <- 0
+
+"{myeloid}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = magic_df, file = .)
+
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

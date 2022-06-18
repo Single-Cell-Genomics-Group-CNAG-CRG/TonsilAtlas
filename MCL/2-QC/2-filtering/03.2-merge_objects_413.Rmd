@@ -1,0 +1,143 @@
+---
+title: "Merge scATAC-seq objects (413)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here we will [merge](https://satijalab.org/signac/articles/merging.html) the scATAC-seq objects for case 413.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+path_to_data <- here::here("MCL/results/R_objects/1.seurat_objects_atac_filtered_413.rds")
+path_to_save <- here::here("MCL/results/R_objects/2.seurat_merged_atac_413.rds")
+```
+
+
+## Read data
+
+```{r}
+seurat_list <- readRDS(path_to_data)
+purrr::map_chr(seurat_list, ~unique(.x$donor_id))
+```
+
+
+## Gene annotation
+
+```{r comment=FALSE}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+
+# Merge objects
+
+## Combine peaks
+
+Since each peak calling was done on each sample separately, it is essential to combine the peaks to get a common feature framework. We will use the reduce method instead of the disjoin (more information on that [here](https://satijalab.org/signac/articles/merging.html))
+
+```{r}
+combined_peaks <- UnifyPeaks(object.list = seurat_list, mode = "reduce")
+combined_peaks
+table(combined_peaks@seqnames)
+
+
+# Keep only standard chromosomes
+combined_peaks <- keepStandardChromosomes(
+  combined_peaks,
+  pruning.mode = "coarse"
+)
+table(combined_peaks@seqnames)
+
+
+# Remove peaks with outlier widths
+peak_widths <- width(combined_peaks)
+ggviolin(peak_widths, add = "boxplot", fill = "gray") +
+  scale_y_log10() +
+  geom_hline(yintercept = c(20, 10000), linetype = "dashed", col = "black")
+combined_peaks <- combined_peaks[peak_widths < 10000 & peak_widths > 20]
+combined_peaks
+```
+
+
+## Quantify peaks
+
+Because the features changed, we will requantify the accessibility matrix from the fragments file
+
+```{r}
+seurat_list_unified <- purrr::map(seurat_list, function(seurat_obj) {
+  new_counts <- FeatureMatrix(
+    fragments = Fragments(seurat_obj),
+    features = combined_peaks,
+    cells = colnames(seurat_obj)
+  )
+  seurat_obj[["peaks"]] <- CreateChromatinAssay(
+    new_counts, 
+    genome = "hg38",
+    fragments = Fragments(seurat_obj),
+    annotation = annotation
+  )
+  DefaultAssay(seurat_obj) <- "peaks"
+  seurat_obj[["ATAC"]] <- NULL
+  seurat_obj
+})
+rm(seurat_list)
+```
+
+
+## Merge
+
+We can now proceed to merge the objects
+
+```{r}
+seurat <- merge(
+  x = seurat_list_unified$jt18zlyw_fy97xnbm,
+  y = list(seurat_list_unified$wsz3j4g1_27jak0zo, seurat_list_unified$ywt2m1v6_16u4fqig)
+)
+rm(seurat_list_unified)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

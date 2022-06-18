@@ -1,0 +1,265 @@
+---
+title: "Cellranger Mapping QC"
+author: "Ramon Massoni-Badosa"
+date: "4/15/2020"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to perform a basic quality control (QC) analysis of the mapping performed with [cellranger](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger). We will do a joint analysis of all the metrics_summary.csv obtained for each library. For more information, we refer to the [cellranger documentation](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/output/overview) and the associated [technical note](https://assets.ctfassets.net/an68im79xiti/163qWiQBTVi2YLbskJphQX/e90bb82151b1cdab6d7e9b6c845e6130/CG000329_TechnicalNote_InterpretingCellRangerWebSummaryFiles_RevA.pdf).
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(ggpubr)
+library(ggrepel)
+library(DT)
+library(plotly)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_not_hashed <- here::here("scRNA-seq/results/tables/cellranger_mapping/cellranger_mapping_metrics_not_hashed.csv")
+path_to_hashed <- here::here("scRNA-seq/results/tables/cellranger_mapping/cellranger_mapping_metrics_hashed.csv")
+path_to_donor_metadata <- here::here("data/tonsil_atlas_donor_metadata.csv")
+path_to_proj_metadata <- here::here("scRNA-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+We have two different datasets (hashed and not hashed). The hashed dataset has additional variables related to the hashtag oligonucleotide (HTO) mapping.
+
+```{r}
+# Load
+qc_not_hashed <- read_csv(path_to_not_hashed, col_names = TRUE)
+qc_hashed <- read_csv(path_to_hashed, col_names = TRUE)
+donor_metadata <- read_csv(path_to_donor_metadata, col_names = TRUE)
+tonsil_metadata <- read_csv(path_to_proj_metadata, col_names = TRUE)
+
+
+# Clean
+colnames(qc_not_hashed) <- str_replace_all(colnames(qc_not_hashed), " ", "_")
+colnames(qc_hashed) <- str_replace_all(colnames(qc_hashed), " ", "_")
+common_columns <- intersect(colnames(qc_not_hashed), colnames(qc_hashed))
+qc_not_hashed <- qc_not_hashed[, common_columns]
+qc_hashed_sub <- qc_hashed[, common_columns]
+
+
+# Join datasets
+qc_list <- list(not_hashed = qc_not_hashed, hashed = qc_hashed_sub)
+qc <- bind_rows(qc_list, .id = "type")
+qc <- as.data.frame(qc)
+for (col in colnames(qc)) {
+  if (any(str_detect(qc[, col], "%"))) {
+    qc[, col] <- as.double(str_remove(qc[, col], "%"))
+  }
+}
+qc$type <- factor(qc$type, levels = c("not_hashed", "hashed"))
+library_names <- tonsil_metadata$library_name
+names(library_names) <- tonsil_metadata$gem_id
+qc$library_name <- library_names[qc$gem_id]
+print("QC summary table")
+DT::datatable(qc)
+
+print("Donor metadata")
+DT::datatable(donor_metadata)
+
+print("Libraries metadata")
+DT::datatable(tonsil_metadata)
+```
+
+# Overall statistics
+
+## Estimated Number of Cells
+
+Let us start by plotting the estimated number of cells per library. Note that this number will differ a lot from the final number of cells after applying future QC filters:
+
+```{r}
+num_cells_gg <- purrr::map(c("not_hashed", "hashed"), function(x){
+  qc %>%
+    filter(type == x) %>%
+    horizontal_barplot(
+      categorical_var = "library_name",
+      continuous_var = "Estimated_Number_of_Cells",
+      ylab = "Estimated Number of Cells"
+    )
+})
+
+print("Estimated number of cells for non-hashed samples:")
+num_cells_gg[[1]]
+print("Estimated number of cells for hashed samples:")
+num_cells_gg[[2]]
+```
+
+
+## Median genes per cell
+
+```{r}
+median_genes_gg <- purrr::map(c("not_hashed", "hashed"), function(x){
+  qc %>%
+    filter(type == x) %>%
+    horizontal_barplot(
+      categorical_var = "library_name",
+      continuous_var = "Median_Genes_per_Cell",
+      ylab = "Median genes per cell"
+    )
+})
+
+print("Median genes per cell for non-hashed samples:")
+median_genes_gg[[1]]
+print("Median genes per cell for hashed samples:")
+median_genes_gg[[2]]
+```
+
+
+# Sequencing
+
+Our first objective is to quantify the quality of our sequenced libraries prior to mapping. We will leverage the "Q30" variables in our dataset. According to 10X, these report the fraction of bases with a Q-score of at least 30 for different sequences: cell barcode, RNA reads, Unique Molecular Identifiers (UMI). Q-score is calculated as follows:
+
+$$Q = -10\log10(p)$$
+Where p is the probability of the base being wrongly called. Thus, bases with a high Q are highly reliable.
+
+```{r fig.height=18}
+# Sequencing QC
+cols <- c("#cb3b25", "#b930df")
+
+
+# Q30
+q30_vars <- str_subset(colnames(qc), "Q3")
+q30_gg <- purrr::map(q30_vars, function(var) {
+  selected_qc <- qc[qc[[var]] < 85, ]
+  ggplot(qc, aes_string("type", var, color = "type")) +
+    geom_boxplot(fill = NA, outlier.shape = NA) +
+    geom_jitter(width = 0.1, height = 0) +
+    geom_text_repel(data = selected_qc, aes(label = library_name), color = "black") +
+    scale_y_continuous(limits = c(75, 100)) +
+    scale_color_manual("", values = cols) +
+    labs(x = "", y = str_c(str_replace_all(var, "_", " "), " (%)")) +
+    theme_classic() +
+    theme(legend.position = "none",
+          axis.title = element_text(size = 13),
+          axis.text = element_text(size = 13, color = "black"))
+})
+q30_gg_arr <- ggarrange(plotlist = q30_gg, nrow = 3, ncol = 1)
+q30_gg_arr
+```
+
+
+# Mapping
+
+Secondly, we will assess the quality of cellranger's mapping by comparing the percentage of reads mapping to the genome, intergenic regions, intronic and exonic regions across libraries. Reads mapping to intergenic regions suggest contamination of ambient DNA, while reads mapping to intronic regions may come from pre-mRNAs or mature splice isoforms that retain the introns:
+
+```{r fig.wide=TRUE, fig.height=12}
+# Reads mapped to genome and transcriptome
+mapping_qc_vars <- c(
+  "Reads_Mapped_Confidently_to_Genome",
+  "Reads_Mapped_Confidently_to_Intergenic_Regions",
+  "Reads_Mapped_Confidently_to_Intronic_Regions",
+  "Reads_Mapped_Confidently_to_Exonic_Regions"
+)
+mapping_qc_gg <- purrr::map(mapping_qc_vars, function(var) {
+  ggplot(qc, aes_string("type", var, color = "type")) +
+    geom_jitter() +
+    geom_boxplot(fill = NA, outlier.shape = NA) +
+    scale_y_continuous(limits = c(0, 100)) +
+    scale_color_manual("", values = cols) +
+    labs(x = "", y = str_c(str_replace_all(var, "_", " "), " (%)")) +
+    theme_bw() +
+    theme(legend.position = "none",
+          axis.title = element_text(size = 13),
+          axis.text = element_text(size = 13, color = "black"))
+})
+selected_qc <- qc[(qc$type == "not_hashed" & 
+                   qc$Reads_Mapped_Confidently_to_Genome < 50) |
+                  (qc$type == "hashed" & 
+                   qc$Reads_Mapped_Confidently_to_Genome < 75), ]
+mapping_qc_gg[[1]] <- mapping_qc_gg[[1]] +
+  geom_text_repel(data = selected_qc, aes(label = library_name), color = "black")
+selected_qc <- qc[qc$type == "not_hashed" &
+                  qc$Reads_Mapped_Confidently_to_Intronic_Regions < 12.5, ]
+mapping_qc_gg[[3]] <- mapping_qc_gg[[3]] +
+  geom_text_repel(data = selected_qc, aes(label = library_name), color = "black")  
+selected_qc <- qc[(qc$type == "not_hashed" &
+                   qc$Reads_Mapped_Confidently_to_Exonic_Regions < 25) |
+                  (qc$type == "hashed" &
+                   qc$Reads_Mapped_Confidently_to_Exonic_Regions < 40), ]
+mapping_qc_gg[[4]] <- mapping_qc_gg[[4]] +
+  geom_text_repel(data = selected_qc, aes(label = library_name), color = "black")
+
+
+# mapping_qc_gg
+mapping_qc_arr <- ggarrange(plotlist = mapping_qc_gg, nrow = 2, ncol = 2)
+mapping_qc_arr
+```
+
+
+# Sequencing Saturation
+
+Thirdly, we will plot the number of detected genes per library as a function of the total reads sequenced. We know that this function reaches a plateau, whereby more sequenced reads does not result in more detected genes. In those scenarios, we say that we have sequenced until saturation:
+
+```{r fig.width = 8, fig.height = 6}
+selected_qc <- qc[qc$Total_Genes_Detected < 20000, ]
+num_genes_vs_total_reads <- qc %>%
+  ggplot(aes(Number_of_Reads, Total_Genes_Detected, color = type)) +
+    geom_point() +
+    geom_text_repel(data = selected_qc, aes(label = library_name), color = "black") +
+    scale_color_manual("", values = cols) +
+    labs(x = "Number of Reads", y = "Total Genes Detected", color = "") +
+    theme_classic() +
+    theme(axis.title = element_text(size = 13, color = "black"),
+          axis.text = element_text(size = 12, color = "black"),
+          legend.text = element_text(size = 12, color = "black"))
+ggplotly(num_genes_vs_total_reads)
+```
+
+
+# Cell Hashing
+
+Finally, we aim to get a sense of the depth of the HTO libraries:
+
+```{r widefig}
+colnames(qc_hashed) <- str_remove(colnames(qc_hashed), ":")
+
+# Library size HTO
+library_names_hashed <- qc[qc$type == "hashed", "library_name"]
+names(library_names_hashed) <- qc[qc$type == "hashed", "gem_id"]
+qc_hashed$library_name <- library_names_hashed[qc_hashed$gem_id]
+lib_size_hto_gg <- qc_hashed %>%
+  horizontal_barplot(
+    categorical_var = "library_name",
+    continuous_var = "Antibody_Number_of_Reads",
+    ylab = "Library size HTO"
+  )
+
+lib_size_hto_gg
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,363 @@
+---
+title: "Motif analysis CISBP"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+The transcription factors (TF) and DNA recognitions depend on multiples levels of interactions. The first level involves chromatin accessibility, where nuclesosome-depleted regions are highly associated with TFs binding compared to the closed chromatin, which is often inaccesible to most TFs. The second represents the existence of the consensus binding motif in the DNA sequence, a point that we are going to identify in this notebook in each cell type using Signac and ChromVar.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(JASPAR2020)
+library(TFBSTools)
+library(BSgenome.Hsapiens.UCSC.hg38)
+library(patchwork)
+library(chromVAR)
+library(motifmatchr)
+library(ggpubr)
+library(data.table)
+library(chromVARmotifs)
+library(dplyr)
+library(purrr)
+library(readxl)
+library(writexl)
+library(pheatmap)
+library(factoextra)
+library(corrplot)
+
+set.seed(1234)
+```
+
+## Parameters
+```{r parameters}
+cell_type = "PC"
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/05.",
+  cell_type,
+  "_chromVar_CISBP_level_5.rds",
+  sep = ""
+)
+
+path_to_save_TF_motifs <- paste0(
+  here::here("scATAC-seq/results/files/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_chromVar_CISBP_level_5.xlsx",
+  sep = ""
+)
+
+color_palette <- c("#73787E", "#B8BCC1","#FECFC7" ,"#FF8E7B",
+                   "#a13b53","#A6E1F4", "#586BA4", "#323734",
+                   "#035F72", "#9CC6CF" ,"#198C19","#006600","#FFD8B1")
+```
+
+## Functions
+```{r}
+remove_correlated_helper <- function(mat, val, cutoff = 0.9) {
+  stopifnot(nrow(mat) == length(val))
+  cormat <- cor(t(mat), use = "pairwise.complete.obs")
+  diag(cormat) <- NA
+  keep <- seq_len(nrow(mat))
+  for (i in order(val, decreasing = TRUE)) {
+    if (i %in% keep) {
+      toremove <- which(cormat[keep, i] >= cutoff)
+      if (length(toremove) > 0) 
+        keep <- keep[-toremove]
+    }
+  }
+  return(keep)
+}
+
+DARS <- function(ident.1,ident.2){
+  DARs <- FindMarkers(
+  ident.1 = ident.1,
+  ident.2 = ident.2,
+  object = seurat,
+  min.pct = 0.05,
+  test.use = 'LR',
+  latent.vars = 'nCount_peaks_level_5')
+
+DARs_filtered <- DARs[DARs$p_val_adj < 0.05,]
+return(DARs_filtered)}
+
+DARS_matrix_ChromVar <- function(DARs, group){
+  avgexpr_mat <- AverageExpression(
+  features = row.names(DARs),
+  seurat,
+  assays = "chromvar",
+  return.seurat = F,
+  group.by = group,
+  slot = "data")
+  
+return(avgexpr_mat)}
+```
+
+# Load data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+DimPlot(seurat, 
+        cols = color_palette,
+        pt.size = 0.8)
+```
+
+# Adding motif information to the Seurat object
+
+## Retrieving matrices from cisBP database
+Curated collection of human motifs from cisBP database
+
+```{r}
+data("human_pwms_v1")
+length(human_pwms_v1)
+```
+
+
+## Add motif information
+
+```{r}
+seurat <- AddMotifs(
+  object = seurat,
+  genome = BSgenome.Hsapiens.UCSC.hg38,
+  pfm = human_pwms_v1
+)
+
+seurat[["peaks_level_5"]]
+```
+
+
+# Computing motif activities
+The TF motif enrichments (that help us to predict potential specific cell-type regulators) previously computed are not calculated per-cell and they do not take into account the insertion sequence bias of the Tn5 transposase. To account for these issues we can use 
+chromVAR that computes for each motif annotation and each cell a bias corrected "desviation" in accessibility from a expected accessibility based on the average of all the cells. This allows us to visualize motif activities per cell, and also provides an alternative method of identifying differentially-active motifs between cell types. 
+
+```{r}
+# The RunChromVAR function retrieved the deviationScores, the Z-scores for each bias corrected deviations.
+seurat <- RunChromVAR(
+  object = seurat,
+  genome = BSgenome.Hsapiens.UCSC.hg38
+)
+
+saveRDS(seurat, path_to_save)
+```
+
+## Averaging the Z-Score by all the cell that conform a cell-type group.
+```{r}
+avgexpr_mat <- AverageExpression(
+  seurat,
+  assays = "chromvar",
+  return.seurat = F,
+  group.by = "ident",
+  slot = "data")
+```
+
+```{r}
+res.pca <- prcomp(t(avgexpr_mat$chromvar),scale. = T)
+
+options(repr.plot.width=6, repr.plot.height=8)
+fviz_pca_ind(res.pca,
+             repel = TRUE)
+```
+
+```{r}
+pheatmap(avgexpr_mat$chromvar, scale = "row",
+         border_color = "black",
+         cluster_rows = T,
+         cluster_cols = T,
+         fontsize_row= 3,
+         clustering_distance_rows = "euclidean",
+         clustering_distance_cols = "euclidean", 
+         clustering_method = "ward.D2",
+         cutree_rows = NA, 
+         cutree_cols = 2)
+```
+
+## Averaging the Z-Score & Correction proposed by chromVar
+We compute the standar desviation for each annotated motif. Then, we select motifs that have a standar desviation higher than a specific theshold and use them to perform a correlation test and a principal component analysis. Note, that we are going to use the function "remove_correlated_helper", to eliminate the variables that present a correlation greater than 0.9.
+
+```{r}
+seurat_average <- AverageExpression(
+  seurat,
+  assays = "chromvar",
+  return.seurat = T,
+  group.by = "ident")
+
+
+threshold = 1
+matrix <- seurat_average[["chromvar"]]@data
+vars <- matrixStats::rowSds(matrix, na_rm = TRUE)
+boxplot(vars)
+abline(h=1)
+
+ix <- which(vars >= threshold)
+ix2 <- ix[remove_correlated_helper(matrix[ix, , drop = FALSE], 
+                                   vars[ix])]
+
+cormat <- cor(matrix[ix2,], 
+              use = "pairwise.complete.obs")
+
+corrplot(cormat, type="upper", order="hclust", tl.col="black", tl.srt=45)
+
+pc_res <- prcomp(t(matrix[ix2, ]))
+fviz_pca_ind(pc_res, repel = TRUE)
+```
+
+# Plotting canonical TF motifs for PCs
+
+```{r}
+human_pwms_v1[grep(pattern = "SIX4",x = name(human_pwms_v1))]
+
+FeaturePlot(
+  object = seurat,
+  features = c("ENSG00000100219-LINE344-XBP1-D-N4",
+               "ENSG00000100219-LINE343-XBP1-D-N1",
+               "ENSG00000057657-LINE611-PRDM1-D-N4",
+               "ENSG00000137265-LINE2747-IRF4-D-N1",
+               "ENSG00000137265-LINE2748-IRF4-D-N1",
+               "ENSG00000213999-LINE2814-MEF2B-D",
+               "ENSG00000177045-LINE2505-SIX5-D-N1",
+               "ENSG00000177045-LINE2506-SIX5-D-N1",
+               "ENSG00000100625-LINE2190-SIX4-I"),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.1,
+  ncol = 3
+)
+```
+
+
+# Differential motif activity analysis across the main states of PC maturation
+
+```{r}
+DefaultAssay(seurat) <- 'chromvar'
+
+step1_ChromVar <- DARS(ident.1 = "Light Zone GCBC", 
+              ident.2 = "PC committed Light Zone GCBC")
+
+step2_ChromVar <- DARS(ident.1 = "PC committed Light Zone GCBC", 
+              ident.2 = "IgG+ PC precursor")
+
+step3_ChromVar <- DARS(ident.1 = "IgG+ PC precursor", 
+              ident.2 = "Mature PC")
+
+step4_ChromVar <- DARS(ident.1 = "class switch MBC", 
+              ident.2 = "Mature PC")
+```
+
+```{r}
+up_selection1 <- row.names(step1_ChromVar %>% top_n(5, avg_log2FC))
+down_selection1 <- row.names(step1_ChromVar %>% top_n(5, -avg_log2FC))
+
+up_selection2 <- row.names(step2_ChromVar %>% top_n(3, avg_log2FC))
+down_selection2 <- row.names(step2_ChromVar %>% top_n(3, -avg_log2FC))
+
+up_selection3 <- row.names(step3_ChromVar %>% top_n(3, avg_log2FC))
+down_selection3 <- row.names(step3_ChromVar %>% top_n(3, -avg_log2FC))
+
+up_selection4 <- row.names(step4_ChromVar %>% top_n(3, avg_log2FC))
+down_selection4 <- row.names(step4_ChromVar %>% top_n(3, -avg_log2FC))
+```
+
+```{r}
+FeaturePlot(
+  object = seurat,
+  features = c(up_selection1,down_selection1),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.2,
+  ncol = 3
+)
+```
+
+```{r}
+FeaturePlot(
+  object = seurat,
+  features = c(up_selection2,down_selection2),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.2,
+  ncol = 3
+)
+```
+
+```{r}
+FeaturePlot(
+  object = seurat,
+  features = c(up_selection3,down_selection3),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.2,
+  ncol = 3
+)
+```
+
+```{r}
+FeaturePlot(
+  object = seurat,
+  features = c(up_selection4,down_selection4),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.2,
+  ncol = 3
+)
+```
+
+```{r}
+FeaturePlot(
+  object = seurat,
+  order = T,
+  features = c("ENSG00000109320-LINE3205-NFKB1-D-N1",
+               "ENSG00000137709-LINE2649-POU2F3-D-N1",
+               "ENSG00000137265-LINE2748-IRF4-D-N1",
+               "ENSG00000115415-LINE3478-STAT1-D-N1",
+               "ENSG00000135363-LINE3654-LMO2-D-N1",
+               "ENSG00000196628-LINE303-TCF4-D-N3",
+               "ENSG00000177606-LINE517-JUN-D-N5",
+               "ENSG00000175592-LINE505-FOSL1-D-N3",
+               "ENSG00000162772-LINE458-ATF3-D-N1",
+               "ENSG00000142539-LINE1880-SPIB-D-N2"),
+  min.cutoff = 'q5',
+  max.cutoff = 'q95',
+  pt.size = 0.2,
+  ncol = 2
+)
+```
+
+# Session info
+```{r}
+sessionInfo()
+```
+

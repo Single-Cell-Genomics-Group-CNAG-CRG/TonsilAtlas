@@ -1,0 +1,263 @@
+---
+title: "Project CITE-seq onto RNA-seq (level 1)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+This script transfers the annotation (level 1) and UMAP coordinates from scRNA-seq to CITE-seq.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+library(caret)
+library(class)
+library(tidyverse)
+library(here)
+```
+
+
+## Parameters
+
+```{r}
+# Parameters and thresholds
+optimal_k <- 6
+
+
+# Source functions
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+
+
+# Paths
+path_to_donor_metadata <- here("data/tonsil_atlas_donor_metadata.csv")
+path_to_sequencing_cite_metadata <- here("CITE-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv")
+path_to_save_integrated <- here::here("scRNA-seq/results/R_objects/final_clusters/integrated_cite_seq_rna.rds")
+```
+
+
+## Read data
+
+```{r}
+query <- readRDS(path_to_cite_seq)
+reference <- readRDS(path_to_save_tonsil)
+final_cells_df <- readRDS(path_to_save_df_multi_myeloid)
+donor_metadata <- read_csv(path_to_donor_metadata)
+sequencing_cite_metadata <- read_csv(path_to_sequencing_cite_metadata)
+```
+
+
+# Harmonize CITE-seq dataset
+
+```{r}
+# Harmonize columns metadata to match the ones we have in RNA-seq
+DefaultAssay(query) <- "RNA"
+query$barcode <- colnames(query)
+colnames(query@meta.data)[colnames(query@meta.data) == "gemid"] <- "gem_id"
+query$pct_mt <- query$percent.mt
+query$pct_ribosomal <- PercentageFeatureSet(query, pattern = "^RPS")
+new_metadata <- left_join(query@meta.data, donor_metadata, by = "donor_id")
+rownames(new_metadata) <- new_metadata$barcode
+query@meta.data <- new_metadata
+query$assay <- "CITE-seq"
+query$UMAP_1_20220215 <- Embeddings(query, "wnn.umap")[, "wnnUMAP_1"]
+query$UMAP_2_20220215 <- Embeddings(query, "wnn.umap")[, "wnnUMAP_2"]
+query@meta.data <- query@meta.data[, selected_cols_cite]
+
+
+# Clean feature names
+rownames_counts <- str_remove(rownames(query[["ADT"]]@counts), "\\.1$")
+rownames_data <- str_remove(rownames(query[["ADT"]]@data), "\\.1$")
+rownames_scale_data <- str_remove(rownames(query[["ADT"]]@scale.data), "\\.1$")
+query[["ADT"]]@counts@Dimnames[[1]] <- rownames_counts
+rownames(query[["ADT"]]@data) <- rownames_data
+rownames(query[["ADT"]]@scale.data) <- rownames_scale_data
+
+
+# Save tmp query (missing columns: annotation_figure_1, UMAP1_level_1, UMAP2_level2)
+saveRDS(
+  query,
+  here("scRNA-seq/3-clustering/final_clusters/tmp/cite_seq_tmp.rds")
+)
+```
+
+
+# Merge query and reference
+
+```{r}
+selected_cols_ref <- c("barcode", "gem_id", "assay", "nCount_RNA",
+                       "nFeature_RNA", "pct_mt", "annotation_figure_1",
+                       "scrublet_doublet_scores", "scrublet_predicted_doublet",
+                       "UMAP_1_level_1", "UMAP_2_level_1")
+query[["ADT"]] <- NULL
+reference <- DietSeurat(reference)
+reference@meta.data <- reference@meta.data[, selected_cols_ref]
+reference$type <- "reference"
+query$annotation_figure_1 <- NA
+query$UMAP_1_level_1 <- NA
+query$UMAP_2_level_1 <- NA
+query@meta.data <- query@meta.data[, selected_cols_ref]
+query$type <- "query"
+integrated <- merge(x = reference, y = query)
+rm(reference, query)
+Idents(integrated) <- "assay"
+```
+
+
+# Find assay-specific highly variable genes
+
+```{r}
+shared_hvg <- find_assay_specific_features(integrated, n_features = 5500)
+print(length(shared_hvg))
+```
+
+
+# Integrate with Harmony
+
+```{r}
+integrated <- integrate_assays(
+  integrated,
+  assay_specific = TRUE,
+  assay_var = "assay",
+  shared_hvg = shared_hvg
+)
+integrated <- RunUMAP(integrated, dims = 1:30, reduction = "harmony")
+DimPlot(integrated, split.by = "assay", group.by = "assay")
+VlnPlot(integrated, "nFeature_RNA", group.by = "assay", pt.size = 0)
+```
+
+
+# Create training and test sets
+
+```{r}
+print("splitting datasets!")
+# saveRDS(integrated, here::here("scRNA-seq/results/R_objects/final_clusters/temporal_integrated_cite_seq_rna.rds"))
+data_sets <- split_training_and_test_sets(
+  integrated,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+print("datasets splitted!")
+```
+
+
+# Find optimal K
+
+```{r}
+# optimal_k_df <- find_optimal_k(
+#   seurat_obj = integrated,
+#   training_set = data_sets$training_set,
+#   response_var = "annotation_level_1",
+#   return_plot = TRUE,
+#   ks = c(5, 10, 15, 20)
+# )
+# optimal_k_df$df
+# optimal_k_df$plot
+```
+
+
+# Transfer label
+
+```{r}
+annotation_data  <- transfer_label(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  response_var = "annotation_figure_1"
+)
+```
+
+
+# Predict UMAP coords
+
+```{r}
+umap_coords <- transfer_umap_coords(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  umap1_var = "UMAP_1_level_1",
+  umap2_var = "UMAP_2_level_1"
+)
+if (all(umap_coords$query_cells == annotation_data$query_cells)) {
+  umap_coords$annotation <- annotation_data$annotation
+  umap_coords$annotation_prob <- annotation_data$annotation_prob
+}
+rownames(umap_coords) <- umap_coords$query_cells
+(umap_annot <- ggplot(umap_coords, aes(UMAP1, UMAP2, color = annotation)) +
+  geom_point(shape = ".") +
+  scale_color_manual(values = color_palette) +
+  theme_classic() +
+  guides(color = guide_legend(override.aes = list(size = 2, shape = 16))))
+(umap_prob <- ggplot(umap_coords, aes(UMAP1, UMAP2, color = annotation_prob)) +
+  geom_point(shape = ".") +
+  scale_color_viridis_c(option = "magma") +
+  theme_classic())
+```
+
+
+# Save
+
+```{r}
+# Reload query, add info, save
+query <- readRDS(here("scRNA-seq/3-clustering/final_clusters/tmp/cite_seq_tmp.rds"))
+query$annotation_figure_1 <- umap_coords[colnames(query), "annotation"]
+query$annotation_prob <- umap_coords[colnames(query), "annotation_prob"]
+query$UMAP_1_level_1 <- umap_coords[colnames(query), "UMAP1"]
+query$UMAP_2_level_1 <- umap_coords[colnames(query), "UMAP2"]
+saveRDS(query, path_to_save_tonsil_cite)
+
+
+# Add CITE-seq rows to dataframe figure 1 and save
+final_cells_df$annotation_prob <- NA
+query$library_name <- NA
+query$is_hashed <- "not_hashed"
+query$pDNN_hashing <- NA
+query$pDNN_scrublet <- NA
+query$pDNN_union <- NA
+query$CC.Difference <- NA
+query$annotation_level_1 <- NA
+query$annotation_20220215 <- NA
+final_cells_df$nCount_ADT <- NA
+final_cells_df$nFeature_ADT <- NA
+query_metadata <- query@meta.data
+query_metadata <- query_metadata[, colnames(final_cells_df)]
+if (all(colnames(query_metadata) == colnames(final_cells_df))) {
+  final_cells_df <- bind_rows(final_cells_df, query_metadata)
+} else{
+  stop("Dataframes have different column names!")
+}
+saveRDS(final_cells_df, path_to_save_cite_seq_df)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

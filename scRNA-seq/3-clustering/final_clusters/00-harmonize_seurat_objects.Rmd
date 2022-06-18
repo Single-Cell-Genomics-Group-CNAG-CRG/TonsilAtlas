@@ -1,0 +1,268 @@
+---
+title: "Harmonize Seurat objects"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Until now, we have annotated each of the main clusters following a top-down approach, stratified by levels, from general to specific. This approach has resulted in an asymmetry across cell types: while the most predominant (ie T or B cells) have been analyzed in depth (multiple levels); the more rare cell types were annotated in more superficial levels. In addition, different annotation teams have followed different analysis strategies, so the meatadata is different for each cell type-specific Seurat object.
+
+Here, we aim to harmonize all Seurat objects, including the file naming and columns in the metadata. In addition, the Seurat objects we save in this notebook will be used for the first version of the data distribution of the tonsil atlas via the [HCAdata](https://bioconductor.org/packages/devel/data/experiment/html/HCAData.html) package.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(here)
+```
+
+
+## Define parameters
+
+All the parameters (paths, colors, variables) are encoded in the file "utils_final_clusters.R":
+
+```{r}
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+```
+
+
+# Non-lymphoid
+
+## Myeloid
+
+```{r}
+myeloid <- readRDS(path_to_final_myeloid)
+myeloid$annotation_figure_1 <- case_when(
+  myeloid$annotation_level_4 %in% c("Neutrophil Granulocytes") ~ "Granulocytes",
+  myeloid$annotation_level_4 %in% c("Monocytes", "ITGAX ZEB2 macrophages", "SELENOP FUCA1 PTGDS macrophages", "IL7R MMP12 macrophages", "C1Q HLA macrophages", "M1 Macrophages") ~ "Mono/Macro",
+  myeloid$annotation_level_4 %in% c("IL7R DC", "DC1 precursor", "DC1 mature", "DC2", "DC3", "DC4", "DC5", "aDC1", "aDC2", "aDC3") ~ "DC",
+  myeloid$annotation_level_4 %in% c("Mast cells") ~ "Mast",
+  myeloid$annotation_level_4 %in% c("Cycling") ~ "cycling myeloid",
+  TRUE ~ "other"
+)
+myeloid$annotation_20220215 <- myeloid$annotation_level_4
+myeloid$UMAP_1_20220215 <- Embeddings(myeloid, "umap")[, "UMAP_1"]
+myeloid$UMAP_2_20220215 <- Embeddings(myeloid, "umap")[, "UMAP_2"]
+myeloid@meta.data <- myeloid@meta.data[, selected_cols]
+saveRDS(myeloid, path_to_save_myeloid)
+rm(myeloid)
+```
+
+
+## Epithelial
+
+```{r}
+epithelial <- readRDS(path_to_final_epithelial)
+epithelial$annotation_20220215 <- epithelial$annotation_level_3
+epithelial$annotation_figure_1 <- epithelial$annotation_level_1
+epithelial$UMAP_1_20220215 <- Embeddings(epithelial, "umap")[, "UMAP_1"]
+epithelial$UMAP_2_20220215 <- Embeddings(epithelial, "umap")[, "UMAP_2"]
+epithelial@meta.data <- epithelial@meta.data[, selected_cols]
+saveRDS(epithelial, path_to_save_epithelial)
+rm(epithelial)
+```
+
+
+## PDC
+
+```{r}
+pdc <- readRDS(path_to_final_pdc)
+pdc <- subset(pdc, hospital != "Royal London")
+pdc$annotation_20220215 <- pdc$annotation_level_3
+pdc$annotation_figure_1 <- pdc$annotation_level_1
+pdc$UMAP_1_20220215 <- Embeddings(pdc, "umap")[, "UMAP_1"]
+pdc$UMAP_2_20220215 <- Embeddings(pdc, "umap")[, "UMAP_2"]
+pdc@meta.data <- pdc@meta.data[, selected_cols]
+saveRDS(pdc, path_to_save_pdc)
+rm(pdc)
+```
+
+
+## FDC
+
+```{r}
+fdc <- readRDS(path_to_final_fdc)
+fdc <- subset(fdc, hospital != "Royal London")
+fdc$annotation_20220215 <- fdc$annotation_level_4
+fdc$annotation_figure_1 <- fdc$annotation_level_1
+fdc$UMAP_1_20220215 <- Embeddings(fdc, "umap")[, "UMAP_1"]
+fdc$UMAP_2_20220215 <- Embeddings(fdc, "umap")[, "UMAP_2"]
+fdc@meta.data <- fdc@meta.data[, selected_cols]
+saveRDS(fdc, path_to_save_fdc)
+rm(fdc)
+```
+
+
+# Precursor lymphocytes
+
+## preB
+
+```{r}
+preB <- readRDS(path_to_preB)
+preB <- subset(preB, hospital != "Royal London")
+preB$annotation_20220215 <- "preB"
+preB$annotation_figure_1 <- "preB/T"
+preB$barcode <- colnames(preB)
+preB$UMAP_1_20220215 <- Embeddings(preB, "umap")[, "UMAP_1"]
+preB$UMAP_2_20220215 <- Embeddings(preB, "umap")[, "UMAP_2"]
+preB@meta.data <- preB@meta.data[, selected_cols]
+saveRDS(preB, path_to_save_preB)
+rm(preB)
+```
+
+
+## preT
+
+```{r}
+preT <- readRDS(path_to_preT)
+preT <- subset(preT, hospital != "Royal London")
+preT$annotation_20220215 <- "preT"
+preT$annotation_figure_1 <- "preB/T"
+preT$barcode <- colnames(preT)
+preT$UMAP_1_20220215 <- Embeddings(preT, "umap")[, "UMAP_1"]
+preT$UMAP_2_20220215 <- Embeddings(preT, "umap")[, "UMAP_2"]
+preT@meta.data <- preT@meta.data[, selected_cols]
+saveRDS(preT, path_to_save_preT)
+rm(preT)
+```
+
+
+# CD8 T cells, NK and ILC
+
+```{r}
+cd8 <- readRDS(path_to_cd8_T)
+ilc_nk <- readRDS(path_to_ilc_or_nk)
+cd8$barcode <- colnames(cd8)
+ilc_nk$barcode <- colnames(ilc_nk)
+cd8$annotation_20220215 <- cd8$annotation_paper
+ilc_nk$annotation_20220215 <- ilc_nk$annotation_paper
+cd8 <- subset(cd8, annotation_paper != "doublets")
+cd8$annotation_figure_1 <- case_when(
+  cd8$annotation_paper == "Naive CD8 T" ~ "Naive CD8 T",
+  cd8$annotation_paper == "DN" ~ "DN",
+  TRUE ~ "CD8 T"
+)
+ilc_nk$annotation_figure_1 <- ifelse(
+  str_detect(ilc_nk$annotation_paper, "ILC"),
+  "ILC",
+  "NK"
+)
+cd8$UMAP_1_20220215 <- Embeddings(cd8, "umap")[, "UMAP_1"]
+cd8$UMAP_2_20220215 <- Embeddings(cd8, "umap")[, "UMAP_2"]
+ilc_nk$UMAP_1_20220215 <- Embeddings(ilc_nk, "umap")[, "UMAP_1"]
+ilc_nk$UMAP_2_20220215 <- Embeddings(ilc_nk, "umap")[, "UMAP_2"]
+cd8@meta.data <- cd8@meta.data[, selected_cols]
+ilc_nk@meta.data <- ilc_nk@meta.data[, selected_cols]
+saveRDS(cd8, path_to_save_cd8)
+saveRDS(ilc_nk, path_to_save_ilc_nk)
+rm(cd8, ilc_nk)
+```
+
+
+# CD4 T cells
+
+```{r}
+cd4 <- readRDS(path_to_cd4)
+cd4$annotation_20220215 <- cd4$annotation_paper
+cd4$annotation_figure_1 <- ifelse(
+  cd4$annotation_20220215 == "Naive",
+  "Naive CD4 T",
+  "CD4 T"
+)
+cd4$UMAP_1_20220215 <- Embeddings(cd4, "umap")[, "UMAP_1"]
+cd4$UMAP_2_20220215 <- Embeddings(cd4, "umap")[, "UMAP_2"]
+cd4@meta.data <- cd4@meta.data[, selected_cols]
+saveRDS(cd4, path_to_save_cd4)
+rm(cd4)
+```
+
+
+# B cells: NBC/MBC, GCBC, PC
+
+
+```{r}
+# NBC/MBC
+nbc_mbc <- readRDS(path_to_nbc_mbc)
+nbc_levels <- c("NBC IFN-activated", "NBC main", "NBC first step activation",
+                "NBC S100A+", "NBC/OA first step activation", "NBC CD229+")
+mbc_levels <- c("ncsMBC FCRL4+", "ncsMBC", "csMBC", "csMBC FCRL4+",
+                "Early MBC", "ncsMBC_FCRL4", "FCRL5+ MBC")
+act_nbc_levels <- c("preGC_1", "preGC_2", "GC-commited MIR155HG+",
+                  "GC-commited MIR155HG-", "GC-commited metabolic activation",
+                  "Early GC-commited MYC+", "Proliferative NBC")
+gcbc_levels <- c("GC LZ Noproli", "GC DZ Noproli")
+nbc_mbc$annotation_figure_1 <- case_when(
+  nbc_mbc$names_level_5_clusters_delta %in% nbc_levels ~ "NBC",
+  nbc_mbc$names_level_5_clusters_delta %in% mbc_levels ~ "MBC",
+  nbc_mbc$names_level_5_clusters_delta %in% act_nbc_levels ~ "Activated NBC",
+  nbc_mbc$names_level_5_clusters_delta %in% gcbc_levels ~ "GCBC",
+)
+nbc_mbc$annotation_20220215 <- nbc_mbc$names_level_5_clusters_delta
+nbc_mbc$UMAP_1_20220215 <- Embeddings(nbc_mbc, "umap")[, "UMAP_1"]
+nbc_mbc$UMAP_2_20220215 <- Embeddings(nbc_mbc, "umap")[, "UMAP_2"]
+nbc_mbc@meta.data <- nbc_mbc@meta.data[, selected_cols]
+saveRDS(nbc_mbc, path_to_save_nbc_mbc)
+rm(nbc_mbc)
+
+
+# GCBC
+gcbc <- readRDS(path_to_gcbc)
+gcbc$annotation_figure_1 <- "GCBC"
+gcbc$annotation_20220215 <- gcbc$names_level_5_clusters_beta
+gcbc$UMAP_1_20220215 <- Embeddings(gcbc, "umap")[, "UMAP_1"]
+gcbc$UMAP_2_20220215 <- Embeddings(gcbc, "umap")[, "UMAP_2"]
+gcbc@meta.data <- gcbc@meta.data[, selected_cols]
+saveRDS(gcbc, path_to_save_gcbc)
+rm(gcbc)
+
+
+# PC
+pc <- readRDS(path_to_pc)
+pc$annotation_figure_1 <- case_when(
+  pc$annotation_level_1 == "NBC_MBC" ~ "MBC",
+  pc$annotation_level_1 == "GCBC" ~ "GCBC",
+  pc$annotation_level_1 == "PC" ~ "PC"
+)
+pc$annotation_20220215 <- pc$names_level_5_clusters_eta
+pc$UMAP_1_20220215 <- Embeddings(pc, "umap")[, "UMAP_1"]
+pc$UMAP_2_20220215 <- Embeddings(pc, "umap")[, "UMAP_2"]
+pc@meta.data <- pc@meta.data[, selected_cols]
+```
+
+
+We noticed that all "UMAP_1_level_1" and "UMAP_2_level_1" were NAs. Thus, let us fetch those values from an earlier object:
+
+```{r}
+pc_level_3 <- readRDS(path_to_pc_lvl_3)
+pc$UMAP_1_level_1 <- pc_level_3$UMAP_1_level_1[colnames(pc)]
+pc$UMAP_2_level_1 <- pc_level_3$UMAP_2_level_1[colnames(pc)]
+saveRDS(pc, path_to_save_pc)
+rm(pc)
+```
+
+
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

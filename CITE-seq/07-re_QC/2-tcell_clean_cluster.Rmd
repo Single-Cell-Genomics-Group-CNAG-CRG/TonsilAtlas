@@ -1,0 +1,122 @@
+---
+title: "T cell clusters cleaning"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+setwd("/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/")
+```
+
+# Define Parameters
+
+## Load packages
+
+```{r } 
+library(Seurat)
+library(flexclust)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(harmony)
+```
+
+
+## Define variables and functions
+
+```{r}
+path_to_save_obj <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/results"
+path_to_tcell_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_tcell_object.rds",
+  sep = "/"
+)
+selected_tcell <- str_c(
+  path_to_save_obj,
+  "tcell_selected_cells.csv",
+  sep = "/"
+)
+# Color
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet")
+```
+
+## Load data
+
+```{r data}
+seurat_obj <- readRDS(path_to_tcell_obj)
+```
+
+# Filter cells
+
+## Filter out cells if Tcell wsnn_res.0.5 in 6 and 10; and receptor in BCR_TCR and BCR
+
+```{r}
+df <- seurat_obj@meta.data
+filter_df <- df[!(df$wsnn_res.0.5 %in% c(6,10)) & !(df$repertoire_flag %in% c("BCR_TCR","BCR")),]
+```
+
+## Clean seurat object
+
+```{r}
+filter_tcell <- rownames(filter_df)
+filtered_tcell_obj = subset(seurat_obj,cells=filter_tcell)
+```
+
+# QC
+
+## DimPlot seurat sub-cluster
+
+```{r}
+Seurat::DimPlot(filtered_tcell_obj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = "wsnn_res.0.5")
+```
+
+
+```{r}
+metadata <- filtered_tcell_obj@meta.data
+df = count(metadata,metadata$wsnn_res.0.5)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+
+## DimPlot repertoires
+
+```{r}
+Seurat::DimPlot(filtered_tcell_obj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = "repertoire_flag")
+```
+
+
+```{r}
+df <- filtered_tcell_obj@meta.data
+with(df, table(wsnn_res.0.5, repertoire_flag, useNA = "ifany"))
+```
+
+## save filtered df
+
+```{r}
+write.csv(filter_df,selected_tcell)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,280 @@
+---
+title: 'Calculate and plot proportion of Doublet Nearest Neighbors (pDNN)'
+author: "Ramon Massoni-Badosa"
+date: "1/28/2021"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+During the quality control (QC) steps, we have accumulated different doublet annotations: 
+
+- Experimental: [cell hashing](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-018-1603-1), which we consider to be gold-standard.
+- Computational: [scrublet](https://www.cell.com/cell-systems/pdfExtended/S2405-4712(18)30474-5), which we consider to be silver-standard.
+- Identifying cells with extreme library sizes or number of detected genes.
+
+
+Although we consider cell hashing as ground-truth, it has some limitations. First, it cannot detect intra-batch doublets (doublets that share the same hashtag). Second, we observed a marked variability in hashing efficiency across libraries (measured with the signal-to-noise ratio), which suggests that for some libraries the detection was not perfect. Finally, as we wanted to measure the effect of hashing on transcriptional profiles, we included several non-hashed libraries, for which we have no experimental doublet annotation.
+
+To overcome these issues, we ran scrublet, which predicts doublets computationally. Although it cannot find homotypic doublets (composed of cells that share the same transcriptional state), it will help us to accumulate independent sources of evidence that we can visualize downstream.
+
+Of particular note, both cell hashing and scrublet were run for each library independently. Thus, we aimed to combined both approaches in a single metric that can consider all cells in the dataset, hence increasing the statistical power to detect doublets. Here, we calculate the proportion of doublet nearest neighbors (pDNN) using the KNN graph computed in the previous notebook. This metric is inspired in the proportion of artificial nearest neighbors (pANN) described in the [DoubletFinder](https://www.cell.com/cell-systems/pdfExtended/S2405-4712(19)30073-0) article. Following this principle, we expect to obtain a bimodal pDNN distribution that allows us to easily separate singlets and homotypic doublets from heterotypic doublets.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Matrix)
+library(tidyverse)
+```
+
+
+## Parameters
+  
+```{r}
+# Paths
+path_to_knn <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/1-doublet_exclusion/tmp/integrated_knn_graph.rds")
+path_to_doubl_annot <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/1-doublet_exclusion/tmp/doublet_preliminary_annotations.rds")
+path_to_save <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/1-doublet_exclusion/tmp/doublet_final_annotations_and_pDNN.rds")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Thresholds
+k <- 75
+```
+
+
+## Load data
+
+```{r}
+knn_graph <- readRDS(path_to_knn)
+doublet_annot <- readRDS(path_to_doubl_annot)
+```
+
+
+# Compare doublet annotations
+
+For a fair comparison, we will only compare doublet annotations for hashed cells:
+
+```{r}
+is_hashed <- doublet_annot$HTO_classification.global != "NA"
+doubl_annot_hashing <- doublet_annot$HTO_classification.global[is_hashed]
+doubl_annot_scrublet <- doublet_annot$scrublet_predicted_doublet[is_hashed]
+tabled_annotations <- table(
+  hashing = factor(doubl_annot_hashing, c("Singlet", "Doublet")),
+  scrublet = doubl_annot_scrublet
+)
+tabled_annotations
+```
+
+As we can see, the overlap between scrublet and cell hashing is relatively small. This is expected, since these two approaches have complementary limitations (discussed above).
+
+
+# Calculate and visualize pDNN
+
+## Hashing only
+
+```{r fig.wide=TRUE}
+# Order levels HTO classification for later plots
+doublet_annot$HTO_classification.global <- factor(
+  doublet_annot$HTO_classification.global,
+  levels = c("Singlet", "Doublet", "NA")
+)
+levels(doublet_annot$HTO_classification.global) <- c(
+  "Singlet",
+  "Doublet",
+  "Not Hashed"
+)
+
+
+# Calculate pDNN
+doublets_hashing <- which(doublet_annot$HTO_classification.global == "Doublet")
+knn_graph_hashing <- knn_graph[, doublets_hashing]
+doublet_annot$pDNN_hashing <- Matrix::rowSums(knn_graph_hashing) / k
+
+
+# Plot
+label <- "pDNN (cell hashing)"
+pDNN_hashing_hist <- doublet_annot %>%
+  plot_histogram_doublets(x = "pDNN_hashing", x_lab = label, bins = 30)
+pDNN_hashing_density <- doublet_annot %>%
+  plot_density_doublets(
+    x = "pDNN_hashing",
+    x_lab = label,
+    color = "HTO_classification.global",
+    color_lab = "HTO classification"
+  )
+pDNN_hashing_boxplot <- doublet_annot %>%
+  plot_boxplot_doublets(
+    x = "HTO_classification.global",
+    y = "pDNN_hashing",
+    fill = "HTO_classification.global",
+    y_lab = label
+  )
+scrublet_label <- "Doublet Score (scrublet)"
+pDNN_hashing_scatter <- doublet_annot %>%
+  plot_scatter_doublets(
+    x = "scrublet_doublet_scores",
+    y = "pDNN_hashing",
+    x_lab = scrublet_label,
+    y_lab = label
+  )
+
+
+# Show plots
+pDNN_hashing_hist
+pDNN_hashing_density
+pDNN_hashing_boxplot
+pDNN_hashing_scatter
+```
+
+
+## Scrublet only
+
+```{r fig.wide=TRUE}
+# Calculate pDNN
+doublets_scrublet <- which(doublet_annot$scrublet_predicted_doublet)
+knn_graph_scrublet <- knn_graph[, doublets_scrublet]
+doublet_annot$pDNN_scrublet <- Matrix::rowSums(knn_graph_scrublet) / k
+
+
+# Plot
+label <- "pDNN (scrublet)"
+pDNN_scrublet_hist <- doublet_annot %>%
+  plot_histogram_doublets(x = "pDNN_scrublet", x_lab = label, bins = 30)
+pDNN_scrublet_density <- doublet_annot %>%
+  plot_density_doublets(
+    x = "pDNN_scrublet",
+    x_lab = label,
+    color = "HTO_classification.global",
+    color_lab = "HTO classification"
+  )
+pDNN_scrublet_boxplot <- doublet_annot %>%
+  plot_boxplot_doublets(
+    x = "HTO_classification.global",
+    y = "pDNN_scrublet",
+    fill = "HTO_classification.global",
+    y_lab = label
+  )
+pDNN_scrublet_scatter <- doublet_annot %>%
+  plot_scatter_doublets(
+    x = "scrublet_doublet_scores",
+    y = "pDNN_scrublet",
+    x_lab = scrublet_label,
+    y_lab = label
+  )
+pDNN_scrublet_hashing <- doublet_annot %>%
+  plot_scatter_doublets(
+    x = "pDNN_hashing",
+    y = "pDNN_scrublet",
+    x_lab = "pDNN (cell hashing)",
+    y_lab = label
+  )
+
+
+# Show plots
+pDNN_scrublet_hist
+pDNN_scrublet_density
+pDNN_scrublet_boxplot
+pDNN_scrublet_scatter
+pDNN_scrublet_hashing
+```
+
+
+## Union
+
+```{r fig.wide=TRUE}
+# Calculate pDNN
+all_doublets <-
+  doublet_annot$HTO_classification.global == "Doublet" |
+  doublet_annot$scrublet_predicted_doublet
+doublets_union <- which(all_doublets)
+knn_graph_union <- knn_graph[, doublets_union]
+doublet_annot$pDNN_union <- Matrix::rowSums(knn_graph_union) / k
+
+
+# Plot
+label <- "pDNN (cell hashing or scrublet)"
+pDNN_union_hist <- doublet_annot %>%
+  plot_histogram_doublets(x = "pDNN_union", x_lab = label, bins = 30)
+pDNN_union_density <- doublet_annot %>%
+  plot_density_doublets(
+    x = "pDNN_union",
+    x_lab = label,
+    color = "HTO_classification.global",
+    color_lab = "HTO classification"
+  )
+pDNN_union_boxplot <- doublet_annot %>%
+  plot_boxplot_doublets(
+    x = "HTO_classification.global",
+    y = "pDNN_union",
+    fill = "HTO_classification.global",
+    y_lab = label
+  )
+pDNN_union_scatter <- doublet_annot %>%
+  plot_scatter_doublets(
+    x = "scrublet_doublet_scores",
+    y = "pDNN_union",
+    x_lab = scrublet_label,
+    y_lab = label
+  )
+
+
+# Show plots
+pDNN_union_hist
+pDNN_union_density
+pDNN_union_boxplot
+pDNN_union_scatter
+```
+
+Interestingly, considering both annotations yields a better separation of singlets/homotypic doublets and heterotypic doublets.
+
+
+# Exclude doublets
+
+Initially, we will be very permissive and only exclude doublets annotated with cell hashing. We will keep both the pDNN and scrublet variables in the metadata, which we will leverage downstream to rule out doublets at the cluster level. This approach will help us both remove doublets and understand its impacts on the data.
+
+
+```{r}
+table(doublet_annot$HTO_classification.global == "Doublet")
+```
+
+In total, we will eliminate `r sum(doublet_annot$HTO_classification.global == "Doublet")` doublets.
+
+Finally, we will keep the cells that have and outlier library size, as they could represent a specific cell type.
+
+```{r}
+table(doublet_annot$has_high_lib_size)
+```
+
+
+# Save
+
+```{r}
+saveRDS(doublet_annot, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

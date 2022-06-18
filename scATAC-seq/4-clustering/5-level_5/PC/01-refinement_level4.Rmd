@@ -1,0 +1,399 @@
+---
+title: 'PC: scATAC annotation level 5'
+author: "Paula Soler-Vila & Sergio Aguilar-Fernández"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to refine the clustering annotation done at level 4. This refinement is the result of a manual curation carried out by specialists to remove poor quality cells, misclassified cells or clusters with very few cells.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+library(harmony)
+library(unikn) 
+library(plyr)
+
+set.seed(333)
+```
+
+
+## Parameters
+```{r}
+cell_type = "PC"
+
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_integration_peak_calling_level_4.rds",
+  sep = ""
+)
+
+path_to_save <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+    "/01.",
+  cell_type,
+  "_integrated_MBC_GCBC_level_5.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- str_c(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+    "/",
+  cell_type,
+  "_seu_obj_level_5_eta.rds",
+  sep = ""
+)
+
+path_to_obj_B_cell_lineage <- here::here("scATAC-seq/results/R_objects/B_cells_integrated.rds")
+path_to_gcbc <- here::here("scATAC-seq/results/R_objects/level_4/GCBC/GCBC_integration_peak_calling_level_4.rds")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+# Load scATAC data
+
+##  Load PC cells
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+DimPlot(seurat, 
+  group.by = "annotation_level_5",
+  pt.size = 0.1)
+```
+
+##  Load GCBC cells
+```{r}
+seurat_GCBC <- readRDS(path_to_gcbc)
+seurat_GCBC
+
+DimPlot(seurat_GCBC, 
+  pt.size = 0.1, label = T)
+```
+
+###  Load entire B-cell lineage 
+```{r}
+seurat_B_cell_lineage <- readRDS(path_to_obj_B_cell_lineage)
+seurat_B_cell_lineage
+
+DimPlot(seurat_B_cell_lineage, 
+  pt.size = 0.1, label = T)
+```
+
+# Load scRNA data
+
+##  Load PC cells
+```{r}
+seurat_RNA <- readRDS(path_to_obj_RNA)
+
+DimPlot(seurat_RNA, 
+        group.by = "names_level_5_clusters_eta",
+        label = T,
+        pt.size = 0.1) + NoLegend()
+```
+
+### Clustering of cells into larger groups.
+Due to the limited number of cells that we have in our scATAC dataset, we are going to merge related scRNAseq cells into larger groups to facilite cell annotation and interpretation.
+
+```{r}
+seurat_RNA$annotation_level_5 <- revalue(seurat_RNA$names_level_5_clusters_eta,
+c("Dark Zone GCBC"="Dark Zone GCBC",
+"DZ migratory PC precursor"=NA,
+"Light Zone GCBC"="Light Zone GCBC",             
+"PC committed Light Zone GCBC"="PC committed Light Zone GCBC",    
+"Early PC precursor"="Early PC precursor",             
+"PB committed early PC precursor"="PB",
+"Transitional PB"="PB",                 
+"PB"="PB",                               
+"IgG+ PC precursor"="IgG+ PC precursor",              
+"preMature IgG+ PC"="preMature IgG+ PC",               
+"Mature IgG+ PC"="Mature PC",                 
+"MBC derived IgG+ PC"="Mature PC",            
+"Mature IgA+ PC"="Mature PC",                 
+"MBC derived IgA+ PC"="Mature PC",             
+"class switch MBC"="class switch MBC",               
+"MBC derived early PC precursor"="MBC derived PC precursor",  
+"MBC derived PC precursor"="MBC derived PC precursor",        
+"IgM+ early PC precursor"="Early PC precursor",        
+"IgM+ PC precursor"="IgM+ PC precursor",                 
+"preMature IgM+ PC"="preMature IgM+ PC",               
+"Mature IgM+ PC"="Mature PC",                 
+"Short lived IgM+ PC"=NA,             
+"IgD PC precursor"="IgD PC precursor"))                            
+
+
+DimPlot(seurat_RNA, 
+        group.by = "annotation_level_5",
+        label = T,
+        pt.size = 0.1) 
+```
+
+
+```{r}
+general_counts <- table(seurat_RNA$annotation_level_5,
+                        seurat_RNA$assay)
+general_counts_melt <-  melt(general_counts)
+ggbarplot(data = general_counts_melt,
+          x = "Var1",
+          y = "value",
+         fill = "Var2", 
+         color = "Var2", 
+         palette = "Paired", 
+         label = TRUE,
+         orientation = "horiz",
+         position = position_dodge(0.9))
+```
+
+
+```{r}
+seurat_only_multiome <- subset(seurat_RNA, assay == "multiome")
+seurat_only_multiomes_melt <-  melt(table(seurat_only_multiome$annotation_level_5, 
+seurat_only_multiome$age_group))
+
+ggbarplot(data = seurat_only_multiomes_melt,
+          x = "Var1",
+          y = "value",
+         fill = "Var2", 
+         color = "Var2", 
+         palette = "Paired", 
+         label = TRUE,
+         orientation = "horiz",
+         position = position_dodge(0.9))
+
+
+DimPlot(seurat_B_cell_lineage, 
+  cols.highlight = "darkred", cols= "grey",
+  cells.highlight= colnames(seurat_only_multiome),
+  pt.size = 0.1)
+```
+
+# Extracting key clusters from the entire B-cell lineage
+
+## Subclustering of GCBC LZ cells
+
+```{r fig.wide=TRUE}
+# seurat_B_cell_lineage@graphs$graphname
+seurat_B_cell_lineage <- FindSubCluster(
+  seurat_B_cell_lineage,
+  cluster = 3,
+  graph.name = "peaks_macs_snn",
+  subcluster.name = "LZ",
+  resolution = 0.15)
+
+DimPlot(seurat_B_cell_lineage, 
+        group.by = "LZ", 
+        label = T)
+
+LZ_1 <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$LZ == "3_2" & seurat_B_cell_lineage$assay == "scATAC"]
+LZ_1_m <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$LZ == "3_2" & seurat_B_cell_lineage$assay == "multiome"]
+LZ_1_m_final <- LZ_1_m[which(LZ_1_m %in% colnames(seurat_only_multiome))]
+
+LZ_2 <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$LZ == "3_3" & seurat_B_cell_lineage$assay == "scATAC"]
+LZ_2_m <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$LZ == "3_3" & seurat_B_cell_lineage$assay == "multiome"]
+LZ_2_m_final <- LZ_2_m[which(LZ_2_m %in% colnames(seurat_only_multiome))]
+
+LZ_1.cells.use <- sample(x = c(LZ_1,LZ_1_m_final), size = 600)
+LZ_2.cells.use <- sample(x = c(LZ_2,LZ_2_m_final), size = 600)
+```
+
+## Subclustering of GCBC DZ cells
+```{r fig.wide=TRUE}
+seurat_B_cell_lineage <- FindSubCluster(
+  seurat_B_cell_lineage,
+  cluster = 1,
+  graph.name = "peaks_macs_snn",
+  subcluster.name = "DZ",
+  resolution = 0.2)
+
+DimPlot(seurat_B_cell_lineage, 
+        group.by = "DZ", 
+        label = T)
+
+DZ_1 <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$DZ == "1_0" & seurat_B_cell_lineage$assay == "scATAC"]
+DZ_1_m <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$DZ == "1_0" & seurat_B_cell_lineage$assay == "multiome"]
+DZ_1_m_final <- DZ_1_m[which(DZ_1_m %in% colnames(seurat_only_multiome))]
+
+DZ_1.cells.use <- sample(x = c(DZ_1,DZ_1_m_final), size = 600)
+```
+
+### Clean GCBC with the processed dataset
+
+```{r fig.wide=TRUE}
+LZ_1.cells.use = subset(LZ_1.cells.use, !(LZ_1.cells.use %in% setdiff(LZ_1.cells.use,colnames(seurat_GCBC))))
+LZ_2.cells.use = subset(LZ_2.cells.use, !(LZ_2.cells.use %in% setdiff(LZ_2.cells.use,colnames(seurat_GCBC))))
+DZ_1.cells.use = subset(DZ_1.cells.use, !(DZ_1.cells.use %in% setdiff(DZ_1.cells.use,colnames(seurat_GCBC))))
+```
+
+## Subclustering of csMBC cells
+```{r fig.wide=TRUE}
+seurat_B_cell_lineage <- FindSubCluster(
+  seurat_B_cell_lineage,
+  cluster = 2,
+  graph.name = "peaks_macs_snn",
+  subcluster.name = "csMBC",
+  resolution = 0.4)
+
+DimPlot(seurat_B_cell_lineage, 
+        group.by = "csMBC",
+        label = T)
+
+csMBC <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$csMBC == "2_0" & seurat_B_cell_lineage$assay == "scATAC"]
+csMBC_m <- colnames(seurat_B_cell_lineage)[seurat_B_cell_lineage$csMBC == "2_0" & seurat_B_cell_lineage$assay == "multiome"]
+csMBC_m_final <- csMBC_m[which(csMBC_m %in% colnames(seurat_only_multiome))]
+
+csMBC.cells.use <- sample(x = c(csMBC,csMBC_m_final), size = 600)
+```
+
+# Extraction the barcodes of the selected cells
+
+```{r}
+selecting_cells <- unique(c(colnames(seurat),
+                     LZ_1.cells.use,
+                     LZ_2.cells.use,
+                     DZ_1.cells.use,
+                     csMBC.cells.use))
+
+
+DimPlot(seurat_B_cell_lineage, 
+  cols.highlight = "brown1", 
+  cols= "grey",
+  cells.highlight= selecting_cells,
+  pt.size = 0.1)
+```
+
+# Extraction of Multiome cells
+
+## From scRNA assay
+```{r}
+tonsil_RNA_annotation <- seurat_RNA@meta.data %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("barcode", "annotation_level_5","donor_id")
+
+table(tonsil_RNA_annotation$donor_id)
+print(paste("Number of PC from scRNA-seq multiome:", sum(table(tonsil_RNA_annotation$annotation_level_5))))
+```
+
+## From scATAC assay
+```{r}
+tonsil_ATAC_cell_barcode <- seurat@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode","donor_id")
+
+table(tonsil_ATAC_cell_barcode$donor_id)
+
+print(paste("Number of PC from scATAC-seq multiome:", sum(table(tonsil_ATAC_cell_barcode$donor_id))))
+```
+
+## Detecting posible doublets in scATAC and clusters with low number of cells
+```{r}
+length(intersect(tonsil_ATAC_cell_barcode$cell_barcode,tonsil_RNA_annotation$barcode))
+possible_doublets_ATAC <- setdiff(tonsil_ATAC_cell_barcode$cell_barcode,tonsil_RNA_annotation$barcode)
+length(possible_doublets_ATAC)
+
+barcodes_filter_groups <- tonsil_RNA_annotation[which(is.na(tonsil_RNA_annotation$annotation_level_5)),]$barcode
+```
+
+# Merging selected quality cells
+
+```{r}
+cells <- selecting_cells[!(selecting_cells %in% c(possible_doublets_ATAC,barcodes_filter_groups))]
+PC_level5 <- subset(seurat_B_cell_lineage, 
+                    cells = cells)
+
+PC_level5$annotation_level_5 <- "unannotated"
+
+# Renaming cells
+PC_level5@meta.data[DZ_1.cells.use,]$annotation_level_5  <- "DZ_1"
+PC_level5@meta.data[LZ_1.cells.use,]$annotation_level_5  <- "LZ_1"
+PC_level5@meta.data[LZ_2.cells.use,]$annotation_level_5  <- "LZ_2"
+PC_level5@meta.data[csMBC.cells.use,]$annotation_level_5  <- "csMBC"
+
+PC_level5@meta.data[colnames(PC_level5),]$annotation_level_5  <- as.character(PC_level5@meta.data[colnames(PC_level5),]$annotation_level_5)
+```
+
+# Integration of the data 
+```{r}
+PC_level5 <- PC_level5 %>%
+  RunTFIDF() %>%
+  FindTopFeatures(min.cutoff = 10) %>%
+  RunSVD()
+
+DepthCor(PC_level5)
+```
+
+```{r}
+PC_level5 <- RunUMAP(object = PC_level5, 
+                             reduction = 'lsi', 
+                             dims = 2:40)
+
+DimPlot(PC_level5,
+      group.by = "annotation_level_5",
+      pt.size = 0.2)
+
+DimPlot(PC_level5,
+      group.by = "assay",
+      pt.size = 0.2)
+```
+
+```{r}
+PC_level5 <- RunHarmony(
+  object = PC_level5,
+  dims = 2:40,
+  group.by.vars = 'gem_id',
+  reduction = 'lsi',
+  assay.use = 'peaks_macs',
+  project.dim = FALSE,
+  max.iter.harmony = 20
+)
+PC_level5 <- RunUMAP(PC_level5, 
+                             reduction = "harmony",
+                             dims = 2:16)
+DimPlot(PC_level5,
+      group.by = "annotation_level_5",
+      pt.size = 1)
+
+DimPlot(PC_level5,
+      group.by = "annotation_level_5", 
+      split.by = "assay",
+      pt.size = 0.2)
+
+DimPlot(PC_level5,
+      split.by = "age_group",
+      pt.size = 0.2)
+```
+
+# Save
+```{r}
+saveRDS(PC_level5, path_to_save)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

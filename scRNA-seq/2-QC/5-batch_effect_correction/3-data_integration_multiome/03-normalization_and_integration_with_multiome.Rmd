@@ -1,0 +1,175 @@
+---
+title: "Normalization and Batch Effect Correction (multiome)"
+author: "Ramon Massoni-Badosa"
+date: "2021/01/29"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In previous notebooks and scripts, we integrated our dataset with the one of [Hamish et al.](https://immunology.sciencemag.org/content/6/56/eabe6291), and merge it with the RNA fraction of the multiome dataset. Here, we will correct for batch effects with [Harmony](https://www.nature.com/articles/s41592-019-0619-0), and visualize the intermixing of different potential confounders pre- and post-integration.
+
+In addition, we will save the dimensionality reduction (PCA) matrices before and after integration to further quantify the effect of the aforementioned confounders in high dimensional space. 
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/tonsil_rna_merged_with_multiome_missing_integration.rds")
+# path_to_obj <- here::here("scRNA-seq/results/R_objects/tonsil_rna_merged_with_multiome_missing_integration_downsampled.rds")
+path_to_save_obj <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_with_multiome.rds")
+path_tmp_dir <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/3-data_integration_multiome/tmp/")
+path_to_save_dimred_uncorrect <- str_c(path_tmp_dir, "batch_uncorrected_pca.rds", sep = "")
+path_to_save_dimred_correct <- str_c(path_tmp_dir, "batch_corrected_pca.rds", sep = "")
+path_to_save_confounders_df <- str_c(path_tmp_dir, "confounders_df.rds", sep = "") 
+path_to_save_supp_df <- here::here("data/raw_data_figures/umaps_rna_batch_correction.csv")
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+tonsil
+```
+
+
+# Visualize UMAP without batch effect correction
+
+Since we noticed that the 3 matrices (scRNA-seq matrices, King et al., and multiome) have different sets of features (genes), we will find assay-specific variable genes. Then, we will use the intersection to improve the batch-effect correction.
+
+```{r fig.wide=TRUE}
+# Find shared highly variable genes (HGV)
+tonsil_list <- SplitObject(tonsil, split.by = "assay")
+tonsil_list <- purrr::map(tonsil_list, FindVariableFeatures, nfeatures = 5000)
+hvg <- purrr::map(tonsil_list, VariableFeatures)
+shared_hvg <- Reduce(intersect, hvg)
+print(length(shared_hvg))
+print(class(shared_hvg))
+print(head(shared_hvg))
+print(tail(shared_hvg))
+rm(tonsil_list)
+
+
+# Process Seurat object
+tonsil <- tonsil%>% 
+  NormalizeData(normalization.method = "LogNormalize", scale.factor = 1e4) %>%
+  ScaleData(features = shared_hvg) %>% 
+  RunPCA(features = shared_hvg) %>%
+  RunUMAP(reduction = "pca", dims = 1:30)
+
+
+# Visualize UMAP
+confounders <- c("library_name", "sex", "age_group", "is_hashed",
+                 "hospital", "assay")
+umaps_before_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(tonsil, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_before_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_before_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_before_integration[2:length(umaps_before_integration)]
+
+
+# Dataframe to generate supplementary figures
+unintegrated_df <- data.frame(
+  barcode = colnames(tonsil),
+  assay = tonsil$assay,
+  UMAP_1 = tonsil@reductions$umap@cell.embeddings[, "UMAP_1"],
+  UMAP_2 = tonsil@reductions$umap@cell.embeddings[, "UMAP_2"],
+  annotation_king = tonsil$cell_type
+)
+unintegrated_df$is_integrated <- "unintegrated"
+```
+
+
+# Run and visualize Harmony's integration
+
+```{r fig.wide=TRUE}
+tonsil <- tonsil %>%
+  RunHarmony(reduction = "pca", dims = 1:30, group.by.vars = "gem_id") %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+umaps_after_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(tonsil, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_after_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_after_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_after_integration[2:length(umaps_before_integration)]
+
+
+# Dataframe to generate supplementary figures
+integrated_df <- data.frame(
+  barcode = colnames(tonsil),
+  assay = tonsil$assay,
+  UMAP_1 = tonsil@reductions$umap@cell.embeddings[, "UMAP_1"],
+  UMAP_2 = tonsil@reductions$umap@cell.embeddings[, "UMAP_2"],
+  annotation_king = tonsil$cell_type
+)
+integrated_df$is_integrated <- "integrated"
+supp_df <- bind_rows(list(unintegrated_df, integrated_df))
+```
+
+
+# Save
+
+```{r}
+# If it doesn't exist create temporal directory
+dir.create(path_tmp_dir, showWarnings = FALSE) 
+
+
+# Save integrated Seurat object
+saveRDS(tonsil, path_to_save_obj)
+
+
+# Save PCA matrices to compute the Local Inverse Simpson Index (LISI)
+confounders_df <- tonsil@meta.data[, confounders]
+saveRDS(confounders_df, path_to_save_confounders_df)
+saveRDS(
+  tonsil@reductions$pca@cell.embeddings[, 1:30],
+  path_to_save_dimred_uncorrect
+)
+saveRDS(
+  tonsil@reductions$harmony@cell.embeddings[, 1:30],
+  path_to_save_dimred_correct
+)
+
+
+# Save dataframe to plot supplementary
+write_delim(supp_df, path_to_save_supp_df, delim = ";", col_names = TRUE)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

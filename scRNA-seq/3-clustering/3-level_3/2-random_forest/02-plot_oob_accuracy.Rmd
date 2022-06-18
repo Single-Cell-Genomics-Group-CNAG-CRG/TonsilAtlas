@@ -1,0 +1,138 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Plot Out-of-Bag Accuracy (level 3):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+
+# Introduction
+
+To define the correct number of clusters, we followed these steps:
+
+1. Clustered cells at varying resolutions with [Seurat's](https://satijalab.org/seurat/) `FindClusters` function. Different resolutions yield different number of clusters.
+2. For each resolution, we down-sampled each cluster to 3000 cells to correct for imbalances in number of cells across clusters. If a cluster had <3000, we sampled all of them.
+3. We fit a [random forest](https://en.wikipedia.org/wiki/Random_forest) classifier and obtained the out-of-bag (OOB) accuracy (1 - [OOB error](https://en.wikipedia.org/wiki/Out-of-bag_error)).
+
+We reasoned that stable clusters that represent real cell types should serve as a reference to classify unseen data with high accuracy. Thus, we choose the right resolution right before the accuracy drops markedly.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+```
+
+
+## Define parameters
+
+```{r}
+# Paths
+path_to_oob <- str_c(
+  here::here("scRNA-seq/3-clustering/3-level_3/tmp/"),
+  cell_type,
+  "/oob",
+  sep = ""
+)
+path_to_utils <- here::here("scRNA-seq/bin/utils.R")
+
+
+# Optimal resolutions
+optimal_resolutions <- c(
+  NBC_MBC = 0.35,
+  GCBC = 0.13,
+  CD4_T = 0.27,
+  Cytotoxic = 0.23,
+  PC = 0.19
+)
+optimal_resolution <- optimal_resolutions[cell_type]
+num_opt_resolutions <- 3
+```
+
+
+## Source functions
+
+```{r}
+source(path_to_utils)
+```
+
+
+## Load data
+
+```{r}
+oob_dfs_paths <- list.files(
+  path_to_oob,
+  pattern = "oob_accuracy_res.*.rds",
+  full.names = TRUE
+)
+oob_dfs <- purrr::map(oob_dfs_paths, readRDS)
+```
+
+
+# Detect the optimal resolution
+
+```{r}
+# Find the optimal resolution
+oob_df <- bind_rows(oob_dfs)
+oob_df$resolution <- as.numeric(as.character(oob_df$resolution))
+df_optimal <- find_optimal_resolution(oob_df)
+df_optimal_melt <- melt(df_optimal, id.vars = "resolution")
+```
+
+
+# Plot 
+
+```{r fig.height=7}
+axis_breaks <- c(90, 92.5, 95, 97.5, 100)
+optimal_resolutions <- df_optimal[order(-df_optimal$optimal_values), ]$res[1:num_opt_resolutions]
+levels(df_optimal_melt$variable) <- c("Out-of-Bag Accuracy (%)", "Optimal Values")
+oob_gg <- df_optimal_melt %>%
+  ggplot(aes(resolution, value, color = variable)) +
+    geom_vline(
+      xintercept = optimal_resolutions,
+      colour = rep(c("black", "gray40", "gray60"), 2),
+      linetype = "dashed", size = 0.5
+    ) +
+    geom_point() +
+    geom_line(
+      data = df_optimal_melt[!is.na(df_optimal_melt$value), ],
+      aes(color = variable)
+    ) +
+    labs(x = "Clustering Resolution", y = "") +
+    theme_bw() +
+    theme(
+      axis.title = element_text(size = 13),
+      legend.position = "none",
+      strip.text = element_text(size = 12)
+    ) +
+    facet_wrap(~variable, scales = "free_y", ncol = 1)
+oob_gg
+```
+
+
+Based on both profiles, we will use a resolution of `r optimal_resolution`.
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

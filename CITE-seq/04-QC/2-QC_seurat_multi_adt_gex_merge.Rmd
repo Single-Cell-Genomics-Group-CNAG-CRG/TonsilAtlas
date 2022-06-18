@@ -1,0 +1,513 @@
+---
+title: "Seurat multi (ADT+GEX) merge + QC"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library("gridExtra")
+```
+
+# Define Parameters
+
+```{r}
+# Paths
+path_to_metadata <- "../01-cellranger_mapping/data/tonsil_atlas_metadata.csv"
+path_to_save_obj <- "../results"
+rds_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_postQC.rds",
+  sep = "/"
+)
+path_to_scrublet <- "../02-scrublet_doublet_detection/results"
+path_to_vireo_genotype <- "../03-demultiplexing_genotype/2-vireo"
+path_to_cellranger_output <- "../01-cellranger_mapping/projects"
+```
+
+# Define threshold
+
+```{r}
+min_count_33 <- 600
+max_count_33 <- 12000
+min_feat_33 <- 300
+max_feat_33 <- 3000
+max_mt_33 <- 15
+min_count_38 <- 300
+max_count_38 <- 6000
+min_feat_38 <- 200
+max_feat_38 <- 2000
+max_mt_38 <- 15
+min_count_40 <- 400
+max_count_40 <- 6000
+min_feat_40 <- 250
+max_feat_40 <- 2250
+max_mt_40 <- 10
+min_count_46 <- 350
+max_count_46 <- 6000
+min_feat_46 <- 300
+max_feat_46 <- 2500
+max_mt_46 <- 15
+min_counts <- c(min_count_33, min_count_38, min_count_40, min_count_46)
+max_counts <- c(max_count_33, max_count_38, max_count_40, max_count_46)
+min_feats <- c(min_feat_33, min_feat_38, min_feat_40, min_feat_46)
+max_feats <- c(max_feat_33, max_feat_38, max_feat_40, max_feat_46)
+max_mt <- c(max_mt_33, max_mt_38, max_mt_40, max_mt_46)
+max_genes <- 10
+```
+
+# Set up the Seurat Object
+
+GEX and CITEseq (ADT) dataset is integrated to set up the seurat object for the project
+
+```{r seurat object, echo=FALSE}
+metadata <- path_to_metadata %>%
+  read_csv(col_names = TRUE) %>% 
+  filter(type == "GEX")
+subproject_list=metadata$subproject
+gem_id_list=metadata$gem_id
+donor_metadata_list = metadata$donor_id
+seurat_objects = list()
+for (i in 1:length(gem_id_list)){
+  subproject <- subproject_list[i]
+  gem_id <- gem_id_list[i]
+  samples <- paste0(subproject,"_",gem_id)
+  filename <- str_c(path_to_cellranger_output,"/",subproject,"/jobs/",gem_id,"/",gem_id,"/outs/per_sample_outs/",gem_id,"/count/sample_feature_bc_matrix",sep = "")
+  data <- Read10X(data.dir = filename)
+  seurat_objects[[i]] <- CreateSeuratObject(counts = data$`Gene Expression`, project = samples)
+  seurat_objects[[i]][["ADT"]] <- CreateAssayObject(counts = data$`Antibody Capture`)
+  seurat_objects[[i]][["sample"]] <- samples
+  seurat_objects[[i]][["subproject"]] <- subproject
+  seurat_objects[[i]][["gemid"]] <- gem_id
+        
+  #include the clonotype info
+        
+  tcr <- read.csv(paste0(path_to_cellranger_output,"/",subproject,"/jobs/",gem_id,"/",gem_id,"/outs/per_sample_outs/",gem_id,"/vdj_t/filtered_contig_annotations.csv",sep = ""))
+  tcr <- tcr[!duplicated(tcr$barcode), ]
+  tcr <- tcr[,c("barcode", "raw_clonotype_id")]
+  names(tcr)[names(tcr) == "raw_clonotype_id"] <- "clonotype_id"
+  clono <- read.csv(paste0(path_to_cellranger_output,"/",subproject,"/jobs/",gem_id,"/",gem_id,"/outs/per_sample_outs/",gem_id,"/vdj_t/clonotypes.csv",sep = ""))
+  tcr <- merge(tcr, clono, by="clonotype_id")
+  tcr <- tcr[, c(2,7,8)]
+  rownames(tcr) <- paste0(samples,"_",tcr$barcode)
+  tcr[,1] <- NULL
+  tcr$tcr_flag <- "T"       
+  
+  #include BCR flag
+        
+  bcr <- read.csv(paste0(path_to_cellranger_output,"/",subproject,"/jobs/",gem_id,"/",gem_id,"/outs/per_sample_outs/",gem_id,"/vdj_b/filtered_contig_annotations.csv",sep = ""))
+  bcr <- bcr[!duplicated(bcr$barcode), ]
+  rownames(bcr) <- paste0(samples,"_",bcr$barcode)
+  bcr[,1] <- NULL
+  bcr$bcr_flag <- "T"       
+  bcr_df <- data.frame(row.names = rownames(bcr), bcr_flag = bcr$bcr_flag)
+  
+  #Ig df 
+  ig_df <- merge(tcr,bcr_df, by=0, all=T)
+  rownames(ig_df) <- ig_df$Row.names
+  ig_df[,1] <- NULL
+  
+  #scrublet doublet score included
+        
+  scrublet_df = read.csv(paste0(path_to_scrublet,"/scrublet_doublet_prediction-",subproject,"-",gem_id,".csv"))
+    	  rownames(scrublet_df) = paste0(samples,"_",scrublet_df$barcodes)
+    	  scrublet_df[,1] <- NULL
+      	
+    	  #merge doublet and clonotype
+    	  df = merge(scrublet_df,ig_df,by = 0, all.x = T)
+      	rownames(df) <- df$Row.names  
+      	df[,c(1)] <- NULL
+    	
+      	#get multiplexed donor info
+      	if (donor_metadata_list[i] == "multiplexed"){
+    	  donor_df <- read.table(paste0(path_to_vireo_genotype,"/",gem_id,"/donor_ids.tsv",sep = ""), sep="\t", header = T)
+    	  donor_meta_df <- data.frame(row.names = paste0(samples,"_",donor_df$cell))
+    	  donor_meta_df$donor_id = paste(gem_id,donor_df$donor_id,sep = "_") 
+    	  donor_meta_df$genotype_based_doublet_flag <- ifelse(donor_df$donor_id == "doublet","T","F")
+    	  donor_meta_df$genotype_based_unassigned_flag <- ifelse(donor_df$donor_id == "unassigned","T","F")
+    	} else {
+    	  donor_meta_df <- data.frame(row.names = rownames(df))
+    	  donor_meta_df$donor_id = donor_metadata_list[i]
+    	  donor_meta_df$genotype_based_doublet_flag <- "F"
+    	  donor_meta_df$genotype_based_unassigned_flag <- "F"
+    	}
+      
+      #combine donor metadata info with the other metadata frame
+    	meta_df <- cbind(donor_meta_df,df)
+    	
+    	seurat_objects[[i]]@meta.data <-cbind(seurat_objects[[i]]@meta.data,meta_df)
+    	seurat_objects[[i]] <- RenameCells(seurat_objects[[i]],
+                                             add.cell.id = samples)
+}    	
+
+
+bcll.combined <- Reduce(merge, seurat_objects)
+table(Idents(bcll.combined))
+rm(seurat_objects)
+rm(data)
+```
+
+# Calculate mitochondrial percent and Add number of genes per UMI for each cell to metadata
+
+```{r metadata}
+bcll.combined[["percent.mt"]] <- PercentageFeatureSet(bcll.combined, pattern = "^MT-")
+
+bcll.combined$log10GenesPerUMI <- log10(bcll.combined$nFeature_RNA) / log10(bcll.combined$nCount_RNA)
+
+subproject_seurat_obj_list <- SplitObject(bcll.combined, split.by = "subproject")
+
+QC_summary <- bcll.combined@meta.data %>% group_by(orig.ident) %>% summarise(Total_cells = n(), Mean_RNA_count= mean(nCount_RNA), Mean_feature_count = mean(nFeature_RNA), Mean_mito_percent = mean(percent.mt), Mean_log10GenesPerUMI = mean(log10GenesPerUMI) ,Number_of_scrublet_doublet = sum(scrublet_predicted_doublet == "True"), Number_of_genotype_doublet = sum(genotype_based_doublet_flag == "T") , Number_of_genotype_unassigned = sum(genotype_based_unassigned_flag == "T") ,Number_of_TCR = sum(tcr_flag == "T", na.rm = T) , Number_of_BCR = sum(bcr_flag == "T", na.rm = T) , Number_of_mait_cells = sum(mait_evidence %in% c("TRB:gene","TRA:gene+junction;TRB:gene","TRA:gene","TRA:gene;TRB:gene","TRA:junction;TRB:gene","TRA:junction","TRA:gene+junction"), na.rm = T), Number_of_inkt_cells =sum(inkt_evidence %in% c("TRB:gene","TRA:gene;TRB:gene","TRA:gene"), na.rm = T), .groups = 'drop')
+
+metadata <- bcll.combined@meta.data
+library(knitr)
+library(kableExtra)
+kable(QC_summary) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+# Check the doublets using Genotype and scrublet
+Cross table to check the doublet called by scrublet and by the genotype package
+
+```{r}
+table(metadata$donor_id, metadata$scrublet_predicted_doublet)
+```
+
+# Cell counts
+The cell counts are determined by the number of unique cellular barcodes detected.
+
+```{r }
+# Visualize the number of cell counts per sample
+plot_cell_count <- function(obj){
+  metadata_subset <- obj@meta.data	
+  p1 <- metadata_subset %>% 
+  	ggplot(aes(x=sample, fill=sample)) + 
+  	geom_bar() +
+  	theme_classic() +
+  	theme(plot.title = element_text(hjust=0.5, face="bold")) +
+  	ggtitle("NCells") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+}  
+plot_list <- lapply(subproject_seurat_obj_list, plot_cell_count)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+```
+
+
+# UMI counts (transcripts) per cell
+
+```{r}
+
+# Visualize the number Feature per cell
+
+feature_per_cell_plot <- function(x){
+  obj <- subproject_seurat_obj_list[[x]]
+	metadata_subset <- obj@meta.data	
+	p2 <- metadata_subset %>% 
+		ggplot(aes(color=sample, x=nFeature_RNA, fill= sample)) + 
+		geom_density(alpha = 0.2) + 
+		scale_x_log10() + 
+		theme_classic() +
+		ylab("Cell density") +
+		geom_vline(xintercept = c(min_feats[[x]], max_feats[[x]]))
+}
+
+vec=c(1,2,3,4)
+
+plot_list <- lapply(vec,feature_per_cell_plot)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+```
+
+
+# Gene detected per cell
+
+
+```{r}
+
+# Visualize the number Gene per cell
+
+gene_per_cell_plot <- function(x){
+	obj <- subproject_seurat_obj_list[[x]]
+  metadata_subset <- obj@meta.data	
+	p3 <- metadata_subset %>% 
+		ggplot(aes(color=sample, x=nCount_RNA, fill= sample)) + 
+		geom_density(alpha = 0.2) + 
+		scale_x_log10() + 
+		theme_classic() +
+		ylab("Cell density") +
+		geom_vline(xintercept = c(min_counts[[x]], max_counts[[x]]))
+}
+plot_list <- lapply(vec, gene_per_cell_plot)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+
+```
+
+# Gene distribution
+
+```{r}
+
+# Visualize the distribution of genes detected per cell via boxplot
+
+gene_per_cell_boxplot <- function(obj){
+	metadata_subset <- obj@meta.data	
+	p4 <- metadata_subset %>% 
+		ggplot(aes(x=sample, y=log10(nCount_RNA), fill=sample)) + 
+		geom_boxplot() + 
+		theme_classic() +
+		theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+		theme(plot.title = element_text(hjust=0.5, face="bold")) +
+		ggtitle("NCells vs NGenes")
+}
+plot_list <- lapply(subproject_seurat_obj_list, gene_per_cell_boxplot)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+
+```
+
+
+# Correlation Between genes, features and mito_percent
+
+```{r}
+
+# Visualize the correlation between genes detected and number of UMIs and determine whether strong presence of cells with low numbers of genes/UMIs
+
+correlation_plot <- function(obj){
+	metadata_subset <- obj@meta.data	
+	p5 <- metadata_subset %>% 
+		ggplot(aes(x=nFeature_RNA, y=nCount_RNA, color=percent.mt)) + 
+		geom_point() + 
+		scale_colour_gradient(low = "gray90", high = "black") +
+		stat_smooth(method=lm) +
+		scale_x_log10() + 
+		scale_y_log10() + 
+		theme_classic() +
+		geom_vline(xintercept = 500) +
+		geom_hline(yintercept = 250) +
+		facet_wrap(~sample)
+}
+plot_list <- lapply(subproject_seurat_obj_list, correlation_plot)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+		
+```
+
+
+# Mitochondrial Counts Ratio
+
+```{r}
+# Visualize the distribution of mitochondrial gene expression detected per cell
+mt_plot <- function(x){
+  obj <- subproject_seurat_obj_list[[x]]
+	metadata_subset <- obj@meta.data	
+	p6 <- metadata_subset %>% 
+  	ggplot(aes(color=sample, x=percent.mt, fill=sample)) + 
+  	geom_density(alpha = 15) + 
+  	theme_classic() +
+  	geom_vline(xintercept = max_mt[[x]])
+}
+vec <- c(1,2,3,4)
+plot_list <- lapply(vec, mt_plot)
+
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+
+```
+
+# Overall Complexity
+
+```{r}
+# Visualize the overall complexity of the gene expression by visualizing the genes detected per UMI
+
+complexity_plot <- function(obj){
+	metadata_subset <- obj@meta.data	
+	p7 <- metadata_subset %>% 
+  	ggplot(aes(x=log10GenesPerUMI, color = sample, fill=sample)) +
+  	geom_density(alpha = 0.2) +
+  	theme_classic() +
+  	geom_vline(xintercept = 0.8)
+}
+plot_list <- lapply(subproject_seurat_obj_list, complexity_plot)
+plot_list[1]  
+plot_list[2]
+plot_list[3]
+plot_list[4]
+
+```
+
+# Violin Plot
+
+```{r}
+VlnPlot(bcll.combined, features = "nCount_ADT",
+  log = TRUE, pt.size = 0) + NoLegend()
+```
+
+```{r}
+VlnPlot(bcll.combined, features = "nCount_ADT",log = FALSE, pt.size = 0, y.max = 5000) + NoLegend()
+```
+
+```{r}
+VlnPlot(bcll.combined, features =  "nCount_RNA", log = TRUE, pt.size = 0) + NoLegend()
+```
+
+
+```{r}
+VlnPlot(bcll.combined, features = "percent.mt",
+  log = TRUE, pt.size = 0) + NoLegend()
+```
+
+
+```{r}
+VlnPlot(bcll.combined, features = "scrublet_doublet_scores",
+  log = TRUE, pt.size = 0) + NoLegend()
+```
+
+
+# Filtering based on the QC results
+
+```{r }
+# Filter out low quality reads using selected thresholds - these will change with experiment
+
+subset_seurat_obj <- function(x) {
+  subset_seurat <- subset(subproject_seurat_obj_list[[x]], subset = nFeature_RNA > min_feats[[x]] & nFeature_RNA < max_feats[[x]] & percent.mt < max_mt[[x]] & nCount_RNA > min_counts[[x]] & nCount_RNA < max_counts[[x]])
+  return(subset_seurat)
+}
+
+subset_seurat_obj
+vec=c(1,2,3,4)
+filtered_subproject_seurat_obj_list <- lapply(vec, subset_seurat_obj)
+
+filtered_bcll.combined <- Reduce(merge, filtered_subproject_seurat_obj_list)
+# Output a logical vector for every gene on whether the more than zero counts per cell
+# Extract counts
+counts <- GetAssayData(object = filtered_bcll.combined, slot = "counts")
+
+# Output a logical vector for every gene on whether the more than zero counts per cell
+nonzero <- counts > 0
+
+# Sums all TRUE values and returns TRUE if more than max_genes TRUE values per gene
+keep_genes <- Matrix::rowSums(nonzero) >= max_genes
+
+# Only keeping those genes expressed in more than max_genes cells
+filtered_counts <- counts[keep_genes, ]
+
+# Reassign to filtered Seurat object
+filtered_bcll.combined <- CreateSeuratObject(filtered_counts, meta.data = filtered_bcll.combined@meta.data)
+cells.use = rownames(filtered_bcll.combined@meta.data)
+filtered_bcll.combined[["ADT"]] <- subset(bcll.combined[["ADT"]], cells = cells.use)
+```
+
+# Create clean metadata
+
+```{r}
+# Save filtered subset to new metadata
+metadata_clean <- filtered_bcll.combined@meta.data
+
+Re_QC_summary <- filtered_bcll.combined@meta.data %>% group_by(orig.ident) %>% summarise(Total_cells = n(), Mean_RNA_count= mean(nCount_RNA), Mean_feature_count = mean(nFeature_RNA), Mean_mito_percent = mean(percent.mt), Mean_log10GenesPerUMI = mean(log10GenesPerUMI), Number_of_scrublet_doublet = sum(scrublet_predicted_doublet == "True"), Number_of_genotype_doublet = sum(genotype_based_doublet_flag == "T") , Number_of_genotype_unassigned = sum(genotype_based_unassigned_flag == "T"), Number_of_TCR = sum(tcr_flag == "T", na.rm = T) , Number_of_BCR = sum(bcr_flag == "T", na.rm = T) , Number_of_mait_cells = sum(mait_evidence %in% c("TRB:gene","TRA:gene+junction;TRB:gene","TRA:gene","TRA:gene;TRB:gene","TRA:junction;TRB:gene","TRA:junction","TRA:gene+junction"), na.rm = T), Number_of_inkt_cells =sum(inkt_evidence %in% c("TRB:gene","TRA:gene;TRB:gene","TRA:gene"), na.rm = T), .groups = 'drop')
+library(knitr)
+library(kableExtra)
+kable(Re_QC_summary) %>%
+  kable_styling("striped", full_width = T)
+```
+
+
+## UMI counts (transcripts) per cell
+
+```{r}
+
+# Visualize the number Feature per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=nFeature_RNA, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = 2500)
+
+```
+
+
+## Gene detected per cell
+
+
+```{r}
+
+# Visualize the number Gene per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=nCount_RNA, fill= sample)) + 
+  	geom_density(alpha = 0.2) + 
+  	scale_x_log10() + 
+  	theme_classic() +
+  	ylab("Cell density") +
+  	geom_vline(xintercept = 200)
+
+```
+
+## Mitochondrial Counts Ratio
+
+```{r}
+# Visualize the distribution of mitochondrial gene expression detected per cell
+metadata_clean %>% 
+  	ggplot(aes(color=sample, x=percent.mt, fill=sample)) + 
+  	geom_density(alpha = 15) + 
+  	theme_classic() +
+  	geom_vline(xintercept = 20)
+
+```
+
+## Genotype and scrublet
+
+Cross table to check the doublet called by scrublet and by the genotype package
+
+```{r}
+table(metadata_clean$donor_id, metadata_clean$scrublet_predicted_doublet)
+```
+
+# Summarise number of cells
+
+```{r}
+sprintf("Total Cells : %i", length(rownames(metadata)))
+sprintf("Total Cells post QC: %i", length(rownames(metadata_clean)))
+sprintf("T Cells (containing TCR): %i", length(rownames(subset(metadata_clean, metadata_clean$tcr_flag == "T"))))
+sprintf("B Cells (containing BCR) : %i", length(rownames(subset(metadata_clean, metadata_clean$bcr_flag == "T"))))
+sprintf("Scrublet Doublet : %i", length(rownames(subset(metadata_clean, metadata_clean$scrublet_predicted_doublet == "True"))))
+sprintf("Genotype Doublet : %i", length(rownames(subset(metadata_clean, metadata_clean$genotype_based_doublet_flag == "T"))))
+sprintf("Genotype Unassigned : %i", length(rownames(subset(metadata_clean, metadata_clean$genotype_based_unassigned_flag == "T"))))
+```
+
+## Save the seurat object 
+
+```{r}
+saveRDS(filtered_bcll.combined, file = rds_obj)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

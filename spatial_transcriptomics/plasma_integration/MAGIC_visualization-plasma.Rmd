@@ -1,0 +1,817 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "Plasma MAGIC visualization"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to load the MAGIC-denoised data to better visualize genes and ease with the annotation when using specific marker genes.
+[MAGIC](https://magic.readthedocs.io/en/stable/) was developed by Smita Krishnaswamy's lab to try to fill in the drop out reads in the spots. `MAGIC` is a Markov Affinity-based Graph Imputation of Cells used for denoising high-dimensional data most commonly applied to single-cell RNA sequencing data. MAGIC learns the manifold data, using the resultant graph to smooth the features and restore the structure of the data based on their k-nearest neighbors. 
+
+## Libraries
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+library(UCell)
+library(stringr)
+```
+
+## Parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{plasma}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{plasma}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+
+goi <- c("AICDA", "BCL6", "CD9", "CXCR4", "MKI67", "PAX5", "SUGCT", "TOP2A", "IRF8", "MEF2B", "MS4A1", "BCL2A1", "LMO2", "CD83", "MZB1", "IGHM", "IRF4", "CELF2", "PRDM1", "CD44", "SLAMF7", "BANK1", "DERL3", "IGHA1", "IGHD", "IGHG1", "SSR4", "XBP1")
+```
+
+```{r}
+scatterplot <- function(x, y, color) {
+  df <- data.frame(
+    feat1 = se_sub@assays$MAGIC_Spatial@data[x, ],
+    feat2 = se_sub@assays$MAGIC_Spatial@data[y, ],
+    color = se_sub@meta.data[, color]
+  )
+  
+  ggplot2::ggplot(df,
+                  ggplot2::aes(x = feat1,
+                               y = feat2,
+                               color = color)) +
+    ggplot2::geom_point() +
+    ggplot2::theme_classic() +
+    ggplot2::labs(
+      x = x,
+      y = y,
+      color = color)
+}
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load MAGIC data from the script *MAGIC_denoising-plasma.Rmd*
+```{r}
+magic_df <- "{plasma}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store ADT information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df[goi, ]))
+
+# Subset merged_se to those barcodes used
+merged_se <- merged_se[, colnames(magic_df)]
+
+# add this assay to the previously created Seurat object
+merged_se[["MAGIC_Spatial"]] <- magic_assay
+```
+
+Subset to only one sample
+```{r}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+```
+
+Subset to only one sample
+```{r}
+se_sub2 <- subset(merged_se, subset = gem_id == "p7hv1g_tjgmyj")
+se_sub2
+se_sub2@images <- se_sub2@images[Seurat::Images(se_sub2) == "p7hv1g_tjgmyj"]
+```
+
+[A Spatially Resolved Dark- versus Light-Zone Microenvironment Signature Subdivides Germinal Center-Related Aggressive B Cell Lymphomas](10.1016/j.isci.2020.101562)
+- **Dark Zone**: OAZ1, AICDA, H3, MKI67, POLH
+- **Light Zone**: LAG3, ITGB8, PDCD1, TIGIT, BCL2, PECAM1, LY6E, B7-H3 (CD276), HLA-DRB1, PSMB10, TNF, ARG1, HLA-E, STAT1
+
+```{r}
+"{plasma}/gene_dict_plasma.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+gene_vec <- rownames(magic_df)
+```
+
+Add genes to gene vec
+```{r}
+# ig <- c("IGHG1", "IGHG2", "IGHG3", "IGHG4", "IGHA1", "IGHA2", "IGHE", "IGHM")
+# pc <- c("XBP1", "CREB3L2", "CD9", "CD44", "PRDM1", "IRF4")
+# gene_vec <- unique(c(gene_vec, ig))
+
+# gene_vec <- gene_vec[gene_vec %in% rownames(merged_se)]
+```
+
+
+## Analysis
+
+Add gene signatures for *plasma_genes*, these signatures are calculated with the lognorm expression.
+```{r}
+# merged_se <- Seurat::AddModuleScore(
+#   object = merged_se,
+#   features = plasma_genes,
+#   name = names(plasma_genes))
+# sign <- glue::glue("{names(plasma_genes)}{1:length(names(plasma_genes))}")
+
+merged_se <- AddModuleScore_UCell(
+    obj = merged_se,
+    features = plasma_genes,
+    name = '_UCell'
+  )
+```
+
+Look at signatures
+```{r fig.width=12, fig.height=5}
+
+sign <- colnames(merged_se@meta.data)[stringr::str_detect(string = colnames(merged_se@meta.data), pattern = '_UCell')]
+
+Seurat::SpatialPlot(
+  object = merged_se,
+  features = sign,
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  ncol = 4)
+```
+
+We also want to compute unbiased signatures from the top marker genes of the cell types of interest
+```{r}
+# Read marker genes from plasma-deconvolution.Rmd
+markers_lvl5_out <- "{plasma}/{robj_dir}/markers_lvl5_plasma.RDS" %>% 
+  glue::glue() %>% 
+  here::here()
+
+mgs <- readRDS(markers_lvl5_out)
+# Specify cell types of interest
+int <- c("Early MBC-derived PC precursors", "LZ-derived early PC precursors",
+  "MBC-derived PC precursors")
+
+# Get top 25 genes for each one of these cell types
+sign_ls <- lapply(int, function(i) {
+  mgs %>%
+    # Subset cell type of interest
+    dplyr::filter(cluster == i & pct.2 < 0.25) %>%
+    # remove ribosomal and mitochondrial genes
+    dplyr::filter(stringr::str_detect(string = gene, pattern = "^RP[L|S]|MT", negate = TRUE)) %>%
+    # Sort genes
+    dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+    head(., 25) %>%
+    dplyr::pull(gene)
+})
+
+names(sign_ls) <- int
+```
+
+Add signatures to object
+```{r}
+merged_se <- AddModuleScore_UCell(
+    obj = merged_se,
+    features = sign_ls,
+    name = '_UCell_mgs'
+  )
+
+mgs_sign <- colnames(merged_se@meta.data)[stringr::str_detect(string = colnames(merged_se@meta.data), pattern = '_UCell_mgs')]
+```
+
+
+Look at marker gene derived signatures
+```{r fig.width=12, fig.height=5}
+Seurat::SpatialPlot(
+  object = merged_se,
+  features = mgs_sign,
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  ncol = 4)
+
+palette <- colorBlindness::paletteMartin[seq_len(length(unique(merged_se$annotation.general)))]
+names(palette) <- unique(merged_se$annotation.general)
+```
+
+Violin plots
+```{r fig.width=15, fig.height=8}
+Seurat::VlnPlot(
+  object = merged_se,
+  features = mgs_sign, 
+  group.by = "annotation.general",
+  pt.size = 0,
+  cols = palette)
+
+```
+
+Restrict the visualization to the follicles
+```{r fig.width=12, fig.height=8, eval=FALSE}
+se_follicle <- merged_se[, merged_se$Spatial_snn_res.1.5 %in% c(3, 6, 8)]
+library(colorBlindness)
+palette <- colorBlindness::paletteMartin[13:15]
+names(palette) <- c(3, 6, 8)
+
+(Seurat::VlnPlot(
+  object = se_follicle,
+  features = c("DZ2", "LZ4"), 
+  group.by = "Spatial_snn_res.1.5",
+  pt.size = 0,
+  cols = palette) |
+  Seurat::SpatialPlot(
+    object = se_follicle,
+    group.by = "Spatial_snn_res.1.5",
+    images = "esvq52_nluss5",
+    cols = palette)) /
+  Seurat::SpatialPlot(
+    object = se_follicle,
+    features = c("DZ2", "LZ4", "DZ.precPC3"),
+    images = "esvq52_nluss5",
+    cols = palette)
+
+```
+
+### Marker gene location
+Look at the location where the marker genes are expressed along with the cell types
+```{r fig.width=20, fig.height=30}
+Seurat::DefaultAssay(merged_se) <- "MAGIC_Spatial"
+
+gene_plt <- Seurat::SpatialFeaturePlot(
+  object = merged_se,
+  features = gene_vec,
+  alpha = c(0, 1),
+  ncol = 8,
+  images = "esvq52_nluss5")
+
+"{plasma}/{plt_dir}/magic_plasma_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = gene_plt,
+    base_height = 35,
+    base_width = 25)
+```
+
+Now with the log-norm expression
+```{r fig.width=20, fig.height=30}
+Seurat::DefaultAssay(merged_se) <- "Spatial"
+
+gene_plt <- Seurat::SpatialFeaturePlot(
+  object = merged_se,
+  features = gene_vec,
+  alpha = c(0, 1),
+  ncol = 8,
+  images = "esvq52_nluss5")
+
+"{plasma}/{plt_dir}/lognorm_plasma_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = gene_plt,
+    base_height = 35,
+    base_width = 25)
+```
+
+### Correlation matrix
+Since we are working with sample esvq52_nluss5 in this example we will limit the correlation plot to this slide.
+```{r fig.height=15, fig.width=15}
+(cor_mtrx <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = gene_vec[!gene_vec %in% c("IGHV3-20", "IGHV3-43", "CXCR4")],
+  assay = "MAGIC_Spatial",
+  slot = "data"))
+
+"{plasma}/{plt_dir}/magic_cor-mtrx_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx,
+    base_height = 15,
+    base_width = 15)
+
+  # Correlation with lognorm expression
+cor_log <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = gene_vec[!gene_vec %in% c("IGHV3-20", "IGHV3-43", "CXCR4")],
+  assay = "Spatial",
+  slot = "data")
+
+"{plasma}/{plt_dir}/lognorm_cor-mtrx_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_log,
+    base_height = 9,
+    base_width = 10)
+```
+
+Look at them side by side
+```{r fig.width=30, fig.height=15}
+cor_mtrx + cor_log
+```
+
+### Integrated correlation matrix
+
+Before we run the gene-correlation matrix on the integrated Seurat object we want to make sure that the behavior across all slides is consistent.
+
+```{r}
+lapply(id_sp_df$gem_id, function(id) {
+  print(id)
+  tmp_sub <- subset(merged_se, subset = gem_id == id)
+  tmp_sub@images <- tmp_sub@images[Seurat::Images(tmp_sub) == id]
+  
+  (cor_mtrx_genes <- SCrafty::correlation_heatmap( 
+    se = tmp_sub,
+    genes = gene_vec,
+    assay = "MAGIC_Spatial",
+    slot = "data") +
+     ggplot2::labs(
+       title = glue::glue("{id} - gene correlation matrix")))
+  
+  "{plasma}/{plt_dir}/magic_cor-mtrx_markers_{id}.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = cor_mtrx_genes,
+      base_height = 9,
+      base_width = 10)
+  
+})
+
+```
+
+After checking all the slides seem to be consistent across the gene clusters observed:
+```{r}
+(cor_mtrx_int <- SCrafty::correlation_heatmap( 
+  se = merged_se,
+  genes = gene_vec,
+  assay = "MAGIC_Spatial",
+  slot = "data") +
+   ggplot2::labs(
+     title = "Integrated gene correlation matrix"))
+
+"{plasma}/{plt_dir}/magic_cor-mtrx_markers_integrated.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx_int,
+    base_height = 9,
+    base_width = 10)
+
+(cor_mtrx_int <- SCrafty::correlation_heatmap( 
+  se = merged_se,
+  genes = gene_vec,
+  assay = "Spatial",
+  slot = "data") +
+   ggplot2::labs(
+     title = "Integrated gene correlation matrix"))
+```
+
+### Trajectory
+We are going to look at how the genes change in a manually set path. To do this we use the SPATA2 package, vignette can be found [here](https://themilolab.github.io/SPATA2/articles/spata-v2-trajectory-analysis.html)
+
+We start by subsetting and converting to a SPATA object
+```{r eval=FALSE}
+# se_sub <- Seurat::RunTSNE(object = se_sub)
+sp <- SPATA2::transformSeuratToSpata(
+  seurat_object = se_sub,
+  sample_name = "esvq52_nluss5",
+  image_name = "esvq52_nluss5",
+  assay_name = "MAGIC_Spatial",
+  assay_slot = "data",
+  method = "spatial",
+  coords_from = "umap",
+  verbose = TRUE)
+```
+
+```{r eval=FALSE}
+# se_sub <- Seurat::RunTSNE(object = se_sub)
+sp2 <- SPATA2::transformSeuratToSpata(
+  seurat_object = se_sub2,
+  sample_name = "p7hv1g_tjgmyj",
+  image_name = "p7hv1g_tjgmyj",
+  assay_name = "MAGIC_Spatial",
+  assay_slot = "data",
+  method = "spatial",
+  coords_from = "umap",
+  verbose = TRUE)
+```
+
+
+#### Draw trajectories
+Spatial trajectories of a sample in a given spata-object can be drawn interactively using the function `createTrajectories()` as shown in the example below. `createTrajectories()` opens a mini-shiny application. This app allows one the one hand to investigate the sample with regards to spatial gene expression like `plotSurfaceInteractive()` does and on the other hand to draw trajectories through the areas of interest in four easy steps.
+```{r eval=FALSE}
+# open interactive application
+sp <- SPATA2::createTrajectories(
+  object = sp)
+
+# Check that the trajectory has been determined correctly
+names(sp@trajectories$esvq52_nluss5)
+
+"{plasma}/{robj_dir}/spata-esvq52_nluss5-plasma.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = sp, file = .)
+```
+
+```{r eval=FALSE}
+# open interactive application
+sp2 <- SPATA2::createTrajectories(
+  object = sp2)
+
+# Check that the trajectory has been determined correctly
+names(sp2@trajectories$p7hv1g_tjgmyj)
+
+"{plasma}/{robj_dir}/spata-p7hv1g_tjgmyj-plasma.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = sp2, file = .)
+```
+
+Load drawn trajectories
+```{r}
+sp <- "{plasma}/{robj_dir}/spata-esvq52_nluss5-plasma.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Look at the trajectory 1
+```{r fig.width=9, fig.height=12}
+plotTrajectory(object = sp,
+               trajectory_name = "DZ-LZ-PCZ",
+               color_by = "annotation.general",
+               pt_clrp = "npg",
+               pt_alpha = 0.25, # reduce alpha to highlight the trajectory's course
+               display_image = FALSE) +
+  scale_y_reverse() +
+  legendTop()
+```
+
+Look at the trajectory 2
+```{r fig.width=9, fig.height=12}
+plotTrajectory(object = sp,
+               trajectory_name = "DZ-LZ-TZ-PCZ",
+               color_by = "annotation.general",
+               pt_clrp = "npg",
+               pt_alpha = 0.25, # reduce alpha to highlight the trajectory's course
+               display_image = FALSE) +
+  scale_y_reverse() +
+  legendTop()
+```
+
+Look at the trajectory 3
+```{r fig.width=9, fig.height=12}
+plotTrajectory(object = sp,
+               trajectory_name = "HM-DZ-LZ-PCZ2",
+               color_by = "annotation.general",
+               pt_clrp = "npg",
+               pt_alpha = 0.25, # reduce alpha to highlight the trajectory's course
+               display_image = FALSE) +
+  scale_y_reverse() +
+  legendTop()
+```
+
+unbiased assessment of how genes vary over the trajectory
+```{r eval=FALSE}
+all_genes <- getGenes(sp)
+
+# obtain an assessed trajectory data.frame for all genes
+atdf_genes1 <- assessTrajectoryTrends(
+  object = sp, 
+  trajectory_name = "DZ-LZ-PCZ", 
+  variables = all_genes)
+
+"{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-MZ-SE.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = atdf_genes1, file = .)
+```
+
+Save the list of genes by trajectory trend in an xlsx sheet
+```{r eval=FALSE}
+library(xlsx)
+
+atdf_genes1 <- "{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-PCZ.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+out_file_gene1 <- "{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-PCZ.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file prior to writing it so that there is no overwriting issue
+file.remove(out_file_gene1)
+lapply(unique(as.character(atdf_genes1$pattern)), function(i) {
+  tmp <- atdf_genes1 %>% dplyr::filter(pattern == i & auc < 0.75) %>% data.frame
+  print(head(tmp))
+  if (nrow(tmp) > 0) {
+    xlsx::write.xlsx(
+      tmp,
+      file = out_file_gene1,
+      row.names = FALSE,
+      sheetName = i,
+      append = file.exists(out_file_gene1))
+    }
+  })
+```
+
+unbiased assessment of how genes vary over the trajectory
+```{r eval=FALSE}
+# obtain an assessed trajectory data.frame for all genes
+atdf_genes2 <- assessTrajectoryTrends(
+  object = sp, 
+  trajectory_name = "DZ-LZ-TZ-PCZ", 
+  variables = all_genes)
+
+"{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-TZ-PCZ.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = atdf_genes2, file = .)
+```
+
+Save the list of genes by trajectory trend in an xlsx sheet
+```{r eval=FALSE}
+library(xlsx)
+
+atdf_genes2 <- "{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-TZ-PCZ.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+out_file_gene2 <- "{plasma}/{robj_dir}/gene_trajectory_trend-DZ-LZ-TZ-PCZ.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file prior to writing it so that there is no overwriting issue
+file.remove(out_file_gene2)
+lapply(unique(as.character(atdf_genes2$pattern)), function(i) {
+  tmp <- atdf_genes2 %>% dplyr::filter(pattern == i & auc < 0.75) %>% data.frame
+  print(head(tmp))
+  if (nrow(tmp) > 0) {
+    xlsx::write.xlsx(
+      tmp,
+      file = out_file_gene2,
+      row.names = FALSE,
+      sheetName = i,
+      append = file.exists(out_file_gene2))
+    }
+  })
+```
+
+Save the list of gene sets by trajectory trend in an xlsx sheet
+```{r eval=FALSE}
+library(xlsx)
+
+out_file_gs <- "{plasma}/{robj_dir}/gene-set_trajectory_trend.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file prior to writing it so that there is no overwriting issue
+file.remove(out_file_gs)
+lapply(unique(as.character(atdf_gene_sets$pattern)), function(i) {
+  tmp <- atdf_gene_sets %>% dplyr::filter(pattern == i & auc < 0.5) %>% data.frame
+  if (nrow(tmp) > 0) {
+    xlsx::write.xlsx(
+      tmp,
+      file = out_file_gs,
+      row.names = FALSE,
+      sheetName = i,
+      append = file.exists(out_file_gs))
+    }
+  })
+```
+
+#### Heatmaps
+
+Display trajectory trends with heatmaps *DZ-LZ-PCZ*
+```{r fig.width=12, fig.height=9}
+hm_colors <- viridis::inferno(n = 100)
+(hm1 <- plotTrajectoryHeatmap(
+  object = sp,
+  trajectory_name = "DZ-LZ-PCZ",
+  variables = goi,
+  arrange_rows = "maxima",
+  # arrange_rows = "minima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-HM-DZ-LZ-PCZ.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm1,
+    base_height = 9,
+    base_width = 12)
+```
+
+Display trajectory trends with heatmaps *LZ-DZ-IZ-PCZ*
+```{r fig.width=12, fig.height=9}
+(hm2 <- plotTrajectoryHeatmap(
+  object = sp,
+  trajectory_name = "DZ-LZ-TZ-PCZ",
+  variables = goi,
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-HM-LZ-DZ-IZ-PCZ.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm2,
+    base_height = 9,
+    base_width = 12)
+```
+
+Display trajectory trends with heatmaps *DZ-LZ-PCZ2*
+```{r fig.width=12, fig.height=9}
+hm_colors <- viridis::inferno(n = 100)
+(hm3 <- plotTrajectoryHeatmap(
+  object = sp,
+  trajectory_name = "HM-DZ-LZ-PCZ2",
+  variables = goi,
+  arrange_rows = "maxima",
+  # arrange_rows = "minima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-HM-DZ-LZ-PCZ2.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm3,
+    base_height = 9,
+    base_width = 12)
+```
+
+Manual trajectories
+```{r fig.width=12, fig.height=9}
+g2 <- c("SUGCT", "AICDA","CXCR4",
+  "MKI67", "TOP2A",
+  "BCL6", "IRF8", "MEF2B", "MS4A1", "PAX5",   
+  "LMO2", "CD83", "BCL2A1", 
+  "CD9",
+  "PRDM1", "XBP1", "IRF4", "SLAMF7", "SSR4", "MZB1", "DERL3", "CREB3L2", "FKBP11",
+  "IGHG1","IGHG2", "IGHG3","IGHG4","IGHA1", "IGHA2","IGHM","IGHD",
+   "CD44")
+
+(hm3_2 <- plotTrajectoryHeatmap(
+  object = sp,
+  trajectory_name = "HM-DZ-LZ-PCZ2",
+  variables = g2,
+  arrange_rows = "input",
+  # arrange_rows = "minima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-HM-DZ-LZ-PCZ2_manual.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm3,
+    base_height = 9,
+    base_width = 12)
+```
+
+## Slide BCLL-12-T
+Load drawn trajectories
+```{r}
+sp2 <- "{plasma}/{robj_dir}/spata-p7hv1g_tjgmyj-plasma.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Look at the trajectory 1
+```{r fig.width=9, fig.height=12}
+(p1 <- plotTrajectory(
+    object = sp2,
+    trajectory_name = "LZ-DZ-PC",
+    color_by = "annotation.general",
+    pt_clrp = "npg",
+    display_image = TRUE,
+    pt_size = 0,
+    pt_alpha = 0,
+    pt_clr = "#0000ffff",
+    smooth_span = 0) +
+  scale_y_reverse() +
+  legendTop())
+```
+
+Look at the trajectory 2
+```{r fig.width=9, fig.height=12}
+(p2 <- plotTrajectory(
+    object = sp2,
+    trajectory_name = "LZ-DZ-PC-2",
+    color_by = "annotation.general",
+    pt_clrp = "npg",
+    display_image = TRUE,
+    pt_size = 0,
+    pt_alpha = 0,
+    pt_clr = "#0000ffff",
+    smooth_span = 0) +
+  legendTop())
+```
+
+#### Heatmaps
+
+Display trajectory trends with heatmaps *DZ-LZ-PCZ*
+```{r fig.width=12, fig.height=9}
+hm_colors <- viridis::inferno(n = 100)
+(hm1 <- plotTrajectoryHeatmap(
+  object = sp2,
+  trajectory_name = "LZ-DZ-PC",
+  variables = goi,
+  arrange_rows = "maxima",
+  # arrange_rows = "minima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-LZ-DZ-PCZ_p7hv1g_tjgmyj.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm1,
+    base_height = 9,
+    base_width = 12)
+```
+
+Display trajectory trends with heatmaps *DZ-LZ-PCZ*
+```{r fig.width=12, fig.height=9}
+hm_colors <- viridis::inferno(n = 100)
+(hm2 <- plotTrajectoryHeatmap(
+  object = sp2,
+  trajectory_name = "LZ-DZ-PC-2",
+  variables = goi,
+  arrange_rows = "maxima",
+  # arrange_rows = "minima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5))
+
+"{plasma}/{plt_dir}/magic_trajectory-LZ-DZ-PC-2_p7hv1g_tjgmyj.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = hm2,
+    base_height = 9,
+    base_width = 12)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

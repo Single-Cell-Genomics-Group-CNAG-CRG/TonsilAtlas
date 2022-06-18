@@ -1,0 +1,235 @@
+---
+title: 'scATAC annotation level 1 with KNN'
+author: "Paula Soler-Vila & Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+Here, we will apply a k-nearest neighbor (KNN) algorithm to classify the scATAC cells to a given cell type category with the help of our training set, the Multiome experiment. Remember, that KNN works on a basic assumption that data points of similar categories are closer to each other.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(flexclust)
+library(tidyverse)
+library(plyr)
+library(harmony)
+library(class)
+library(ggplot2)
+library(reshape2)
+```
+
+## Parameters
+
+```{r parameters}
+path_to_ATAC_obj <- here::here("scATAC-seq/results/R_objects/7.tonsil_atac_integrated_with_multiome.rds")
+path_to_RNA_df <- here::here("scRNA-seq/3-clustering/1-level_1/tmp/annotation_level_1_multiome.rds")
+path_to_save <- here::here("scATAC-seq/results/R_objects/8.tonsil_atac_integrated_with_multiome_annotated_level1.rds")
+path_to_tmp_files <- here::here("scATAC-seq/3-Label_transfering/tmp/")
+```
+
+## Variables
+
+```{r variables}
+labels_var <- "annotation_level_1"
+reduction <- "harmony"
+dims <- 1:40
+colors <- c("#a6cee3", "#1f78b4","#b2df8a", 
+             "#33a02c", "#fb9a99","#e31a1c", 
+             "#fdbf6f", "#ff7f00","#cab2d6",
+             "#6a3d9a")
+```
+
+## Load data
+We need to load the scRNAseq annotation from Multiome experiment (cell barcode and cell-type assigned) and the integrated scATAC data. Note that there are 221 cells difference between scATAC and scRNA from multiome.
+
+```{r}
+tonsil_RNA_annotation <- readRDS(path_to_RNA_df)
+head(tonsil_RNA_annotation)
+nrow(tonsil_RNA_annotation)
+
+tonsil_ATAC <- readRDS(path_to_ATAC_obj)
+tonsil_ATAC
+table(tonsil_ATAC$assay)
+```
+
+Annotation level 1 for scATAC will be defined "a priori" as unannotated and the scRNA annotation will be transfered to the scATAC-multiome cells based on the same cell barcode.
+```{r}
+tonsil_scATAC_df <- data.frame(cell_barcode = colnames(tonsil_ATAC)[tonsil_ATAC$assay == "scATAC"])
+tonsil_scATAC_df$annotation_level_1 <- "unannotated"
+
+df_all <- rbind(tonsil_RNA_annotation,tonsil_scATAC_df)
+rownames(df_all) <- df_all$cell_barcode
+df_all <- df_all[colnames(tonsil_ATAC), ]
+
+tonsil_ATAC$annotation_level_1 <- df_all$annotation_level_1
+tonsil_ATAC@meta.data$annotation_prob  <- 1
+melt(table(tonsil_ATAC$annotation_level_1))
+table(is.na(tonsil_ATAC$annotation_level_1))
+```
+
+Looking at the results, we removed the preBC, preTC and the unannotated cells from multiome, labeled as NA.
+```{r}
+tonsil_ATAC$annotation_level_1[is.na(tonsil_ATAC$annotation_level_1)] <- "preTC"
+tonsil_ATAC$annotation_level_1[tonsil_ATAC$annotation_level_1 == "preBC"] <- "preTC"
+
+tonsil_ATAC = subset(tonsil_ATAC, annotation_level_1 != "preTC")
+tonsil_ATAC$annotation_level_1 <- factor(tonsil_ATAC$annotation_level_1)
+
+melt(table(tonsil_ATAC$annotation_level_1))
+table(is.na(tonsil_ATAC$annotation_level_1))
+```
+
+##  General low-dimensionality representation of the assays
+
+```{r fig.wide=TRUE}
+
+p1 <- DimPlot(tonsil_ATAC,
+  group.by = "annotation_level_1",
+  cols = colors,
+  pt.size = 0.1)
+
+p1
+
+
+p2 <- DimPlot(tonsil_ATAC,
+  group.by = "annotation_level_1",
+  pt.size = 0.1,
+  cols = colors,
+  split.by = "assay")
+
+
+p2
+```
+
+
+# KNN Algorithm
+
+## Data Splicing
+Data splicing basically involves splitting the data set into training and testing data set.
+
+```{r}
+reference_cells <- colnames(tonsil_ATAC)[tonsil_ATAC$assay == "multiome"]
+query_cells <- colnames(tonsil_ATAC)[tonsil_ATAC$assay == "scATAC"]
+
+reduction_ref <- tonsil_ATAC@reductions[[reduction]]@cell.embeddings[reference_cells, dims]
+reduction_query <- tonsil_ATAC@reductions[[reduction]]@cell.embeddings[query_cells, dims]
+```
+
+## Cross-validation of the K parameter.
+We’re going to calculate the number of observations in the training dataset that correspond to the Multiome data. The reason we’re doing this is that we want to initialize the value of ‘K’ in the KNN model. To do that, we split our training data in two part: a train.loan, that correspond to the random selection of the 70% of the training data and the test.loan, that is the remaining 30% of the data set. The first one is used to traint the system while the second is uses to evaluate the learned system.
+
+```{r}
+dat.d <- sample(1:nrow(reduction_ref),
+               size=nrow(reduction_ref)*0.7,replace = FALSE) 
+
+train.loan  <- reduction_ref[dat.d,] # 70% training data
+test.loan <- reduction_ref[-dat.d,] # remaining 30% test data
+
+train.loan_labels <- tonsil_ATAC@meta.data[row.names(train.loan),]$annotation_level_1
+test.loan_labels <- tonsil_ATAC@meta.data[row.names(test.loan),]$annotation_level_1
+
+k.optm <- c()
+k.values <- c()
+
+for (i in c(2,4,6,8,16,32,64,128,256)){
+ print(i)
+ knn.mod <- knn(train=train.loan, test=test.loan, cl=train.loan_labels, k=i)
+ k.optm <- c(k.optm, 100 * sum(test.loan_labels == knn.mod)/NROW(test.loan_labels))
+ k.values <- c(k.values,i)
+}
+```
+
+Now we can plot the accuracy of the model taking in account a range of different K and selec the best one.
+
+```{r fig.wide=TRUE}
+k.optim = data.frame(k.values,k.optm)
+
+p3 <- ggplot(data=k.optim, aes(x=k.values, y=k.optm, group=1)) +
+ geom_line() +
+ geom_point() + 
+ geom_vline(xintercept=6, linetype="dashed", color = "red")
+
+p3
+```
+
+## Building a Machine Learning model with the optimal k value.
+```{r}
+train.loan  <- reduction_ref
+test.loan <- reduction_query
+
+train.loan_labels <- tonsil_ATAC@meta.data[row.names(train.loan),]$annotation_level_1
+test.loan_labels <- tonsil_ATAC@meta.data[row.names(test.loan),]$annotation_level_1
+
+knn.mod <- knn(train=train.loan, test=test.loan, cl=train.loan_labels, k=6, prob=T)
+
+annotation_data <- data.frame(query_cells, knn.mod, attr(knn.mod,"prob"))
+colnames(annotation_data) <- c("query_cells",
+                               "annotation_level_1",
+                               "annotation_prob")
+
+tonsil_ATAC@meta.data[annotation_data$query_cell,]$annotation_level_1 <- annotation_data$annotation_level_1
+tonsil_ATAC@meta.data[annotation_data$query_cell,]$annotation_prob <- annotation_data$annotation_prob
+tonsil_ATAC$annotation_level_1 <- factor(tonsil_ATAC$annotation_level_1)
+```
+
+##  Low-dimensionality representation of the assays
+
+```{r fig.wide=TRUE}
+
+p4 <- DimPlot(
+  tonsil_ATAC,
+  cols = colors,
+  group.by = "annotation_level_1",
+  pt.size = 0.1)
+
+
+p4
+
+p5 <- DimPlot(
+  cols = colors,
+  tonsil_ATAC, reduction = "umap",
+  group.by = "annotation_level_1",
+  pt.size = 0.1,  split.by = "assay")
+
+p5
+
+
+melt(table(tonsil_ATAC$annotation_level_1))
+
+saveRDS(tonsil_ATAC, path_to_save)
+```
+
+##  Low-dimensionality representation of the prediction probability 
+
+Note that the probability of the prediction was lower in the transitioning cells and in not-defined clusters. 
+```{r fig.wide=TRUE}
+tonsil_ATAC_scATAC = subset(tonsil_ATAC, assay == "scATAC")
+
+p6 <- FeaturePlot(
+  tonsil_ATAC_scATAC, reduction = "umap",
+  features = "annotation_prob",
+  pt.size = 0.1)
+
+p6
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

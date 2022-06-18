@@ -1,0 +1,195 @@
+---
+title: "Transfer labels RNA to ATAC: NBC/MBC"
+author: "Ramon Massoni-Badosa"
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the label from RNA to ATAC for the naive and memory B cells (NBC/MBC) using a KNN classifier.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(SLOcatoR)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+library(pals)
+library(openxlsx)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+# Paths
+path_to_rna <- here::here("scRNA-seq/results/R_objects/final_clusters/NBC_MBC_seu_obj_level_5_delta.rds")
+path_to_atac <- here::here("scATAC-seq/results/R_objects/NBC_MBC_integrated_level_3.rds")
+path_to_save <- here::here("scATAC-seq/results/R_objects/NBC_MBC_annotated.rds")
+
+
+# Colors
+color_palette <-  c("#E6194B", "#3CB44B", "#FFD8B1", "#4363D8", "#F58231",
+                    "#911EB4", "#46F0F0", "#F032E6", "#BCF60C", "#FABEBE",
+                    "#008080", "#E6BEFF", "#9A6324", "#FFFAC8", "#800000",
+                    "#AAFFC3", "#808000", "#FFE119", "#000075", "#808080",
+                    "#000000", "tan", "darkgrey")
+
+
+# Misc
+optimal_k <- 5
+```
+
+
+## Read data
+
+```{r}
+rna <- readRDS(path_to_rna)
+rna$names_level_5_clusters_delta[rna$names_level_5_clusters_delta == "ncsMBC_FCRL4"] <- "ncsMBC FCRL4+"
+Idents(rna) <- "names_level_5_clusters_delta"
+atac <- readRDS(path_to_atac)
+DimPlot(rna, cols = color_palette)
+DimPlot(atac, cols = color_palette)
+```
+
+
+# Subset object
+
+We noticed that the ATAC-seq fraction of the BCLL-2-T donor (old adult) profiled with multiome was of poor-quality, so we excluded it. Thus, to perform the label transfer we first need to find the intersection of cell barcodes for cells from the multiome experiments.
+
+```{r}
+# Intersection of cell barcodes
+common_cells <- intersect(colnames(rna), colnames(atac))
+
+
+# Subset
+selected_cells <- c(
+  colnames(atac)[atac$assay == "scATAC"],
+  common_cells
+)
+atac <- subset(atac, cells = selected_cells)
+atac$type <- ifelse(
+  atac$assay == "scATAC",
+  "query",
+  "reference"
+)
+Idents(atac) <- "assay"
+atac$annotation <- NA
+atac$UMAP1_nbc_mbc <- NA
+atac$UMAP2_nbc_mbc <- NA
+
+
+# Define variables to predict
+ref_cells <- colnames(atac)[atac$type == "reference"]
+umap_df <- as.data.frame(Embeddings(rna, "umap"))
+atac$annotation[ref_cells] <- rna$names_level_5_clusters_delta[ref_cells]
+atac$UMAP1_nbc_mbc[ref_cells] <- umap_df[ref_cells, "UMAP_1"]
+atac$UMAP2_nbc_mbc[ref_cells] <- umap_df[ref_cells, "UMAP_2"]
+DimPlot(atac, group.by = "annotation", cols = color_palette, split.by = "type")
+```
+
+
+# Create training and test sets
+
+
+```{r}
+data_sets <- split_training_and_test_sets(
+  atac,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 40
+)
+data_sets$training_set <- data_sets$training_set[, 2:40]
+data_sets$test_set <- data_sets$test_set[, 2:40]
+```
+
+
+# Transfer label
+
+```{r}
+annotation_data  <- SLOcatoR::transfer_label(
+  seurat_obj = atac,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  response_var = "annotation"
+)
+```
+
+
+# Transfer UMAP coords
+
+```{r}
+umap_coords <- transfer_umap_coords(
+  seurat_obj = atac,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  umap1_var = "UMAP1_nbc_mbc",
+  umap2_var = "UMAP2_nbc_mbc"
+)
+annotation_atac_df <- left_join(
+  annotation_data,
+  umap_coords,
+  by = "query_cells"
+)
+p1 <- ggplot(annotation_atac_df, aes(UMAP1, UMAP2, color = annotation)) +
+  geom_point(size = 0.4) +
+  scale_color_manual(values = color_palette) +
+  theme_classic()
+p2 <- ggplot(annotation_atac_df, aes(UMAP1, UMAP2, color = annotation_prob)) +
+  geom_point(size = 0.4) +
+  scale_color_viridis_c(option = "magma") +
+  theme_classic()
+p1 | p2
+```
+
+
+# Add info to Seurat object
+
+```{r}
+rownames(annotation_atac_df) <- annotation_atac_df$query_cells
+query_cells <- colnames(atac)[!(colnames(atac) %in% ref_cells)]
+atac$annotation[query_cells] <- annotation_atac_df[query_cells, "annotation"]
+atac$annotation_prob[query_cells] <- annotation_atac_df[query_cells, "annotation_prob"]
+atac$UMAP1_nbc_mbc[query_cells] <- annotation_atac_df[query_cells, "UMAP1"]
+atac$UMAP2_nbc_mbc[query_cells] <- annotation_atac_df[query_cells, "UMAP2"]
+```
+
+
+# Save
+
+```{r}
+saveRDS(atac, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

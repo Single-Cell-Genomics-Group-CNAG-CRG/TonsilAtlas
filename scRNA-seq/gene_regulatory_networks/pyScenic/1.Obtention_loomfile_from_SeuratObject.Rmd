@@ -1,0 +1,66 @@
+---
+title: "Obtantion of loom file from Seurat Object"
+author: "Sergio Aguilar"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+In this Rmarkdown document we are going to convert a Seurat Objet to a loom file using the __SCopeLoomR package__. This script was initially thought to be used for obtaining the file needeed for running  __pySCENIC__ and compute the GRN; however, it could also be use to store data and load it into python in an easy way. Furthermore, we will also obtain a metadata.csv file to store the metadata.
+
+## Libraries
+```{r warning = FALSE, message = FALSE}
+library(dplyr)
+library(Seurat)
+library(SCopeLoomR)
+```
+
+
+
+## Parameters
+```{r}
+#name of the project
+project_name = "name_of_the_project"
+
+#Folder structure
+base_folder <- paste0("{path_to_project_folder}", project_name)
+data_folder <- paste0(base_folder, "/data/")
+```
+
+## Load object
+First, we load the initial seurat object from which we want to obtain the regulons using pySCENIC. 
+```{r}
+seurat_object <- readRDS(paste0(data_folder, project_name, "_seu_obj.rds"))
+```
+
+## Save metadata object
+Secondly, we save the metadata for obtaining the regulon specificity score (RSS) from one of the columns
+```{r}
+subset <- seurat_object@meta.data
+
+library(data.table)
+fwrite(x = subset, row.names = TRUE, file = paste(data_folder, project_name, "_metadata.csv", sep=""))
+```
+
+## Obtain loom file
+Finally, we obtain the loom file using SCopeLoomR package
+```{r}
+counts <- seurat_object@assays$RNA@counts
+Emb_expr <- seurat_object[["umap"]]@cell.embeddings
+default.emb <- Emb_expr
+default.emb.name <- "Umap"
+
+file.name <- paste0(data_folder, project_name, ".loom")
+build_loom(
+  file.name=file.name,
+  dgem=counts,
+  title=paste0("loom file from ", project_name),
+  genome="Human", # Just for user information, not used internally
+  default.embedding=default.emb,
+  default.embedding.name=default.emb.name
+)
+```

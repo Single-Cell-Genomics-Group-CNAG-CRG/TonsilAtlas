@@ -1,0 +1,26 @@
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	15	make_cellranger
+	2	write_fastqs
+	18
+Select jobs to execute...
+
+[Wed Jan 20 14:58:26 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_46/jobs/XV1SLOR2_HRF5D9A3/XV1SLOR2_HRF5D9A3.cmd
+    jobid: 19
+    wildcards: subproject=BCLLATLAS_46, gem_id=XV1SLOR2_HRF5D9A3
+
+RuleException in line 55 of /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/Snakefile:
+'InputFiles' object has no attribute 'feat_ref'
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/snakemake/executors/__init__.py", line 136, in run_jobs
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/snakemake/executors/__init__.py", line 439, in run
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/snakemake/executors/__init__.py", line 230, in _run
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/snakemake/executors/__init__.py", line 156, in _run
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/snakemake/executors/__init__.py", line 162, in printjob

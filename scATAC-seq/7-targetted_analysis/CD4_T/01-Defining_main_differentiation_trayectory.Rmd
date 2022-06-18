@@ -1,0 +1,204 @@
+---
+title: "CD4-T I: Cell differentiation trajectory"
+author: "Paula Soler-Vila & Juan Nieto"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to perform a computational dissection of the main differentiation pathway that CD4-T cells follow using the most variable features of our dataset.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(GenomicRanges)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(xlsx)
+library(plyr)
+library(stringr)
+```
+
+## Parameters
+```{r parameters}
+cell_type <- "CD4_T"
+
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0",
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA",
+                    "#FBE426", "#16FF32",  "black",  "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3", 
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", 
+                    "#822E1C", "coral2",  "#1CFFCE", "#1CBE4F", 
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B", 
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", 
+                    "#FBE426", "Brown")
+
+```
+
+## Functions
+
+```{r functions}
+plot_dim <- function(seurat, group,color_palette){
+  DimPlot(seurat, 
+  group.by = group,
+  cols = color_palette,
+  pt.size = 0.1)}
+```
+
+
+# CD4-T cells data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_peaks <- seurat@assays$peaks_level_5@ranges
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/UMAP_final_annotation.pdf"), 
+ #   width = 6, height = 4)
+
+print(plot_dim(seurat, group = "annotation_paper",color_palette))
+#dev.off()
+```
+
+## Grouping the cells in Non-Tfh & Tfh groups
+At low level of resolution, we want to detect the main epigenomic changes between Non-Tfh vs Tfh. For this reason, we decide to group the cells in 4 clusters: Non-Tfh, Tfh, Central Memory and Naive.
+
+```{r}
+seurat@meta.data <- seurat@meta.data %>% mutate(Group =
+  case_when(annotation_paper == "Naive" ~ "Naive",
+    annotation_paper == "CM Pre-non-Tfh" ~ "Central Memory",
+    annotation_paper == "CM PreTfh" ~ "Central Memory",
+    annotation_paper == "T-Trans-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-Eff-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-helper" ~ "Non-Tfh",
+    annotation_paper == "Tfh T:B border" ~ "Tfh",
+    annotation_paper == "Tfh-LZ-GC" ~ "Tfh",
+    annotation_paper == "GC-Tfh-SAP" ~ "Tfh",
+    annotation_paper == "GC-Tfh-0X40" ~ "Tfh",
+    annotation_paper == "Tfh-Mem" ~ "Tfh",
+    annotation_paper == "Memory T cells" ~ "Non-Tfh",
+    annotation_paper == "Eff-Tregs" ~ "Non-Tfh",
+    annotation_paper == "non-GC-Tf-regs" ~ "Non-Tfh",
+    annotation_paper == "GC-Tf-regs" ~ "Non-Tfh"))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/UMAP_main_groups.pdf"), 
+ #   width = 6, 
+  #  height = 4)
+
+print(plot_dim(seurat, group = "Group",
+               color_palette = c("black", "gray", "red", "yellow")))
+#dev.off()
+```
+
+# Latent semantic indexing analysis
+We have seen that the relation of the second and the third components of the LSI reduction reflects the cell-fate decision of the naïve CD4-T cell towards Non-Tfh or Tfh. In order to verify this effect in detail, we decided to extract the feature.loadings of these two components and filter by the high variable peaks that could be explain this differention process. Using those peaks, we can re-compute the UMAP and see how the trajectory appears clearer. 
+
+```{r}
+a1 <- DimPlot(
+  seurat, 
+  group.by = "Group",
+  cols = color_palette,
+  pt.size = 0.4,
+  reduction = "lsi",
+  dims = 2:3
+)
+
+a2 <- DimPlot(
+  seurat, 
+  group.by = "annotation_paper",
+  cols = color_palette,
+  pt.size = 0.4,
+  reduction = "lsi",
+  dims = 2:3
+)
+
+a2
+a1 
+```
+
+```{r}
+loading_2_3 <- seurat@reductions$lsi@feature.loadings[,c("LSI_2","LSI_3")]
+loading_2_3.df <- as.data.frame(seurat@reductions$lsi@feature.loadings[,c("LSI_2","LSI_3")])
+loading_2_3.melt <- melt(loading_2_3)
+
+ggviolin(loading_2_3.melt, "Var2", "value", 
+         fill = "Var2", palette = c("#00AFBB", "#E7B800"),
+         add = "boxplot", add.params = list(fill = "white")) + 
+         geom_hline(yintercept = c(-0.015,0.015))
+
+# filter dataframe to get data to be highligheted
+loadings_high <- loading_2_3.melt[loading_2_3.melt$value > 0.015 | loading_2_3.melt$value < -0.015,]$Var1
+
+highlight_df <- loading_2_3.df[loadings_high,]
+
+loading_2_3.df %>% 
+  ggplot(aes(x=LSI_2,y=LSI_3)) + 
+  geom_point(alpha=0.3) +
+  geom_point(data=highlight_df, 
+             aes(x=LSI_2,y=LSI_3), 
+             color='red',
+             size=2) + theme_minimal() 
+```
+
+We can re-compute the UMAP using the high variable features previously defined.
+
+```{r}
+loadings_high_UMAP <- RunUMAP(object = seurat, 
+                features = loadings_high)
+
+#saveRDS(object = loadings_high_UMAP,
+ #       file = here::here("scATAC-seq/results/plots/CD4-T/files_plots/loadings_high_UMAP.rds"))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/UMAP_HVF_4groups.pdf"), 
+ #   width = 6, height = 4)
+
+DimPlot(object = loadings_high_UMAP, 
+        label = F,group.by = "Group",
+        pt.size = 0.3,
+        cols = c("black", "gray", "red", "yellow"))
+#dev.off()
+
+DimPlot(ncol = 4, object = loadings_high_UMAP, 
+        label = F,split.by = "Group",
+        pt.size = 0.3,
+        cols = color_palette) + NoLegend()
+```
+
+
+```{r}
+sessionInfo()
+```
+

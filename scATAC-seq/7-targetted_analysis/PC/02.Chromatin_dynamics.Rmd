@@ -1,0 +1,490 @@
+---
+title: "PC: Chromatin dynamics"
+author: "Paula Soler-Vila & Sergio Aguilar"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+To interrogate the different maturation states required in these two differentiation pathways we performed a single-cell transcriptional and chromatin accessibility profiling of the PCs together with a representative subset of Germinal Center B Cells (GCBC) and MBCs. A total of 12,779 cells were analyzed at scRNA-seq level which clustered into 23 subpopulations, while 4,160 cells were grouped into 13 subpopulations at the scATAC-seq level to re-force cell transfer annotation and interpretation.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(GenomicRanges)
+library(pheatmap)
+library(JASPAR2020)
+library(TFBSTools)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(writexl)
+library(plyr)
+library(stringr)
+library(grid)
+library(gridExtra)
+library(EnhancedVolcano)
+library(qlcMatrix)
+
+set.seed(333)
+```
+
+## Parameters
+```{r parameters}
+cell_type = "PC"
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/05.",
+  cell_type,
+  "_chromVar_CISBP_level_5.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- paste0(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+  "/PC_seu_obj_level_5_eta.rds")
+
+
+color_palette <- c("#73787E", "#B8BCC1","#FECFC7" ,
+                   "#FF8E7B","#a13b53","#A6E1F4", 
+                   "#586BA4", "#323734","#035F72",
+                   "#9CC6CF" ,"#198C19","#006600","#FFD8B1")
+
+
+cels_order <- c("Dark Zone GCBC",
+                "Light Zone GCBC",
+                "PC committed Light Zone GCBC",
+                "Early PC precursor",
+                "PB",
+                "IgG+ PC precursor",
+                "IgM+ PC precursor",
+                "IgD PC precursor", 
+                "preMature IgG+ PC",
+                "preMature IgM+ PC",
+                "Mature PC",
+                "MBC derived PC precursor",
+                "class switch MBC")
+
+colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+```
+
+## Functions
+
+```{r functions}
+DARS <- function(ident.1,ident.2){
+  DARs <- FindMarkers(
+  ident.1 = ident.1,
+  ident.2 = ident.2,
+  object = seurat,
+  min.pct = 0.05,
+  test.use = 'LR',
+  latent.vars = 'nCount_peaks_level_5')
+  
+return(DARs)}
+
+DARS_ChromVar <- function(ident.1,ident.2){
+  DARs <- FindMarkers(
+  ident.1 = ident.1,
+  ident.2 = ident.2,
+  object = seurat,
+  min.pct = 0.05,
+  test.use = 'LR')
+  
+return(DARs)}
+
+DARS_matrix <- function(DARs, group){
+  avgexpr_mat <- AverageExpression(
+  features = row.names(DARs),
+  seurat,
+  assays = "peaks_level_5",
+  return.seurat = F,
+  group.by = group,
+  slot = "data")
+return(avgexpr_mat)}
+
+
+DARS_filtered_max <- function(mat, quant, cluster_interest){
+  matrix_coefficient <- rowMax(mat) / rowSums(mat)
+  hist(matrix_coefficient, breaks = 100)
+  abline(v = quantile(matrix_coefficient, quant), 
+         col="red", lwd=3, lty=2)
+  
+  regions <- which(matrix_coefficient > quantile(matrix_coefficient, 
+                                                 quant))
+  filtered_regions <- mat[regions,]
+  filtered_regions_interest_clusters <- filtered_regions[which(apply(X = filtered_regions,
+      MARGIN = 1,FUN = which.max) %in% cluster_interest),]
+
+  return(filtered_regions_interest_clusters)}
+
+
+pheatmap_plot <- function(matrices,n_cutree_rows,
+                          annotation_col,mycolors_list){
+  pheatmap(matrices,
+      scale = "row",
+      annotation_col = annotation_col,
+      annotation_colors = mycolors_list,
+      color = colfunc(100),
+      angle_col = 45,
+      show_rownames=F,
+      border_color = "white",
+      cluster_rows = T,
+      cluster_cols = F,
+      fontsize_col = 10,
+      cutree_rows = n_cutree_rows,
+      clustering_distance_cols = "euclidean", 
+      clustering_method = "ward.D2")}
+```
+
+# Load data
+
+## Load PC scRNA-seq data
+```{r loading data}
+seurat_RNA <- readRDS(path_to_obj_RNA)
+Idents(seurat_RNA) <- "names_level_5_clusters_eta"
+seurat_RNA
+```
+
+## Load PC scATAC-seq data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat_peaks <- seurat@assays$peaks_level_5@ranges
+seurat
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/1.UMAP_scATAC.pdf",
+ #   width=5,height=5,paper='special')
+
+DimPlot(seurat,
+  reduction = "umap",
+  pt.size = 1,
+  cols= color_palette,
+  label = FALSE) + NoLegend() + theme(plot.title = element_blank())
+```
+
+# Differential accessible analysis (DARs)
+A pairwise differential accessibility analysis between the major biological identities revealed an extensive chromatin modulation along the primary reaction pathway.
+
+```{r}
+DefaultAssay(seurat) <- "peaks_level_5"
+
+step1 <- DARS(ident.1 = "Light Zone GCBC", 
+              ident.2 = "PC committed Light Zone GCBC")
+
+step2 <- DARS(ident.1 = "PC committed Light Zone GCBC", 
+              ident.2 = "IgG+ PC precursor")
+
+step3 <- DARS(ident.1 = "IgG+ PC precursor", 
+              ident.2 = "Mature PC")
+
+step4 <- DARS(ident.1 = "class switch MBC", 
+              ident.2 = "Mature PC")
+
+all_DARs <- rbind(step1,step2,step3, step4)
+
+EnhancedVolcano(all_DARs, 
+                lab = NA,
+                pCutoff = 10e-03,
+                FCcutoff = 0.5,
+                labSize = 4,
+                legendLabSize = 8,
+                x = 'avg_log2FC', y = 'p_val_adj') 
+```
+
+The following statistical cutoffs where applied to filter the DARs: avg_log2FC >= 0,5 and p adjusted value <= 10e-03.
+```{r}
+step1_filtered <- step1[which(abs(step1$avg_log2FC) >= 0.5 &
+                                    step1$p_val_adj <= 10e-03),]
+
+step2_filtered <- step2[which(abs(step2$avg_log2FC) >= 0.5 &
+                                    step2$p_val_adj <= 10e-03),]
+
+step3_filtered <- step3[which(abs(step3$avg_log2FC) >= 0.5 &
+                                    step3$p_val_adj <= 10e-03),]
+
+step4_filtered <- step4[which(abs(step4$avg_log2FC) >= 0.5 &
+                                    step4$p_val_adj <= 10e-03),]
+
+nrow(step1_filtered)
+nrow(step2_filtered)
+nrow(step3_filtered)
+nrow(step4_filtered)
+
+DARS <- rev(c(nrow(step1_filtered),nrow(step2_filtered),
+          nrow(step3_filtered),nrow(step4_filtered)))
+
+steps <- rev(c("step1", "step2", "step3", "step4"))
+
+df <- data.frame(steps, round(DARS/sum(DARS) * 100,2))
+colnames(df) <- c("steps","DARS")
+
+#ggsave("/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/DARs_barplot.pdf")
+
+ggbarplot(df, "steps", "DARS", 
+          orientation = "horiz",
+          label = TRUE) + scale_y_continuous(limits=c(0, 100))
+```
+
+# Module-specific DARs
+To evaluate the general landscape of the chromatin remodeling during PC differentiation, we combined the obtained DARs into a unique heatmap. A hierarchical clustering based on the Euclidean distance measure and ward.D2 method revealed three main modules of chromatin dynamics.
+
+```{r}
+DefaultAssay(seurat) <- "peaks_level_5"
+step1_mat <- DARS_matrix(DARs = step1_filtered,
+                         group = "annotation_level_5")
+step2_mat <- DARS_matrix(DARs = step2_filtered,
+                        group = "annotation_level_5")
+step3_mat <- DARS_matrix(DARs = step3_filtered,
+                         group = "annotation_level_5")
+step4_mat <- DARS_matrix(DARs = step4_filtered,
+                         group = "annotation_level_5")
+
+path_matrix <- rbind(step1_mat$peaks_level_5,
+                      step2_mat$peaks_level_5,
+                      step3_mat$peaks_level_5,
+                      step4_mat$peaks_level_5)
+
+cell_types <- names(table(seurat$annotation_level_5))
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+mycolors <- color_palette
+names(mycolors) <- cell_types
+mycolors_list <- list(mycolors)
+names(mycolors_list) <- "cell_type"
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/3.Heatmap_DARs.pdf",
+ #   width = 8,height = 6)
+entire_heatmap <- pheatmap_plot(path_matrix[,cels_order],n_cutree_rows = 3,
+                                annotation_col, 
+                                mycolors_list)
+entire_heatmap
+```
+
+```{r}
+cutree_out = cutree(entire_heatmap$tree_row, k=3)
+cutree_df <- as.data.frame(cbind(names(cutree_out),cutree_out))
+cluster1 <- cutree_df[cutree_df$cutree_out == 1,]
+cluster2 <- cutree_df[cutree_df$cutree_out == 2,]
+cluster3 <- cutree_df[cutree_df$cutree_out == 3,]
+```
+
+As module-specific DARs likely contain specific DNA motifs that allow binding of specific TF, we performed an enrichment analysis and identified several key binding motifs of expressed TF related to the cell identity.
+
+## Cluster 1
+
+### Selection of top overrepresented expressed TF.
+```{r}
+Motif_enr_cluster1 <- FindMotifs(object = seurat,
+                             features = cluster1$V1)
+Motif_enr_cluster1$cluster <- 1
+
+avgexpr_mat <- AverageExpression(
+  features = Motif_enr_cluster1$motif.name,
+  seurat_RNA,
+  return.seurat = F,
+  group.by = "annotation_level_1",
+  slot = "data")
+
+# Removing motifs with non-expression in any main population
+avgexpr_df_filt <- filter(as.data.frame(avgexpr_mat$RNA),
+                           GCBC > 0, NBC_MBC > 0, PC > 0)
+
+DT::datatable(avgexpr_df_filt)
+DT::datatable(Motif_enr_cluster1)
+
+FeaturePlot(
+  object = seurat,
+  features = c("ENSG00000164330-LINE255-EBF1-D-N1",
+               "ENSG00000196092-LINE3170-PAX5-D-N8"),
+  min.cutoff = 'q1',
+  max.cutoff = 'q99',
+  pt.size = 0.1,
+  ncol = 2
+)
+```
+
+### Subclustering module 1: PC_committed-module
+```{r}
+clustering1_filtered <- DARS_filtered_max(path_matrix[cluster1$V1,], 0.6, 3)
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/4.Heatmap_PC_committed_DARs.pdf")
+pheatmap_plot(clustering1_filtered[,cels_order],n_cutree_rows = 1, annotation_col, mycolors_list)
+
+seurat <- AddModuleScore(
+    seurat,
+    name = 'PC-committed-module',
+    features = list(row.names(clustering1_filtered)))
+
+
+colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/5.Module_PC-committed_DARs.pdf",
+ #   width=5,height=5,paper='special')
+
+FeaturePlot(seurat,
+      order = TRUE,
+      min.cutoff = 'q1',
+      max.cutoff = 'q99',
+      pt.size = 0.8,
+      features  = "PC.committed.module1") + 
+  theme(plot.title = element_blank()) + 
+  scale_color_gradientn( colours = c('lightgrey', 'darkgreen'))
+```
+
+#### Enrichment motif analysis of PC_committed-module
+```{r}
+clustering1_filtered_motifs <- FindMotifs(object = seurat,
+                             features = row.names(clustering1_filtered))
+
+DT::datatable(clustering1_filtered_motifs)
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/6.Volcano_plot_POU.pdf",
+ #   width=5,height=8,paper='special')
+
+EnhancedVolcano(clustering1_filtered_motifs, 
+                pCutoff = 10e-03,
+                FCcutoff = 0.5,
+                labSize = 4,
+                legendLabSize = 8,
+                lab = clustering1_filtered_motifs$motif.name,
+                x = 'fold.enrichment', y = 'pvalue') 
+
+#pdf(file="/Users/pauli/Desktop/PAPER_FIGURES/ETA/2.scATAC/7.UMAP_POU.pdf",
+ #   width=5,height=5,paper='special')
+
+FeaturePlot(seurat,
+      order = TRUE,
+      features = "ENSG00000137709-LINE2649-POU2F3-D-N1",
+      min.cutoff = 'q1',
+      max.cutoff = 'q99',
+      pt.size = 0.8) + 
+  theme(plot.title = element_blank()) + scale_color_gradientn( colours = c('lightgrey', 'chartreuse3'))
+```
+
+## Cluster 2
+```{r}
+Motif_enr_cluster2 <- FindMotifs(object = seurat,
+                             features = cluster2$V1)
+
+avgexpr_mat <- AverageExpression(
+  features = Motif_enr_cluster2$motif.name,
+  seurat_RNA,
+  return.seurat = F,
+  group.by = "annotation_level_1",
+  slot = "data")
+
+# Removing motifs with non-expression in any main population
+avgexpr_df_filt <- filter(as.data.frame(avgexpr_mat$RNA),
+                           GCBC > 0, NBC_MBC > 0, PC > 0)
+
+DT::datatable(avgexpr_df_filt)
+DT::datatable(Motif_enr_cluster2)
+
+FeaturePlot(
+  object = seurat,
+  features = c("ENSG00000137265-LINE2748-IRF4-D-N1",
+               "ENSG00000140968-LINE2752-IRF8-D-N2"),
+  min.cutoff = 'q1',
+  max.cutoff = 'q99',
+  pt.size = 0.1,
+  ncol = 2
+)
+```
+
+## Cluster 3
+```{r}
+Motif_enr_cluster3 <- FindMotifs(object = seurat,
+                             features = cluster3$V1)
+
+avgexpr_mat <- AverageExpression(
+  features = Motif_enr_cluster3$motif.name,
+  seurat_RNA,
+  return.seurat = F,
+  group.by = "annotation_level_1",
+  slot = "data")
+
+# Removing motifs with non-expression in any main population
+avgexpr_df_filt <- filter(as.data.frame(avgexpr_mat$RNA),
+                           GCBC > 0, NBC_MBC > 0, PC > 0)
+
+DT::datatable(avgexpr_df_filt)
+DT::datatable(Motif_enr_cluster3)
+
+FeaturePlot(
+  object = seurat,
+  features = c("ENSG00000142539-LINE1880-SPIB-D-N2",
+               "ENSG00000175832-LINE1927-ETV4-D-N1"),
+  min.cutoff = 'q1',
+  max.cutoff = 'q99',
+  pt.size = 0.1,
+  ncol = 2
+)
+```
+
+
+# Differential motif activity analysis across the main states of PC maturation
+
+```{r}
+DefaultAssay(seurat) <- "chromvar"
+
+step1_chromVar <- DARS_ChromVar(ident.1 = "Light Zone GCBC", 
+                                ident.2 = "PC committed Light Zone GCBC")
+
+step2_chromVar <- DARS_ChromVar(ident.1 = "PC committed Light Zone GCBC", 
+                                ident.2 = "IgG+ PC precursor")
+
+step3_chromVar <- DARS_ChromVar(ident.1 = "IgG+ PC precursor", 
+                                ident.2 = "Mature PC")
+
+step4_chromVar <- DARS_ChromVar(ident.1 = "class switch MBC", 
+                                ident.2 = "Mature PC")
+
+
+step1_chromVar_filtered <- step1_chromVar[which(abs(step1_chromVar$avg_log2FC) >= 0.5 &
+                            step1_chromVar$p_val_adj <= 10e-05),]
+
+step2_chromVar_filtered <- step2_chromVar[which(abs(step2_chromVar$avg_log2FC) >= 0.5 &
+                            step2_chromVar$p_val_adj <= 10e-05),]
+
+step3_chromVar_filtered <- step2_chromVar[which(abs(step3_chromVar$avg_log2FC) >= 0.5 &
+                            step3_chromVar$p_val_adj <= 10e-05),]
+
+step4_chromVar_filtered <- step4_chromVar[which(abs(step4_chromVar$avg_log2FC) >= 0.5 &
+                            step4_chromVar$p_val_adj <= 10e-05),]
+```
+
+
+```{r}
+DT::datatable(step1_chromVar_filtered)
+DT::datatable(step2_chromVar_filtered)
+DT::datatable(step3_chromVar_filtered)
+DT::datatable(step4_chromVar_filtered)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

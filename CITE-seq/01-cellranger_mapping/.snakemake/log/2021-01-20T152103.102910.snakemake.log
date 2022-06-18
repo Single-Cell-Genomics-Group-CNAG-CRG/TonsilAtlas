@@ -1,0 +1,220 @@
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	15	make_cellranger
+	2	write_fastqs
+	18
+Select jobs to execute...
+
+[Wed Jan 20 15:21:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/SOJZt9kY_qpnv20QN/SOJZt9kY_qpnv20QN.cmd
+    jobid: 23
+    wildcards: subproject=BCLLATLAS_46, gem_id=SOJZt9kY_qpnv20QN
+
+
+[Wed Jan 20 15:21:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/XV1SLOR2_HRF5D9A3/XV1SLOR2_HRF5D9A3.cmd
+    jobid: 10
+    wildcards: subproject=BCLLATLAS_46, gem_id=XV1SLOR2_HRF5D9A3
+
+
+[Wed Jan 20 15:21:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_33/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_33/jobs/ifZOgenn_TpMNTvBa/ifZOgenn_TpMNTvBa.cmd
+    jobid: 4
+    wildcards: subproject=BCLLATLAS_33, gem_id=ifZOgenn_TpMNTvBa
+
+
+[Wed Jan 20 15:21:04 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_33/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_33/jobs/mLuLpVxi_v0fLyotc/mLuLpVxi_v0fLyotc.cmd
+    jobid: 13
+    wildcards: subproject=BCLLATLAS_33, gem_id=mLuLpVxi_v0fLyotc
+
+[Wed Jan 20 15:21:05 2021]
+Finished job 23.
+1 of 18 steps (6%) done
+Select jobs to execute...
+[Wed Jan 20 15:21:05 2021]
+Finished job 10.
+2 of 18 steps (11%) done
+[Wed Jan 20 15:21:05 2021]
+Finished job 13.
+3 of 18 steps (17%) done
+
+[Wed Jan 20 15:21:05 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/KETfaLdx_Ub1mtE13/KETfaLdx_Ub1mtE13.cmd
+    jobid: 18
+    wildcards: subproject=BCLLATLAS_46, gem_id=KETfaLdx_Ub1mtE13
+
+Select jobs to execute...
+[Wed Jan 20 15:21:05 2021]
+Finished job 4.
+4 of 18 steps (22%) done
+
+[Wed Jan 20 15:21:05 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd
+    jobid: 7
+    wildcards: subproject=BCLLATLAS_46, gem_id=HjqdPU0E_aGDmEY5F
+
+
+[Wed Jan 20 15:21:05 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/BZEECBEG_GXkc6Q1y/BZEECBEG_GXkc6Q1y.cmd
+    jobid: 17
+    wildcards: subproject=BCLLATLAS_46, gem_id=BZEECBEG_GXkc6Q1y
+
+Select jobs to execute...
+
+[Wed Jan 20 15:21:05 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_38/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_38/fastq_paths.csv
+    jobid: 2
+    wildcards: subproject=BCLLATLAS_38
+
+Select jobs to execute...
+[Wed Jan 20 15:21:06 2021]
+Finished job 18.
+5 of 18 steps (28%) done
+Select jobs to execute...
+
+[Wed Jan 20 15:21:06 2021]
+localrule write_fastqs:
+    input: projects/BCLLATLAS_40/info.txt, data/tonsil_atlas_metadata.csv
+    output: projects/BCLLATLAS_40/fastq_paths.csv
+    jobid: 15
+    wildcards: subproject=BCLLATLAS_40
+
+[Wed Jan 20 15:21:06 2021]
+Finished job 17.
+6 of 18 steps (33%) done
+[Wed Jan 20 15:21:06 2021]
+Finished job 7.
+7 of 18 steps (39%) done
+[Wed Jan 20 15:21:06 2021]
+Finished job 2.
+8 of 18 steps (44%) done
+Select jobs to execute...
+
+[Wed Jan 20 15:21:06 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_38/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_38/jobs/WToIzInl_LudU7hVX/WToIzInl_LudU7hVX.cmd
+    jobid: 12
+    wildcards: subproject=BCLLATLAS_38, gem_id=WToIzInl_LudU7hVX
+
+
+[Wed Jan 20 15:21:06 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_38/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_38/jobs/rdFRFhrU_ZdYeOZlf/rdFRFhrU_ZdYeOZlf.cmd
+    jobid: 11
+    wildcards: subproject=BCLLATLAS_38, gem_id=rdFRFhrU_ZdYeOZlf
+
+
+[Wed Jan 20 15:21:06 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_38/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_38/jobs/B20O1bh7_VmM99YZJ/B20O1bh7_VmM99YZJ.cmd
+    jobid: 1
+    wildcards: subproject=BCLLATLAS_38, gem_id=B20O1bh7_VmM99YZJ
+
+[Wed Jan 20 15:21:07 2021]
+Finished job 15.
+9 of 18 steps (50%) done
+Select jobs to execute...
+
+[Wed Jan 20 15:21:07 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/ujxNn2kq_lG2VLlYd/ujxNn2kq_lG2VLlYd.cmd
+    jobid: 22
+    wildcards: subproject=BCLLATLAS_40, gem_id=ujxNn2kq_lG2VLlYd
+
+[Wed Jan 20 15:21:07 2021]
+Finished job 11.
+10 of 18 steps (56%) done
+Select jobs to execute...
+[Wed Jan 20 15:21:07 2021]
+Finished job 1.
+11 of 18 steps (61%) done
+[Wed Jan 20 15:21:07 2021]
+Finished job 12.
+12 of 18 steps (67%) done
+
+[Wed Jan 20 15:21:07 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/LxBTpkPO_8TcNpBg4/LxBTpkPO_8TcNpBg4.cmd
+    jobid: 14
+    wildcards: subproject=BCLLATLAS_40, gem_id=LxBTpkPO_8TcNpBg4
+
+Select jobs to execute...
+
+[Wed Jan 20 15:21:07 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/uqJAc4r9_BYScOzxA/uqJAc4r9_BYScOzxA.cmd
+    jobid: 21
+    wildcards: subproject=BCLLATLAS_40, gem_id=uqJAc4r9_BYScOzxA
+
+
+[Wed Jan 20 15:21:07 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/pseMjZsU_qgZNOhOQ/pseMjZsU_qgZNOhOQ.cmd
+    jobid: 20
+    wildcards: subproject=BCLLATLAS_40, gem_id=pseMjZsU_qgZNOhOQ
+
+Select jobs to execute...
+[Wed Jan 20 15:21:08 2021]
+Finished job 22.
+13 of 18 steps (72%) done
+Select jobs to execute...
+
+[Wed Jan 20 15:21:08 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_40/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_40/jobs/CfdzDgHe_IMOTbrIP/CfdzDgHe_IMOTbrIP.cmd
+    jobid: 19
+    wildcards: subproject=BCLLATLAS_40, gem_id=CfdzDgHe_IMOTbrIP
+
+[Wed Jan 20 15:21:08 2021]
+Finished job 14.
+14 of 18 steps (78%) done
+[Wed Jan 20 15:21:08 2021]
+Finished job 21.
+15 of 18 steps (83%) done
+[Wed Jan 20 15:21:08 2021]
+Finished job 20.
+16 of 18 steps (89%) done
+[Wed Jan 20 15:21:09 2021]
+Finished job 19.
+17 of 18 steps (94%) done
+Select jobs to execute...
+
+[Wed Jan 20 15:21:09 2021]
+localrule all:
+    input: projects/BCLLATLAS_38/jobs/B20O1bh7_VmM99YZJ/B20O1bh7_VmM99YZJ.cmd, projects/BCLLATLAS_33/jobs/ifZOgenn_TpMNTvBa/ifZOgenn_TpMNTvBa.cmd, projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd, projects/BCLLATLAS_46/jobs/XV1SLOR2_HRF5D9A3/XV1SLOR2_HRF5D9A3.cmd, projects/BCLLATLAS_38/jobs/rdFRFhrU_ZdYeOZlf/rdFRFhrU_ZdYeOZlf.cmd, projects/BCLLATLAS_38/jobs/WToIzInl_LudU7hVX/WToIzInl_LudU7hVX.cmd, projects/BCLLATLAS_33/jobs/mLuLpVxi_v0fLyotc/mLuLpVxi_v0fLyotc.cmd, projects/BCLLATLAS_40/jobs/LxBTpkPO_8TcNpBg4/LxBTpkPO_8TcNpBg4.cmd, projects/BCLLATLAS_46/jobs/BZEECBEG_GXkc6Q1y/BZEECBEG_GXkc6Q1y.cmd, projects/BCLLATLAS_46/jobs/KETfaLdx_Ub1mtE13/KETfaLdx_Ub1mtE13.cmd, projects/BCLLATLAS_40/jobs/CfdzDgHe_IMOTbrIP/CfdzDgHe_IMOTbrIP.cmd, projects/BCLLATLAS_40/jobs/pseMjZsU_qgZNOhOQ/pseMjZsU_qgZNOhOQ.cmd, projects/BCLLATLAS_40/jobs/uqJAc4r9_BYScOzxA/uqJAc4r9_BYScOzxA.cmd, projects/BCLLATLAS_40/jobs/ujxNn2kq_lG2VLlYd/ujxNn2kq_lG2VLlYd.cmd, projects/BCLLATLAS_46/jobs/SOJZt9kY_qpnv20QN/SOJZt9kY_qpnv20QN.cmd
+    jobid: 0
+
+[Wed Jan 20 15:21:09 2021]
+Finished job 0.
+18 of 18 steps (100%) done
+Complete log: /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/.snakemake/log/2021-01-20T152103.102910.snakemake.log

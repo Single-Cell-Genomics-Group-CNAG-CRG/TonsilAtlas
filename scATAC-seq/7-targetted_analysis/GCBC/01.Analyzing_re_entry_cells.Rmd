@@ -1,0 +1,657 @@
+---
+title: "GCBC: Analyzing chromatin dynamics"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(Signac)
+library(harmony)
+library(tidyverse)
+library(pheatmap)
+library(reshape2)
+library(ggpubr)
+library(plyr)
+library(UCell)
+library(qlcMatrix)
+library(GOfuncR)
+library(Homo.sapiens)
+library(biomaRt)
+library(viridis)
+library(grid)
+library(writexl)
+
+set.seed(333)
+```
+
+
+## Parameters
+
+```{r parameters}
+cell_type = "GCBC"
+
+cols_gcbc <- c(
+  "DZ G2M phase" = "#6F66A3",
+  "DZ-early S phase" = "#006FC4", 
+  "DZ-late S phase" = "#004D89",
+  "DZ-non-proliferative" = "#356200", 
+  "DZ-LZ transition" = "#D4F0A3",
+  "LZ" = "#FFF59A",  
+  "LZ-DZ-re-entry commitment" = "#E0EFEF", 
+  "LZ-DZ-transition" = "#4EB2FF",
+  "LZ-proliferative"  = "#9AD3FF", 
+  "MBC" = "#E68098", 
+  "prePC" = "#FECFC7")
+
+cels_order <- c("DZ-non-proliferative","DZ-LZ transition","LZ",
+                "LZ-DZ-re-entry commitment","LZ-proliferative",
+                "LZ-DZ-transition","DZ-early S phase",
+                "DZ-late S phase","DZ G2M phase","MBC",
+                 "prePC")
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_chromVar_CISBP_level_4.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- paste0(
+  here::here("scRNA-seq/3-clustering/4-level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_seu_obj_level_5_eta.rds",
+  sep = ""
+)
+
+path_to_obj_RNA_DE <- paste0(
+  here::here("scRNA-seq/3-clustering/4-level_4/"),
+  cell_type,
+  "/markers_re_entry.rds",
+  sep = "")
+
+path_to_obj_regulons <- paste0(
+  here::here("scRNA-seq/3-clustering/4-level_4/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_seu_obj_level_5_beta_3P_withpyscenic.rds",
+  sep = ""
+)
+
+figures_folder <-"/Users/pauli/Desktop/PAPER_FIGURES/GCBC/2.scATAC/"
+path_to_regulons <- here::here("scATAC-seq/results/Pyscenic/list_of_regs.rds")
+path_to_mat <- here::here("scRNA-seq/results/all_targets_KFKB_mean_expression_per_cluster_eta_noMBC.rds")
+
+```
+
+## Functions
+```{r}
+DARS <- function(ident.1,ident.2){
+  DARs <- FindMarkers(
+  ident.1 = ident.1,
+  ident.2 = ident.2,
+  object = seurat,
+  min.pct = 0.05,
+  test.use = 'LR',
+  latent.vars = 'nCount_peaks_redefined')
+  
+  DARs_filtered <- DARs[DARs$p_val_adj < 0.05,]
+return(DARs_filtered)}
+
+DARS_matrix <- function(DARs, group){
+  avgexpr_mat <- AverageExpression(
+  features = row.names(DARs),
+  seurat,
+  assays = "peaks_redefined",
+  return.seurat = F,
+  group.by = group,
+  slot = "data")
+return(avgexpr_mat)}
+
+DARS_filtered_max <- function(mat, quant, cluster_interest){
+    matrix_coefficient <- rowMax(mat) / rowSums(mat)
+    regions <- which(matrix_coefficient > quantile(matrix_coefficient, 
+                                                   quant))
+    filtered_regions <- mat[regions,]
+    filtered_regions_interest_clusters <- filtered_regions[which(apply(X = filtered_regions,
+        MARGIN = 1,FUN = which.max) %in% cluster_interest),]
+    print(nrow(filtered_regions_interest_clusters))
+    return(filtered_regions_interest_clusters)}
+
+
+pheatmap_plot <- function(matrices,n_cutree_rows,
+                          annotation_col,mycolors_list){
+  colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+  pheatmap(matrices,
+      scale = "row",
+      annotation_col = annotation_col,
+      annotation_colors = mycolors_list,
+      color = colfunc(100),
+      angle_col = 45,
+      show_rownames=F,
+      border_color = "white",
+      cluster_rows = T,
+      cluster_cols = F,
+      fontsize_col = 10,
+      cutree_rows = n_cutree_rows,
+      clustering_distance_cols = "euclidean", 
+      clustering_method = "ward.D2")}
+```
+
+# Load data
+## Load scATAC-seq data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat$level_5 <- revalue(seurat$level_5,
+                c("DZ/LZ"="DZ-LZ transition",
+                  "DZ_Sphase_HistoneHigh"="DZ-late S phase",
+                  "DZ_G2M"="DZ G2M phase",
+                  "DZ-nonproliferative"="DZ-non-proliferative",
+                  "DZ_Sphase"="DZ-early S phase",
+                  "LZ"="LZ",
+                  "LZ-DZ-re-entry"="LZ-DZ-re-entry commitment",
+                  "LZ-proliferative_BCL2A1neg"="LZ-DZ-transition",
+                  "LZ-proliferative_BCL2A1pos"="LZ-proliferative",
+                  "MBC-like"="MBC",
+                  "PC-precursors"="prePC"))
+
+seurat$level_5 <- factor(seurat$level_5, levels = names(cols_gcbc))
+
+p1 <- DimPlot(seurat, 
+    group.by = "level_5",
+    cols = cols_gcbc,
+    pt.size = 2, raster = T) + NoLegend()
+
+#pdf(paste(figures_folder, "Panel_E.pdf", sep=""),width=4,height=4,paper='special') 
+p1 
+```
+
+## Load scRNA-seq data
+```{r}
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+```
+
+## Load regulons data
+```{r}
+seurat_regulons <- readRDS(path_to_obj_regulons)
+seurat_regulons
+```
+
+### Merging re-entry subtypes
+```{r}
+seurat$re_entry_merged <- revalue(seurat$level_5,
+          c("DZ-LZ transition"="DZ-LZ transition",
+            "DZ-late S phase"="DZ-late S phase",
+            "DZ G2M phase"="DZ G2M phase",
+            "DZ-non-proliferative"="DZ-non-proliferative",
+            "DZ-early S phase"="DZ-early S phase",
+            "LZ"="LZ",
+            "LZ-DZ-re-entry commitment"="LZ-DZ-re-entry commitment",
+            "LZ-DZ-transition"="LZ-DZ-re-entry commitment",
+            "LZ-proliferative"="LZ-DZ-re-entry commitment",
+            "MBC"="MBC",
+            "prePC"="prePC"))
+
+seurat_RNA$merged <- revalue(seurat_RNA$names_level_5_clusters_eta,
+            c("DZ_LZ transition"="DZ-LZ transition",
+            "DZ cell cycle exit"="DZ-non-proliferative",
+            "DZ late Sphase"="DZ-late S phase",
+            "G2M early Sphase"="DZ G2M phase",
+            "G2M late Sphase"="DZ G2M phase",
+            "DZ non proliferative"="DZ-non-proliferative",
+            "DZ early Sphase"="DZ-early S phase",
+            "LZ"="LZ",
+            "LZ_DZ reentry commitment"="LZ-DZ-re-entry commitment",
+            "LZ_DZ transition"="LZ-DZ-transition",
+            "LZ proliferative"="LZ-proliferative",
+            "Precursor MBC"="MBC",
+            "Reactivated proliferative MBCs"="MBC",
+            "prePC"="prePC"))
+
+seurat_regulons$merged <- revalue(seurat_regulons$names_level_5_clusters_beta,
+  c("DZ-cell cycle exit"="DZ-non-proliferative",
+    "DZ-nonproliferative"="DZ-non-proliferative",
+    "DZ-nonproliferative_FOXP1hi"="DZ-non-proliferative",
+    "DZ/LZ"="DZ-LZ transition",
+    "LZ"="LZ",
+    "LZ-BCL2A1 neg"="LZ",
+    "LZ-DZ-re-entry early commitment"="LZ-DZ-re-entry commitment",
+    "PC-precursors"="prePC",
+    "MBC-like_proli1"="MBC",
+    "MBC-like_proli2"="MBC",
+    "MBC-like_proli3"="MBC",
+    "MBC-like_nonproli"="MBC",
+    "MBC-like_FCRL4+"="MBC",
+    "LZ-proliferative_BCL2A1pos"="LZ-proliferative",
+    "LZ-proliferative_BCL2A1neg"="LZ-DZ-transition",
+    "DZ_Sphase_HistoneHigh"="DZ-late S phase",
+    "DZ_Sphase"="DZ-early S phase",
+    "DZ_G2M_CCNBHigh"="DZ G2M phase",         
+    "DZ_G2M_HistoneHigh"="DZ G2M phase"))
+```
+
+# From the DZ to the LZ
+A pairwise differential accessibility analysis between the major biological identities revealed that the DZ-LZ transition was seamless, with not major chromatin changes. 
+
+```{r}
+Idents(seurat) <- seurat$re_entry_merged
+  
+step1 <- DARS(ident.1 = "DZ-non-proliferative", 
+              ident.2 = "DZ-LZ transition")
+
+step2 <- DARS(ident.1 = "DZ-LZ transition", 
+              ident.2 = "LZ")
+```
+
+```{r}
+step1_mat <- DARS_matrix(DARs = step1,
+                         group = "re_entry_merged")
+step2_mat <- DARS_matrix(DARs = step2,
+                        group = "re_entry_merged")
+
+path_matrix <- rbind(step1_mat$peaks_redefined,
+                      step2_mat$peaks_redefined)
+```
+
+## Selecting top candidates regions
+
+```{r}
+path_matrix <- rbind(step1_mat$peaks_redefined,
+                      step2_mat$peaks_redefined)
+
+cluster_interest = c(4,5,6)
+top_candidates1 <- DARS_filtered_max(path_matrix, 0, 
+                                     cluster_interest)
+top_candidates1_selection <- DARS_filtered_max(top_candidates1[,cluster_interest], 
+                            0.6, c(1,2,3))
+```
+
+## Visualization of top candidates regions in not merged context
+
+```{r}
+step1_not_merged_mat <- DARS_matrix(step1, 
+                                  group ="level_5")
+
+step2_not_merged_mat <- DARS_matrix(step2, 
+                                  group ="level_5")
+
+path_not_merged_matrix <- rbind(step1_not_merged_mat$peaks_redefined,step2_not_merged_mat$peaks_redefined)
+
+cell_types <- names(table(seurat$level_5))
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+mycolors <- cols_gcbc
+names(mycolors) <- cell_types
+mycolors_list <- list(mycolors)
+names(mycolors_list) <- "cell_type"
+
+#pdf(paste0(figures_folder, "heatmap_DARs_DZtoLZ.pdf"),width=8,height=6,paper='special') 
+out_DZ_LZ = pheatmap_plot(path_not_merged_matrix[row.names(top_candidates1_selection),cels_order],
+              n_cutree_rows = 3,
+              annotation_col, 
+              mycolors_list)
+```
+
+### Definition of the sub-clusters
+```{r}
+cutree_out = cutree(out_DZ_LZ$tree_row, k=3)
+cutree_df <- as.data.frame(cbind(names(cutree_out),cutree_out))
+cluster1 <- cutree_df[cutree_df$cutree_out == 1,]
+cluster2 <- cutree_df[cutree_df$cutree_out == 2,]
+cluster3 <- cutree_df[cutree_df$cutree_out == 3,]
+
+nrow(cluster1)
+nrow(cluster2)
+nrow(cluster3)
+```
+
+# From the LZ to return to the DZ
+A pairwise differential accessibility analysis between the major biological identities revealed an extensive chromatin modulation along the canonical pathway.
+ 
+```{r}
+Idents(seurat) <- seurat$re_entry_merged
+
+step1_re_entry_merged <- DARS(ident.1 = "LZ", 
+                              ident.2 = "LZ-DZ-re-entry commitment")
+
+step2_re_entry_merged  <- DARS(ident.1 = "LZ-DZ-re-entry commitment", 
+                               ident.2 = "DZ-early S phase")
+```
+
+```{r}
+step1_re_entry_merged_mat <- DARS_matrix(step1_re_entry_merged, 
+                                  group ="re_entry_merged")
+
+step2_re_entry_merged_mat <- DARS_matrix(step2_re_entry_merged, 
+                                  group ="re_entry_merged")
+
+path_reentry_merged_matrix <- rbind(step1_re_entry_merged_mat$peaks_redefined,
+                             step2_re_entry_merged_mat$peaks_redefined)
+```
+
+## Selecting top candidates regions
+
+```{r}
+cluster_interest = c(6,7,2)
+
+top_candidates_reentry <- DARS_filtered_max(path_reentry_merged_matrix, 0, cluster_interest)
+top_candidates_reentry_selection <- DARS_filtered_max(top_candidates_reentry[,cluster_interest],0.6, c(1,2,3))
+```
+
+## Visualization of top candidates regions in not merged context
+
+```{r}
+step1_re_entry_not_merged_mat <- DARS_matrix(step1_re_entry_merged, 
+                                  group ="level_5")
+
+step2_re_entry_not_merged_mat <- DARS_matrix(step2_re_entry_merged, 
+                                  group ="level_5")
+
+path_reentry_not_merged_matrix <- rbind(step1_re_entry_not_merged_mat$peaks_redefined,step2_re_entry_not_merged_mat$peaks_redefined)
+
+DZ_LZ_heatmap <- pheatmap_plot(path_reentry_not_merged_matrix[row.names(top_candidates_reentry_selection),cels_order],
+              n_cutree_rows = 4,
+              annotation_col, 
+              mycolors_list)
+
+#pdf(paste0(figures_folder, "heatmap_DARs_LZtoDZ.pdf"),width=8,height=6,paper='special') 
+DZ_LZ_heatmap
+```
+
+```{r}
+# Definition of the sub-clusters
+cutree_DZ_LZ_heatmap_non_merged = cutree(DZ_LZ_heatmap$tree_row, 
+                                         k=4)
+cutree_df <- as.data.frame(cbind(names(cutree_DZ_LZ_heatmap_non_merged),cutree_DZ_LZ_heatmap_non_merged))
+
+cluster1_DZ_LZ <- cutree_df[cutree_df$cutree_DZ_LZ_heatmap_non_merged == 1,]
+cluster2_DZ_LZ <- cutree_df[cutree_df$cutree_DZ_LZ_heatmap_non_merged == 2,]
+cluster3_DZ_LZ <- cutree_df[cutree_df$cutree_DZ_LZ_heatmap_non_merged == 3,]
+cluster4_DZ_LZ <- cutree_df[cutree_df$cutree_DZ_LZ_heatmap_non_merged == 4,]
+```
+
+### Signature of the LZ cluster 
+```{r}
+print(paste0("Number of regions:", nrow(cluster2_DZ_LZ)))
+
+pheatmap_plot(path_reentry_not_merged_matrix[unlist(cluster2_DZ_LZ$V1),cels_order], n_cutree_rows = 1, annotation_col,  mycolors_list)
+```
+
+```{r}
+seurat <- AddModuleScore(
+  seurat,
+  name = 'LZ-module',
+  features = list(cluster2_DZ_LZ$V1))
+
+colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+
+#pdf(paste(figures_folder, "Panel_G1.pdf", sep=""),width=5,height=5,paper='special') 
+FeaturePlot(seurat,
+            order = TRUE,
+            min.cutoff = 'q1',
+            max.cutoff = 'q99',
+            pt.size = 2,
+            features  = "LZ.module1",
+            raster = T) + 
+  theme(plot.title = element_blank()) + 
+  scale_color_gradientn( colours = c('lightgrey', 'darkgreen')) + NoLegend()
+``` 
+
+#### Motif enrichment analysis cluster LZ
+```{r}
+enriched.motifs <- FindMotifs(
+  object = seurat,
+  features = cluster2_DZ_LZ$V1
+)
+
+write_xlsx(enriched.motifs,here::here("scATAC-seq/results/tables/supplementary_table_GCBC_MEA_re_entryI.xlsx"))
+
+DT::datatable(enriched.motifs)
+```
+
+### Signature cluster re-entry I
+```{r}
+print(paste0("Number of regions:", nrow(cluster3_DZ_LZ)))
+
+pheatmap_plot(path_reentry_not_merged_matrix[unlist(cluster3_DZ_LZ$V1),cels_order],
+              n_cutree_rows = 1,
+              annotation_col, 
+              mycolors_list)
+```
+
+```{r}
+seurat <- AddModuleScore(
+  seurat,
+  name = 'reentry-module',
+  features = list(cluster3_DZ_LZ$V1))
+
+colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+
+#pdf(paste(figures_folder, "Panel_G2.pdf", sep=""),width=5,height=5,paper='special') 
+FeaturePlot(seurat,
+            order = TRUE,
+            min.cutoff = 'q1',
+            max.cutoff = 'q99',
+            pt.size = 2,
+            features  = "reentry.module1",
+            raster = T) + 
+  theme(plot.title = element_blank()) + 
+  scale_color_gradientn( colours = c('lightgrey', 'darkgreen')) + NoLegend()
+``` 
+
+#### Motif enrichment re-entry I
+```{r}
+enriched.motifs <- FindMotifs(
+  object = seurat,
+  features = cluster3_DZ_LZ$V1
+)
+
+write_xlsx(enriched.motifs,here::here("scATAC-seq/results/tables/supplementary_table_GCBC_MEA_re_entryII.xlsx"))
+
+DT::datatable(enriched.motifs)
+```
+
+### Signature re-entry II
+```{r}
+print(paste0("Number of regions:", nrow(cluster1_DZ_LZ)))
+
+pheatmap_plot(path_reentry_not_merged_matrix[unlist(cluster1_DZ_LZ$V1),cels_order],
+              n_cutree_rows = 1,
+              annotation_col, 
+              mycolors_list)
+```
+
+```{r}
+seurat <- AddModuleScore(
+  seurat,
+  name = 'reentryII-module',
+  features = list(cluster1_DZ_LZ$V1))
+
+colfunc <- colorRampPalette(c("#4575B4", "white","darkgreen"))
+
+#pdf(paste(figures_folder, "Panel_G3.pdf", sep=""),width=5,height=5,paper='special') 
+FeaturePlot(seurat,
+            order = TRUE,
+            min.cutoff = 'q1',
+            max.cutoff = 'q99',
+            pt.size = 2,
+            features  = "reentryII.module1",
+            raster = T) + 
+  theme(plot.title = element_blank()) + 
+  scale_color_gradientn( colours = c('lightgrey', 'darkgreen')) + NoLegend()
+``` 
+
+#### Motif enrichment analysis cluster 2
+```{r}
+enriched.motifs <- FindMotifs(
+  object = seurat,
+  features = cluster1_DZ_LZ$V1
+)
+
+write_xlsx(enriched.motifs,here::here("scATAC-seq/results/tables/supplementary_table_GCBC_MEA_re_entryIII.xlsx"))
+
+DT::datatable(enriched.motifs)
+```
+
+# Studying target transcription factors
+
+## BATF family
+
+```{r}
+p1 <- FeaturePlot(seurat,
+                  order = TRUE,
+                  features = "ENSG00000156127-LINE436-BATF-D-N1",
+                  min.cutoff = 'q1',
+                  max.cutoff = 'q99',
+                  pt.size = 0.4) + 
+  theme(plot.title = element_blank()) 
+
+p2 <- FeaturePlot(seurat_RNA,
+                  order = TRUE,
+                  features = "BATF", 
+                  min.cutoff = 'q1',
+                  max.cutoff = 'q99',
+                  pt.size = 0.4) + 
+  theme(plot.title = element_blank()) 
+
+p1 | p2
+```
+
+
+```{r}
+seurat[["level_5"]] <- factor(unlist(seurat[["level_5"]]), levels= cels_order)
+seurat_RNA[["merged"]] <- factor(unlist(seurat_RNA[["merged"]]), levels= cels_order)
+seurat_regulons[["merged"]] <- factor(unlist(seurat_regulons[["merged"]]), levels= cels_order)
+
+p1 <- VlnPlot(seurat,
+              features = c("ENSG00000156127-LINE435-BATF-D-N1"), 
+              group.by = "level_5", pt.size = 0) + NoLegend() + xlab("") + ylab("") +
+  theme(legend.position = "none", 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.title.y = element_text(size = rel(1), angle = 0), 
+        axis.text.y = element_text(size = rel(1))) 
+
+p2 <- VlnPlot(seurat_RNA,
+              features = c("BATF"), 
+              group.by = "merged", pt.size = 0) + NoLegend() + xlab("") + ylab("") +
+  theme(legend.position = "none", 
+       # axis.text.x = element_blank(), 
+       # axis.ticks.x = element_blank(), 
+        axis.title.y = element_text(size = rel(1), angle = 0), 
+        axis.text.y = element_text(size = rel(1))) 
+
+#pdf(paste(figures_folder, "Violin_module_final_r-entry.pdf", sep=""),width=4,height=8,paper='special') 
+#patchwork::wrap_plots(plotlist = list(p1,p2), ncol = 1)
+p1
+p2
+```
+
+## NFkB family
+
+```{r}
+p1 <- FeaturePlot(seurat,
+                  order = TRUE,
+                  features = "ENSG00000109320-LINE3203-NFKB1-D-N1",
+                  min.cutoff = 'q1',
+                  max.cutoff = 'q99',
+                  pt.size = 0.4) + 
+  theme(plot.title = element_blank()) 
+
+p2 <- FeaturePlot(seurat_RNA,
+                  order = TRUE,
+                  features = "NFKB1", 
+                  min.cutoff = 'q1',
+                  max.cutoff = 'q99',
+                  pt.size = 0.4) + 
+  theme(plot.title = element_blank()) 
+
+p1 | p2
+```
+
+
+```{r}
+FeaturePlot(seurat,
+            order = TRUE,
+            features = c("ENSG00000162924-LINE3217-REL-D-N3",
+                         "ENSG00000173039-LINE3227-RELA-D-N13",
+                         "ENSG00000104856-LINE3201-RELB-D",
+                         "ENSG00000109320-LINE3203-NFKB1-D-N1",
+                         "ENSG00000077150-LINE3189-NFKB2-D-N1"),
+            min.cutoff = 'q1',
+            max.cutoff = 'q99',
+            pt.size = 0.4,
+            ncol = 2) + 
+  theme(plot.title = element_blank()) 
+```
+
+```{r}
+seurat[["level_5"]] <- factor(unlist(seurat[["level_5"]]), levels= cels_order)
+seurat_RNA[["merged"]] <- factor(unlist(seurat_RNA[["merged"]]), levels= cels_order)
+seurat_regulons[["merged"]] <- factor(unlist(seurat_regulons[["merged"]]), levels= cels_order)
+
+p1 <- VlnPlot(seurat,
+              features = c("ENSG00000109320-LINE3203-NFKB1-D-N1"), 
+              group.by = "level_5", pt.size = 0) + NoLegend() + xlab("") + ylab("") +
+  theme(legend.position = "none", 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.title.y = element_text(size = rel(1), angle = 0), 
+        axis.text.y = element_text(size = rel(1))) 
+
+p2 <- VlnPlot(seurat_RNA,
+              features = c("NFKB1"), 
+              group.by = "merged", pt.size = 0) + NoLegend() + xlab("") + ylab("") +
+  theme(legend.position = "none", 
+        axis.text.x = element_blank(), 
+        axis.ticks.x = element_blank(), 
+        axis.title.y = element_text(size = rel(1), angle = 0), 
+        axis.text.y = element_text(size = rel(1))) 
+
+p3 <- VlnPlot(seurat_regulons,
+              features = c("NFKB1(+)"), 
+              group.by = "merged", pt.size = 0) + NoLegend() + xlab("") + ylab("") +
+  theme(legend.position = "none", 
+        axis.title.y = element_text(size = rel(1), angle = 0), 
+        axis.text.y = element_text(size = rel(1))) 
+
+#pdf(paste(figures_folder, "violin_module_r-entry.pdf", sep=""),width=4,height=8,paper='special') 
+#patchwork::wrap_plots(plotlist = list(p1,p2,p3), ncol = 1)
+p1
+p2
+p3
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
+
+

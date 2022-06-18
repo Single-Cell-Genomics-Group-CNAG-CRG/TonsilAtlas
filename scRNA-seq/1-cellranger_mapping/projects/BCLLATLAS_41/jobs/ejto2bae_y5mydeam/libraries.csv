@@ -1,0 +1,7 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/cDNA/lane2,ejto2bae_y5mydeam,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/cDNA/lane4,ejto2bae_y5mydeam,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/cDNA/lane1,ejto2bae_y5mydeam,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/cDNA/lane3,ejto2bae_y5mydeam,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/HTO/lane2,ejto2bae_y5mydeam_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/ejto2bae_y5mydeam/fastq/HTO/lane1,ejto2bae_y5mydeam_HTO,Antibody Capture

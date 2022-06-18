@@ -1,0 +1,299 @@
+---
+title: "FDC: Level 4"
+author: "Ramon Massoni-Badosa"
+date: "2021/08/18"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will include the annotation of the FDC cells (level 4).
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_3/FDC/FDC_clustered_level_3_with_pre_freeze.rds"
+path_to_save_proliferative <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/FDC/FDC_proliferative_level_4.rds"
+path_to_save_epithelial <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/FDC/epithelial_level_4.rds"
+path_to_save_fdc <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/FDC/FDC_all_level_4.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette)
+```
+
+# Explore
+
+```{r}
+FeaturePlot(seurat, c("CD79A", "CD3D", "TOP2A"), pt.size = 0.5) &
+  scale_color_viridis_c(option = "magma")
+FeaturePlot(seurat, "MS4A1") +
+  scale_color_viridis_c(option = "magma")
+FeaturePlot(seurat, c("KRT15", "KRT19"), pt.size = 0.5) &
+  scale_color_viridis_c(option = "magma")
+```
+
+
+# TODO
+
+* Merge clusters 0 and 2. Cluster 2 has a poorly defined signature, and some markers of B cells. We will subcluster it to see if we can separate doublets and FDC.
+* Remove cluster 4 (doublets with B cells).
+* Remove cluster 6 (doublets: top half doublets with T cells, bottom half doublet with B cell).
+* Divide cluster 3 in cycling (left) + doublets (right). Remove doublets
+* Subset cluster 9 and merge it with epithelial cells (it expresses KRT19 and KRT15).
+
+
+Important literature
+
+* [Application of Tonsil-Derived Mesenchymal Stem Cells in Tissue Regeneration: Concise Review](https://stemcellsjournals.onlinelibrary.wiley.com/doi/10.1002/stem.3058)
+
+# Remove
+
+```{r}
+seurat$annotation_level_3 <- as.character(seurat$seurat_clusters)
+selected_cells <- colnames(seurat)[!(seurat$annotation_level_3 %in% c("4", "6"))]
+seurat <- subset(seurat, cells = selected_cells)
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+
+# Subcluster
+
+### Cluster 2
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindNeighbors(seurat, reduction = "harmony", dims = 1:20)
+seurat <- FindSubCluster(seurat, "2", "RNA_snn", "sub2", resolution = 0.6)
+DimPlot(seurat, group.by = "sub2", cols = color_palette)
+Idents(seurat) <- "sub2"
+markers_sub2 <- find_markers_subclusters(seurat, "sub2", "^2_")
+DT::datatable(markers_sub2$`2_0`)
+DT::datatable(markers_sub2$`2_1`)
+DT::datatable(markers_sub2$`2_2`)
+```
+
+
+Clearly, cluster 2_2 expressed B cell markers, so we will remove it:
+
+```{r}
+seurat <- subset(seurat, sub2 != "2_2")
+DimPlot(seurat, group.by = "sub2", cols = color_palette)
+markers_2vs0 <- FindMarkers(seurat, ident.1 = c("2_0", "2_1"), ident.2 = "0", only.pos = TRUE)
+DT::datatable(markers_2vs0)
+```
+
+
+New cluster 2 does not have distinctive markers when compared to cluster 0, so we will merge both:
+
+```{r}
+seurat$annotation_level_3[seurat$annotation_level_3 %in% c("0", "2")] <- "0_2"
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, group.by = "annotation_level_3")
+```
+
+
+### Cluster 3
+
+```{r}
+seurat <- FindNeighbors(seurat, reduction = "harmony", dims = 1:15)
+seurat <- FindSubCluster(seurat, "3", "RNA_snn", "sub3", resolution = 0.3)
+DimPlot(seurat, group.by = "sub3", cols = color_palette)
+Idents(seurat) <- "sub3"
+markers_sub3 <- FindMarkers(seurat, ident.1 = "3_1", ident.2 = c("3_0", "3_2"), only.pos = FALSE)
+markers_sub3 <- markers_sub3 %>%
+  rownames_to_column("gene") %>%
+  arrange(desc(avg_log2FC))
+DT::datatable(markers_sub3)
+markers_sub3 <- find_markers_subclusters(seurat, "sub3", "^3_")
+DT::datatable(markers_sub3$`3_0`)
+DT::datatable(markers_sub3$`3_1`)
+```
+
+Since it is hard to separate, I propose to keep this cluster and label it "proliferative FDC/doublets". However, to gain more resolution in the annotation of the other clusters, we can subset it (similar to CD4 T cells):
+
+```{r}
+proliferative_doublets <- subset(seurat, annotation_level_3 == "3")
+seurat <- subset(seurat, annotation_level_3 != "3")
+DimPlot(seurat, group.by = "annotation_level_3")
+```
+
+
+# Get cluster 9 (epithelial)
+
+```{r}
+epithelial <- subset(seurat, annotation_level_3 == "9")
+seurat <- subset(seurat, annotation_level_3 != "9")
+DimPlot(epithelial, cols = color_palette)
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette)
+```
+
+# Reintegrate
+
+```{r}
+seurat <- seurat %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "donor_id", reduction = "pca", dims = 1:20) %>%
+  RunUMAP(reduction = "harmony", dims = 1:20, n.neighbors = 20)
+DimPlot(seurat, group.by = "annotation_level_3", cols = color_palette)
+```
+
+# Recluster
+
+```{r}
+seurat <- FindNeighbors(
+  seurat,
+  dims = 1:20,
+  reduction = "harmony",
+  k.param = 20
+)
+seurat <- FindClusters(seurat, resolution = 0.7)
+DimPlot(seurat, cols = color_palette)
+```
+Let us join clusters 1, 2 and 4 in a single cluster; and split cluster 3 in 3:
+
+```{r}
+# Merge
+seurat$annotation_level_4 <- as.character(seurat$seurat_clusters)
+seurat$annotation_level_4[seurat$annotation_level_4 %in% c("1", "2", "4")] <- "1"
+
+
+# Split
+Idents(seurat) <- "annotation_level_4"
+seurat <- FindSubCluster(seurat, "3", "RNA_snn", "sub3_level_4", resolution = 0.7)
+DimPlot(seurat, group.by = "sub3_level_4", cols = color_palette)
+
+# Rename
+seurat$annotation_level_4 <- case_when(
+  seurat$sub3_level_4 == "0" ~ "0",
+  seurat$sub3_level_4 == "1" ~ "1",
+  seurat$sub3_level_4 == "3_0" ~ "2",
+  seurat$sub3_level_4 == "3_1" ~ "3",
+  seurat$sub3_level_4 == "3_2" ~ "4",
+  seurat$sub3_level_4 == "5" ~ "5",
+  seurat$sub3_level_4 == "6" ~ "6"
+)
+Idents(seurat) <- "annotation_level_4"
+DimPlot(seurat, group.by = "annotation_level_4")
+```
+
+
+## Markers
+
+```{r}
+markers_new <- FindAllMarkers(seurat, only.pos = TRUE, logfc.threshold = 0.75)
+```
+
+
+# Generate outputs
+
+```{r}
+shiny_output <- seurat2shiny(seurat, assay = "RNA", reduction = "umap", slot = "data")
+```
+
+
+# Final annotation
+
+* 0: COL27A1_DZ_FDC_or_FRC
+* 1: LZ_FDC
+* 2: precursor_FDC
+* 3: KLF_FDC
+* 4: T-MSC
+* 5: doublets
+* 6: CD14_CD55_FDC
+
+
+# Save
+
+```{r}
+# Save Seurat objects
+saveRDS(seurat, path_to_save_fdc)
+saveRDS(epithelial, path_to_save_epithelial)
+saveRDS(proliferative_doublets, path_to_save_proliferative)
+```
+```{r}
+# Save shiny
+saveRDS(
+  shiny_output$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/FDC/FDC_metadata_to_shiny_app_level_4.rds"
+)
+saveRDS(shiny_output$expression, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/FDC/FDC_expression_to_shiny_app_level_4.rds")
+```
+```{r}
+# Markers
+markers_new_list <- purrr::map(unique(markers_new$cluster), function(x) {
+  df <- markers_new[markers_new$cluster == x, ]
+  df
+})
+names(markers_new_list) <- unique(markers_new$cluster)
+markers_new_list <- markers_new_list[as.character(0:6)]
+openxlsx::write.xlsx(x = markers_new_list, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/FDC/tmp/markers_FDC_level_4.xlsx")
+```
+```{r}
+# Save
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/FDC/tmp/FDC_umap_level_4.png",
+  plot = DimPlot(seurat, cols = color_palette),
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

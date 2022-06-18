@@ -1,0 +1,578 @@
+---
+title: "Plasma Cell Annotation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=False, message=FALSE, warning=FALSE}
+# Libraries
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(Seurat)
+library(ggpubr)
+library(harmony)
+library(knitr)
+library(kableExtra)
+library(clusterProfiler)
+library(biomaRt)
+library(writexl)
+library(scales)
+```
+
+```{r}
+save.image(file = "level_3_tonsil.RData")
+```
+## Data exploration and quality control
+```{r}
+setwd("/Users/spalominoe/Documents/Single-Cell/TONSIL/Plasma Cell/New Data 2/")
+
+data <- readRDS("PC_clustered_level_3_with_pre_freeze.rds")
+```
+
+```{r}
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "gold", "brown")
+```
+
+#### Proposed UMAPs
+```{r}
+# by cluster
+DimPlot(data, group.by="seurat_clusters", label=TRUE) 
+```
+# Proposed annotation (1st iteration)
+```{r}
+data@meta.data$level_3 <- as.character(data@meta.data$seurat_clusters)
+
+data@meta.data$level_3[data@meta.data$level_3=="0"] <- "IgG mature PC"
+data@meta.data$level_3[data@meta.data$level_3=="1"] <- "GC Derived precursor 1"
+data@meta.data$level_3[data@meta.data$level_3=="2"] <- "IgA/IgG mature PC"
+data@meta.data$level_3[data@meta.data$level_3=="3"] <- "GC Derived precursor 2"
+data@meta.data$level_3[data@meta.data$level_3=="4"] <- "GC Derived precursor 3"
+data@meta.data$level_3[data@meta.data$level_3=="5"] <- "IgG plasmablast"
+data@meta.data$level_3[data@meta.data$level_3=="6"] <- "Proliferating plasmablast"
+data@meta.data$level_3[data@meta.data$level_3=="7"] <- "IgM"
+data@meta.data$level_3[data@meta.data$level_3=="8"] <- "IgA adult"
+data@meta.data$level_3[data@meta.data$level_3=="9"] <- "IgD"
+data@meta.data$level_3[data@meta.data$level_3=="10"] <- "GC Derived precursor 0"
+data@meta.data$level_3[data@meta.data$level_3=="11"] <- "Histone like"
+data@meta.data$level_3[data@meta.data$level_3=="12"] <- "Tecnichal 1"
+data@meta.data$level_3[data@meta.data$level_3=="13"] <- "Tecnichal 2"
+data@meta.data$level_3[data@meta.data$level_3=="14"] <- "Doublets"
+
+DimPlot(data, reduction = "umap", group.by = "level_3",label = TRUE)
+```
+
+# Proportion of cell in relation to the annotation pre-freeze
+```{r}
+proportions_df_cells <- find_proportions_df(
+  data,
+  x = "seurat_clusters",
+  fill = "annotation_pre_freeze"
+)
+
+DT::datatable(proportions_df_cells)
+stacked_barplot_cells <- plot_stacked_barplot(
+  proportions_df_cells,
+  x = "seurat_clusters",
+  fill = "annotation_pre_freeze",
+  colors = color_palette
+)
+stacked_barplot_cells
+```
+
+```{r}
+# annotation pre freeze
+DimPlot(data, group.by="annotation_pre_freeze") 
+```
+
+```{r}
+# by age group
+DimPlot(data, group.by="age_group") 
+```
+
+```{r}
+# by sex
+DimPlot(data, group.by="sex") 
+```
+
+```{r}
+# by assay
+DimPlot(data, group.by="assay") 
+```
+
+#### Cell cycle analysis visualization
+```{r}
+s_gg <- FeaturePlot(data, features = "S.Score") +
+  scale_color_viridis_c(option = "magma")
+s_gg
+```
+
+```{r}
+g2m_gg <- FeaturePlot(data, features = "G2M.Score") +
+  scale_color_viridis_c(option = "magma")
+g2m_gg
+```
+
+#### QC metrics
+```{r}
+# Visualize QC metrics-1
+VlnPlot(data,c("nCount_RNA","nFeature_RNA"))
+
+FeaturePlot(data,c("nFeature_RNA","nCount_RNA"),cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# Visualize QC metrics-2
+FeaturePlot(data,c("pct_mt","pct_ribosomal", "nCount_RNA","nFeature_RNA"),cols = c("lightgray","blue"), reduction="umap")
+
+VlnPlot(data,c("pct_mt","pct_ribosomal"))
+```
+
+```{r}
+# Find markers
+markers <- FindAllMarkers(
+  data,
+  logfc.threshold = 0.5,
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), group_by = TRUE) %>%
+  ungroup()
+```
+# B cell lineage markers
+```{r}
+# B cell lineage markers
+FeaturePlot(data, c("REL", "PAX5", "BACH2", "IRF8"), cols = c("lightgray","blue"), reduction="umap", label = TRUE)
+```
+# Plasma cell lineage markers
+```{r}
+# Plasma cell lineage markers
+FeaturePlot(data, c("IRF4", "XBP1", "PRDM1", "BLIMP1"), cols = c("lightgray","blue"), reduction="umap", label = TRUE)
+```
+# Immunoglobulines distribution
+```{r}
+# Igs
+ig <- markers[grepl("^IG", markers$gene),]
+
+FeaturePlot(data, c("IGHA1","IGHA2", "IGHG1", "IGHG2", "IGHG3", "IGHG4","IGHGP", "IGHD", "IGHM" ), cols = c("lightgray","blue"), reduction="umap", label = TRUE)
+```
+# GC Derive Precursors: 5 - 10 - 1 - 3 - 4
+Comparison of markers between these clusters:
+```{r}
+cl5vs10 <- FindMarkers(data, ident.1 = 5, ident.2 = 10, min.pct = 0.5, logfc.threshold = 0.5)
+cl5vs4 <- FindMarkers(data, ident.1 = 5, ident.2 = 4, min.pct = 0.5, logfc.threshold = 0.5)
+cl5vs1 <- FindMarkers(data, ident.1 = 5, ident.2 = 1, min.pct = 0.5, logfc.threshold = 0.5)
+cl5vs3 <- FindMarkers(data, ident.1 = 5, ident.2 = 3, min.pct = 0.5, logfc.threshold = 0.5)
+
+######
+cl10vs4 <- FindMarkers(data, ident.1 = 10, ident.2 = 4, min.pct = 0.5, logfc.threshold = 0.5)
+cl10vs3 <- FindMarkers(data, ident.1 = 10, ident.2 = 3, min.pct = 0.5, logfc.threshold = 0.5)
+cl10vs1 <- FindMarkers(data, ident.1 = 10, ident.2 = 1, min.pct = 0.5, logfc.threshold = 0.5)
+
+#####
+cl4vs3 <- FindMarkers(data, ident.1 = 4, ident.2 = 3, min.pct = 0.5, logfc.threshold = 0.5)
+cl4vs1 <- FindMarkers(data, ident.1 = 4, ident.2 = 1, min.pct = 0.5, logfc.threshold = 0.5)
+
+#####
+cl3vs1 <- FindMarkers(data, ident.1 = 3, ident.2 = 1, min.pct = 0.5, logfc.threshold = 0.5)
+```
+
+```{r}
+# CLUSTER 5 IgG-positive plasmablasts precursors 
+FeaturePlot(data, c("CIITA", "AFF3", "SPIB", "PAX5", "FCMR", "TRIM22","REL" ,"BANK1","MS4A1" ), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# CLUSTER 10 GC Derive Precursors 0
+FeaturePlot(data, c("CD19", "CD38", "CD53","LRMP", "CD74", "HMCES", "BCL7A"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# CLUSTER 1 GC Derive Precursors 1
+FeaturePlot(data, c("CD19", "CD38", "CD53","LRMP", "CD74", "HMCES", "BCL7A"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# CLUSTER 3 GC Derive Precursors 2
+FeaturePlot(data, c("IGHG1", "CD20", "CD79B"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# CLUSTER 4 GC Derive Precursors 3
+FeaturePlot(data, c("IGHG1", "CD20", "CD79B"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+
+#### let's explore clusters 6,7,8,9 (son los que me tocan)
+```{r}
+#CLUSTER 6
+FeaturePlot(data, c("MKI67", "PCNA","EZH2","CKS2", "FDPS"), cols = c("lightgray","blue"), reduction="umap")
+
+FeaturePlot(data, c("BCL6", "BACH2", "PAX5" ,"XBP1", "IRF4", "PRDM1", "BLIMP1"), cols = c("lightgray","blue"), reduction="umap")
+
+FeaturePlot(data, c("CKS2", "EZH2", "PCNA"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+#CLUSTER 7
+FeaturePlot(data, c("IGHM","HLA-A"), cols = c("lightgray","blue"), reduction="umap")
+
+FeaturePlot(data, c("IGHG1", "IGHG2", "IGHG3"), cols = c("lightgray","blue"), reduction="umap")
+
+
+FeaturePlot(data, c("ZNF804A",	"LINC01480",	"EML6",	"ITPR2",	"DUSP2",	"CCDC88A",		"IGFLR1",	"HCST",	"FCRL3",	"ARHGAP15"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+#CLUSTER 8
+cl8 <- subset(data, subset = seurat_clusters=="8")
+FeaturePlot(cl8, c("IGHM","IGHA1", "IGHA2", "IGHD","JCHAIN","IGLC1","IGLC2" ), cols = c("lightgray","blue"), reduction="umap")
+
+DimPlot(cl8, group.by="age_group")
+DimPlot(cl8, group.by="assay")
+```
+
+```{r}
+#CLUSTER 9
+FeaturePlot(data, c("IGHD", "IGHM"), cols = c("lightgray","blue"), reduction="umap")
+cl9 <- subset(data, subset = seurat_clusters=="9")
+
+DimPlot(data, group.by="seurat_clusters", label=TRUE) 
+
+DimPlot(cl9, group.by="seurat_clusters") 
+```
+
+## cluster 2,8,0
+```{r}
+DimPlot(subset(x = data, idents = c("0" ,"2" ,"8")), group.by="seurat_clusters", label=TRUE)
+
+
+FeaturePlot(subset(x = data, idents = c("0" ,"2" ,"8")),c("pct_mt","pct_ribosomal", "nCount_RNA","nFeature_RNA"),cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+#subclustering cluster 2
+data <- FindSubCluster(
+  data,
+  cluster = "2",
+  graph.name = "RNA_snn",
+  resolution = 0.1,
+  subcluster.name = "annotation_level_4"
+)
+Idents(data) <- "annotation_level_4"
+
+table(data@meta.data$annotation_level_4)
+
+DimPlot(subset(x = data, idents = c("0" ,"2_0","2_1" ,"8")), group.by="annotation_level_4", label=TRUE)
+```
+```{r}
+doubts <- subset(x = data, idents = c("0" ,"2_0","2_1" ,"8"))
+
+# Find markers
+markers_doubts <- FindAllMarkers(
+  doubts,
+  logfc.threshold = 0.5,
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+
+markers_doubts <- markers_doubts %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), group_by = TRUE) %>%
+  ungroup()
+
+table(markers_doubts$cluster)
+```
+
+```{r}
+FeaturePlot(subset(x = data, idents = c("2_0","2_1")), c("IGHG1", "IGHG2","IGHA1", "IGHA2"),cols = c("lightgray","blue"), reduction="umap", label=TRUE)
+
+DimPlot(subset(x = data, idents = c("2_0","2_1")), group.by = "age_group", reduction="umap", label=TRUE)
+```
+
+```{r}
+FeaturePlot(ig_doubts, c("IGHG","IGHG1","IGHG3", "IGHG2", "IGHG4"), cols = c("lightgray","blue"), reduction="umap", label=TRUE)
+```
+
+```{r}
+FeaturePlot(ig_doubts, c("IGHA","IGHA1","IGHA2"), cols = c("lightgray","blue"), reduction="umap", label=TRUE)
+```
+
+```{r}
+cl2_0vs0 <- FindMarkers(ig_doubts, ident.1 = "2_0", ident.2 = c(0), min.pct = 0.5, logfc.threshold = 0.5)
+```
+
+```{r}
+cl2_0vs2_1 <- FindMarkers(ig_doubts, ident.1 = "2_0", ident.2 = "2_1", min.pct = 0.5, logfc.threshold = 0.5)
+```
+
+```{r}
+cl2_0vs8 <- FindMarkers(ig_doubts, ident.1 = "2_0", ident.2 = "8", min.pct = 0.5, logfc.threshold = 0.5)
+```
+
+```{r}
+cl2_1vs8 <- FindMarkers(ig_doubts, ident.1 = "2_1", ident.2 = 8, min.pct = 0.5, logfc.threshold = 0.5)
+head(cl2_1vs8, n = 5)
+
+cl2_1vs8$gene <- rownames(cl2_1vs8)
+write.xlsx(cl2_1vs8, 'cl2_1vs8.xlsx', row.names=TRUE)
+```
+
+```{r}
+cl0vs8 <- FindMarkers(ig_doubts, ident.1 = 0, ident.2 = 8, min.pct = 0.5, logfc.threshold = 0.5)
+head(cl0vs8, n = 5)
+
+cl0vs8$gene <- rownames(cl0vs8)
+write.xlsx(cl0vs8, 'cl0vs8.xlsx', row.names=TRUE)
+```
+
+```{r}
+#subclustering cluster IgM
+data <- FindSubCluster(
+  data,
+  cluster = "7",
+  graph.name = "RNA_snn",
+  resolution = 0.1,
+  subcluster.name = "annotation_level_4"
+)
+Idents(data) <- "annotation_level_4"
+
+table(data@meta.data$annotation_level_4)
+
+DimPlot(subset(x = data, idents = c("7_0","7_1","7_2")), group.by="annotation_level_4", label=TRUE)
+```
+```{r}
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="0"] <- "IgG mature PC"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="1"] <- "GC Derived precursor 1"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="2_0"] <- "IgA mature PC"
+
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="2_1"] <- "IgG mature PC"
+
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="3"] <- "GC Derived precursor 2"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="4"] <- "GC Derived precursor 3"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="5"] <- "IgG plasmablast"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="6"] <- "Proliferating plasmablast"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="7"] <- "IgM"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="8"] <- "IgA mature PC"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="9"] <- "IgD"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="10"] <- "GC Derived precursor 0"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="11"] <- "Histone like"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="12"] <- "Tecnichal 1"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="13"] <- "Tecnichal 2"
+data@meta.data$annotation_level_4[data@meta.data$annotation_level_4=="14"] <- "Doublets"
+
+DimPlot(data, group.by = "annotation_level_4")
+
+saveRDS(data, file = "PC_level3_annotated.rds")
+```
+### Cleaning in relation to ncount, nfeatures, mt and rb 
+```{r}
+# There is no "explicit" way to select the thresholds, so let's explore:
+## mt
+ggscatterhist(data@meta.data, x = "nCount_RNA", y = "nFeature_RNA", color = "pct_mt", 
+                  size = 1, alpha = 0.6, 
+                  margin.params = list(fill="black",color = "black", size = 0.2))
+
+## rb
+ggscatterhist(data@meta.data, x = "nCount_RNA", y = "nFeature_RNA",color = "pct_ribosomal", 
+              size = 1, alpha = 0.6, 
+              margin.params = list(fill="black",color = "black", size = 0.2))
+
+```
+
+```{r}
+plot(data@meta.data$nCount_RNA, data@meta.data$nFeature_RNA,pch=16,bty="n")
+abline(h=c(1000,7000),v=c(2500,5e04),col="red",lty=2)
+```
+
+
+####===================================
+####===================================
+####===================================
+#### Recompute thresholds
+```{r}
+data2 <- subset(data, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & nCount_RNA > 2500 & nCount_RNA < 5e04 & pct_mt < 8 & pct_ribosomal <10)
+
+FeaturePlot(data2,c("nFeature_RNA","nCount_RNA", "pct_mt", "pct_ribosomal"),cols = c("lightgray","blue"), reduction="umap")
+```
+
+### Remove technical-doublets clusters  12,13,14
+```{r}
+data2 <- subset(x = data2, idents = c("12" ,"13" ,"14"), invert = TRUE)
+DimPlot(data2, group.by="seurat_clusters", label=TRUE) 
+```
+
+#### Normalize data, and adjust 3P and multiome
+```{r}
+seurat_list <- SplitObject(data2, split.by = "assay")
+  seurat_list <- seurat_list[c("3P", "multiome")]
+  seurat_list <- purrr::map(
+    seurat_list,
+    FindVariableFeatures,
+    nfeatures = 5000
+  )
+  
+  hvg <- purrr::map(seurat_list, VariableFeatures)
+  shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+  
+ElbowPlot(data2)
+```
+
+```{r}
+data2@meta.data$assay <- as.factor(data2@meta.data$assay)
+
+data3 <- data2 %>%
+      ScaleData(features = shared_hvg) %>%
+      RunPCA(features = shared_hvg) %>%
+      RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:12)
+```
+
+```{r}
+data3 <- RunUMAP(data3, reduction = "harmony", dims = 1:12)
+data3 <- FindNeighbors(data3, reduction = "harmony", dims = 1:12)
+```
+
+```{r}
+DimPlot(data3, group.by= "assay", reduction="umap")
+
+DimPlot(data3, group.by= "gem_id", reduction="umap")
+```
+
+```{r}
+data3 <- FindClusters(data3, resolution = 0.7)
+DimPlot(data3, reduction = "umap")
+
+data3 <- FindVariableFeatures(data3)
+
+```
+
+```{r}
+list <- SplitObject(data, split.by = "level_3")
+
+list <- SplitObject(data, split.by = "annotation_level_4")
+
+```
+
+```{r}
+tonsil.anchors <- FindTransferAnchors(reference = data, query = data3,
+                                        dims = 1:12, project.query = T)
+
+predictions <- TransferData(anchorset = tonsil.anchors, refdata = data$annotation_level_4,
+                            dims = 1:12)
+
+data3 <- AddMetaData(data3, metadata = predictions)
+```
+
+### See the generated plot with predicted ID
+```{r}
+DimPlot(data3, group.by="predicted.id", label=TRUE) 
+
+data_predict.id <- data3
+```
+
+```{r}
+DimPlot(data3, group.by="seurat_clusters", label=TRUE) 
+```
+
+```{r}
+DimPlot(data3, group.by="assay", label=TRUE) 
+```
+
+```{r}
+DimPlot(data3, group.by="age_group", label=TRUE) 
+```
+
+
+```{r}
+proportions_df_cells <- find_proportions_df(
+  data3,
+  x = "seurat_clusters",
+  fill = "predicted.id"
+)
+
+DT::datatable(proportions_df_cells)
+stacked_barplot_cells <- plot_stacked_barplot(
+  proportions_df_cells,
+  x = "seurat_clusters",
+  fill = "predicted.id",
+  colors = color_palette
+)
+stacked_barplot_cells
+```
+```{r}
+data3@meta.data$seurat_clusters2 <- as.character(data3@meta.data$predicted.id)
+```
+
+```{r}
+proportions_df_cells <- find_proportions_df(
+  data3,
+  x = "seurat_clusters2",
+  fill = "predicted.id"
+)
+
+DT::datatable(proportions_df_cells)
+stacked_barplot_cells <- plot_stacked_barplot(
+  proportions_df_cells,
+  x = "seurat_clusters2",
+  fill = "predicted.id",
+  colors = color_palette
+)
+stacked_barplot_cells
+```
+
+```{r}
+# Find markers
+Idents(data3) <- "predicted.id"
+
+markers3 <- FindAllMarkers(
+  data3,
+  logfc.threshold = 0.5,
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers3 <- markers3 %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), group_by = TRUE) %>%
+  ungroup()
+```
+
+```{r}
+IgA_IgG <- FindMarkers(data3, ident.1 = "IgA/IgG mature PC", ident.2 = "IgA adult", min.pct = 0.5, logfc.threshold = 0.5)
+head(IgA_IgG, n = 5)
+
+IgA_IgG$gene <- rownames(IgA_IgG)
+
+write.xlsx(IgA_IgG, 'IgA_IgG.xlsx')
+```
+
+### Marker exploration
+```{r}
+# Plasma Cell linage
+FeaturePlot(data3, c("IRF4", "XBP1", "PRDM1"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# B cell lineage markers
+FeaturePlot(data3, c("REL", "PAX5", "BACH2", "IRF8"), cols = c("lightgray","blue"), reduction="umap")
+```
+```{r}
+# Immunoglobulines
+FeaturePlot(data3, c("IGHM", "IGHD", "IGHA1", "IGHA2"), cols = c("lightgray","blue"), reduction="umap")
+```
+
+```{r}
+# Immunoglobulines
+FeaturePlot(data3, c("IGHG1", "IGHG2", "IGHG3", "IGHG4"), cols = c("lightgray","blue"), reduction="umap")
+```

@@ -1,0 +1,291 @@
+---
+title: 'PC: scATAC annotation level 5 with KNN'
+author: "Paula Soler-Vila & Sergio Aguilar-Fernández"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+Here, we will apply a k-nearest neighbor (KNN) algorithm to classify the scATAC cells to a given cell type category with the help of our training set, the Multiome experiment. Remember, that KNN works on a basic assumption that data points of similar categories are closer to each other.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(flexclust)
+library(tidyverse)
+library(plyr)
+library(harmony)
+library(class)
+library(ggplot2)
+library(reshape2)
+library(unikn) 
+
+set.seed(111)
+```
+
+## Parameters
+
+```{r parameters}
+
+# Variables
+cell_type = "PC"
+reduction <- "harmony"
+dims <- 1:15
+
+# Paths
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+    "/01.",
+  cell_type,
+  "_integrated_MBC_GCBC_level_5.rds",
+  sep = ""
+)
+
+path_to_save <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+    "/02.",
+  cell_type,
+  "_annotated_MBC_GCBC_level_5.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- str_c(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+    "/",
+  cell_type,
+  "_seu_obj_level_5_eta.rds",
+  sep = ""
+)
+```
+
+# Load data
+
+## scRNAseq
+
+```{r}
+seurat_RNA <- readRDS(path_to_obj_RNA)
+
+DimPlot(seurat_RNA, 
+        group.by = "names_level_5_clusters_eta",
+        label = T,
+       # cols = palette,
+        pt.size = 0.1) + NoLegend()
+```
+
+## Clustering of cells into larger groups.
+Due to the limited number of cells that we have in our scATAC dataset, we are going to merge related scRNAseq cells into larger groups to facilite cell annotation and interpretation.
+
+```{r}
+seurat_RNA$annotation_level_5 <- revalue(seurat_RNA$names_level_5_clusters_eta,
+c("Dark Zone GCBC"="Dark Zone GCBC",
+"DZ migratory PC precursor"=NA,
+"Light Zone GCBC"="Light Zone GCBC",             
+"PC committed Light Zone GCBC"="PC committed Light Zone GCBC",    
+"Early PC precursor"="Early PC precursor",             
+"PB committed early PC precursor"="PB",
+"Transitional PB"="PB",                 
+"PB"="PB",                               
+"IgG+ PC precursor"="IgG+ PC precursor",              
+"preMature IgG+ PC"="preMature IgG+ PC",               
+"Mature IgG+ PC"="Mature PC",                 
+"MBC derived IgG+ PC"="Mature PC",            
+"Mature IgA+ PC"="Mature PC",                 
+"MBC derived IgA+ PC"="Mature PC",             
+"class switch MBC"="class switch MBC",               
+"MBC derived early PC precursor"="MBC derived PC precursor",  
+"MBC derived PC precursor"="MBC derived PC precursor",        
+"IgM+ early PC precursor"="Early PC precursor",        
+"IgM+ PC precursor"="IgM+ PC precursor",                 
+"preMature IgM+ PC"="preMature IgM+ PC",               
+"Mature IgM+ PC"="Mature PC",                 
+"Short lived IgM+ PC"=NA,             
+"IgD PC precursor"="IgD PC precursor"))                            
+
+
+DimPlot(seurat_RNA, 
+        group.by = "annotation_level_5",
+        label = T,
+        pt.size = 0.1) 
+```
+
+```{r}
+tonsil_RNA_annotation <- seurat_RNA@meta.data %>%
+  dplyr::filter(assay == "multiome") %>%
+  #dplyr::filter(annotation_level_5 %in% PC_subtypes ) %>%
+  dplyr::select("barcode", "annotation_level_5")
+
+colnames(tonsil_RNA_annotation) <- c("cell_barcode", 
+                                     "annotation_level_5")
+```
+
+## scATACseq
+```{r}  
+seurat_ATAC <- readRDS(path_to_obj)
+
+DimPlot(seurat_ATAC, 
+        group.by = "annotation_level_5",
+        label = T,
+        pt.size = 0.1) + NoLegend()   
+```
+
+```{r}
+tonsil_scATAC_df <- data.frame(cell_barcode = colnames(seurat_ATAC)[seurat_ATAC$assay == "scATAC"])
+tonsil_scATAC_df$annotation_level_5 <- "unannotated"
+
+df_all <- rbind(tonsil_RNA_annotation,tonsil_scATAC_df)
+rownames(df_all) <- df_all$cell_barcode
+df_all <- df_all[colnames(seurat_ATAC), ]
+
+seurat_ATAC$annotation_level_5 <- df_all$annotation_level_5
+seurat_ATAC@meta.data$annotation_prob  <- 1
+melt(table(seurat_ATAC$annotation_level_5))
+
+table(is.na(seurat_ATAC$annotation_level_5))
+```
+
+###  General low-dimensionality representation of the assays
+
+```{r fig.wide=TRUE}
+DimPlot(seurat_ATAC,
+  group.by = "annotation_level_5",
+  split.by = "assay",
+  label = T,
+  pt.size = 1.5) + NoLegend()
+```
+
+
+# KNN Algorithm
+
+## Data Splicing
+Data splicing basically involves splitting the data set into training and testing data set.
+
+```{r}
+reference_cells <- colnames(seurat_ATAC)[seurat_ATAC$assay == "multiome"]
+query_cells <- colnames(seurat_ATAC)[seurat_ATAC$assay == "scATAC"]
+
+reduction_ref <- seurat_ATAC@reductions[[reduction]]@cell.embeddings[reference_cells, dims]
+reduction_query <- seurat_ATAC@reductions[[reduction]]@cell.embeddings[query_cells, dims]
+```
+
+## Cross-validation of the K parameter.
+We’re going to calculate the number of observations in the training dataset that correspond to the Multiome data. The reason we’re doing this is that we want to initialize the value of ‘K’ in the KNN model. To do that, we split our training data in two part: a train.loan, that correspond to the random selection of the 70% of the training data and the test.loan, that is the remaining 30% of the data set. The first one is used to traint the system while the second is uses to evaluate the learned system.
+
+```{r}
+dat.d <- sample(1:nrow(reduction_ref),
+               size=nrow(reduction_ref)*0.7,replace = FALSE) 
+
+train.loan  <- reduction_ref[dat.d,] # 70% training data
+test.loan <- reduction_ref[-dat.d,] # remaining 30% test data
+
+train.loan_labels <- seurat_ATAC@meta.data[row.names(train.loan),]$annotation_level_5
+test.loan_labels <- seurat_ATAC@meta.data[row.names(test.loan),]$annotation_level_5
+
+k.optm <- c()
+k.values <- c()
+
+for (i in c(seq(1,10),16,32,64,128)) {
+ print(i)
+ knn.mod <- knn(train=train.loan, test=test.loan, cl=train.loan_labels, k=i)
+ k.optm <- c(k.optm, 100 * sum(test.loan_labels == knn.mod)/NROW(test.loan_labels))
+ k.values <- c(k.values,i)
+}
+```
+
+Now we can plot the accuracy of the model taking in account a range of different K and select the best one.
+
+```{r fig.wide=TRUE}
+k.optim = data.frame(k.values,k.optm)
+
+p3 <- ggplot(data=k.optim, aes(x=k.values, y=k.optm, group=1)) +
+ geom_line() +
+ geom_point() + 
+ geom_vline(xintercept=7, linetype="dashed", color = "red")
+
+p3
+```
+
+## Building a Machine Learning model with the optimal k value.
+```{r}
+train.loan  <- reduction_ref
+test.loan <- reduction_query
+
+train.loan_labels <- seurat_ATAC@meta.data[row.names(train.loan),]$annotation_level_5
+test.loan_labels <- seurat_ATAC@meta.data[row.names(test.loan),]$annotation_level_5
+
+knn.mod <- knn(train=train.loan, 
+               test=test.loan, 
+               cl=train.loan_labels, 
+               k=7, 
+               prob=T)
+
+annotation_data <- data.frame(query_cells, knn.mod, attr(knn.mod,"prob"))
+colnames(annotation_data) <- c("query_cells",
+                               "annotation_level_5",
+                               "annotation_prob")
+
+annotation_data$annotation_level_5 <- as.character(annotation_data$annotation_level_5)
+seurat_ATAC@meta.data[annotation_data$query_cells,]$annotation_level_5 <- annotation_data$annotation_level_5
+seurat_ATAC@meta.data[annotation_data$query_cells,]$annotation_prob <- annotation_data$annotation_prob
+seurat_ATAC$annotation_level_5 <- factor(seurat_ATAC$annotation_level_5)
+```
+
+##  Low-dimensionality representation of the assays
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat_ATAC,
+  cols = c("#035F72","red","gray10","gray50","gold","#198c19",
+           "#FF8E7B","lightblue","darkgoldenrod","darkgreen",
+           "pink","lightgreen","violet","purple","aquamarine2","darkmagenta"),
+  group.by = "annotation_level_5",
+  label = T,
+  pt.size = 1)  + NoLegend()
+
+
+DimPlot(
+  seurat_ATAC, 
+  reduction = "umap",
+  label = T,
+  group.by = "annotation_level_5",
+  pt.size = 0.1,  split.by = "assay") + NoLegend()
+
+
+melt(table(seurat_ATAC$annotation_level_5))
+saveRDS(seurat_ATAC, path_to_save)
+```
+
+##  Low-dimensionality representation of the prediction probability 
+
+Note that the probability of the prediction was lower in the transitioning cells and in not-defined clusters. 
+
+```{r fig.wide=TRUE}
+seurat_ATAC_scATAC = subset(seurat_ATAC, assay == "scATAC")
+
+FeaturePlot(
+  seurat_ATAC_scATAC, reduction = "umap",
+  features = "annotation_prob",
+  pt.size = 0.1)
+
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

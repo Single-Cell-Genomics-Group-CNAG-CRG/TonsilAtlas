@@ -1,0 +1,8 @@
+id,name,read,pattern,sequence,feature_type
+Total-seq-A_1,Total-seq-A_1,R2,^(BC),GTCAACTCTTTAGCG,Antibody Capture
+Total-seq-A_2,Total-seq-A_2,R2,^(BC),TGATGGCCTATTGGG,Antibody Capture
+Total-seq-A_3,Total-seq-A_3,R2,^(BC),TTCCGCCTCTCTTTG,Antibody Capture
+Total-seq-A_4,Total-seq-A_4,R2,^(BC),AGTAAGTTCAGCGTA,Antibody Capture
+Total-seq-A_5,Total-seq-A_5,R2,^(BC),AAGTATCGTTTCGCA,Antibody Capture
+Total-seq-A_6,Total-seq-A_6,R2,^(BC),GGTTGCCAGATGTCA,Antibody Capture
+Total-seq-A_7,Total-seq-A_7,R2,^(BC),TGTCTTTCCTGCCAG,Antibody Capture

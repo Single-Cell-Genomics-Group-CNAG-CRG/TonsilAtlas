@@ -1,0 +1,389 @@
+---
+title: "Cluster tumoral cells (413)"
+author: "Ramon Massoni-Badosa"
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will cluster the tumoral cells for case 413.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(SLOcatoR)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+library(tidyverse)
+library(pals)
+library(openxlsx)
+library(here)
+
+#library(presto)
+library(DT)
+set.seed(173)
+```
+
+
+## Define paths and parameters
+
+```{r}
+path_to_obj <- here("MCL/results/R_objects/6.seurat_tumoral_413.rds")
+path_to_save_xlsx<- here("MCL/3-clustering/tmp/7.seurat_tumoral_413_clustered_markers.xlsx")
+path_to_save_obj <- here("MCL/results/R_objects/7.seurat_tumoral_413_clustered.rds")
+path_to_save_shiny_metadata <- here("MCL/results/R_objects/7.seurat_tumoral_413_clustered_shiny_metadata.rds")
+path_to_save_shiny_expression <- here("MCL/results/R_objects/7.seurat_tumoral_413_clustered_shiny_expression.rds")
+
+
+# Colors
+color_palette <-  c("#E6194B", "#3CB44B", "#FFD8B1", "#4363D8", "#F58231",
+                    "#911EB4", "#46F0F0", "#F032E6", "#BCF60C", "#FABEBE",
+                    "#008080", "#E6BEFF", "#9A6324", "#FFFAC8", "#800000",
+                    "#AAFFC3", "#808000", "#FFE119", "#000075", "#808080",
+                    "#000000", "tan", "darkgrey")
+
+
+# Source functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Thresholds
+chrY_cutoff <- 0
+```
+
+
+## Read data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+# seurat[["ATAC"]] <- NULL
+```
+
+
+# Dimensionality reduction
+
+Let us score each cell for cell cycling singatures:
+
+```{r}
+seurat <- CellCycleScoring(
+  seurat,
+  s.features = cc.genes$s.genes,
+  g2m.features = cc.genes$g2m.genes
+)
+FeaturePlot(seurat, c("G2M.Score", "S.Score")) &
+  scale_color_viridis_c(option = "magma")
+```
+
+
+Since we subsetted the CD79A+ cells, let us rerun the general pipeline for dimensionality reduction:
+
+```{r}
+seurat <- seurat %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunUMAP(dims = 1:20, reduction = "pca")
+DimPlot(seurat, cols = color_palette, reduction = "umap")
+```
+
+# Classify chry +/-
+
+Exploring our data, we have observed that the two main "blobs" might be two subclones, one chrY+ and the other chrY. Loss of chromosome Y is a [known feature of MCL](https://academic.oup.com/ajcp/article/116/6/886/1758329?login=false):
+
+```{r}
+FeaturePlot(
+  seurat,
+  features = c("UTY", "KDM5D", "DDX3Y", "USP9Y", "ZFY", "EIF1AY"),
+  reduction = "umap"
+) &
+  scale_color_viridis_c(option = "magma")
+```
+
+
+Let us convert the expression of all genes located in chrY in a single score:
+
+```{r}
+# annotations <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86)
+# seqlevelsStyle(annotations) <- "UCSC"
+# annotations_chrY <- annotations[annotations@seqnames == "chrY", "gene_name"]
+# goi_chrY <- unique(annotations_chrY$gene_name)
+goi_chrY <- c("UTY", "KDM5D", "DDX3Y", "USP9Y", "ZFY", "EIF1AY")
+seurat <- AddModuleScore(seurat, features = list(goi_chrY), name = "chrY_score")
+FeaturePlot(seurat, "chrY_score1", reduction = "umap")
+(density_gg <- seurat@meta.data %>%
+  ggplot(aes(chrY_score1)) +
+  geom_density() +
+  geom_vline(xintercept = chrY_cutoff, linetype = "dashed", color = "darkblue") +
+  theme_classic())
+seurat$has_loss_chrY <- ifelse(
+  seurat$chrY_score1 > chrY_cutoff,
+  "chrY+",
+  "chrY-"
+)
+DimPlot(seurat, group.by = "has_loss_chrY", reduction = "umap")
+```
+
+
+# Cluster
+
+```{r}
+seurat <- FindNeighbors(seurat, dims = 1:20, reduction = "pca")
+seurat <- FindClusters(seurat, resolution = 0.75)
+DimPlot(seurat, cols = color_palette, reduction = "umap")
+FeaturePlot(seurat, c("CD8A", "CD3D"), reduction = "umap", order = TRUE)
+```
+
+
+Let us subcluster and eliminate residual T cells:
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "10",
+  graph.name = "RNA_snn",
+  subcluster.name = "T_cells",
+  resolution = 0.25
+)
+DimPlot(seurat, group.by = "T_cells", reduction = "umap", cols = color_palette)
+Idents(seurat) <- "T_cells"
+markers_t <- FindMarkers(seurat, ident.1 = "10_2", ident.2 = c("10_1", "10_0"))
+head(markers_t, 40)
+markers_t2 <- FindMarkers(seurat, ident.1 = "10_2", ident.2 = "9")
+head(markers_t2, 40)
+seurat <- subset(seurat, T_cells != "10_2") # cluster 10_2 expresses T cell markers
+DimPlot(seurat, reduction = "umap")
+```
+
+
+We will try to find "mirror" clusters in both subclones (chrY+/-):
+
+```{r}
+seurat <- FindNeighbors(seurat, dims = 1:20, reduction = "pca")
+seurat <- FindClusters(seurat, resolution = 0.1)
+DimPlot(seurat, reduction = "umap")
+
+
+# chrY-
+Idents(seurat) <- "seurat_clusters"
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "0",
+  graph.name = "RNA_snn",
+  subcluster.name = "chrYneg",
+  resolution = 0.15
+)
+DimPlot(seurat, group.by = "chrYneg", reduction = "umap")
+Idents(seurat) <- "chrYneg"
+markers_0 <- FindAllMarkers(seurat, only.pos = TRUE, logfc.threshold = 0.8)
+markers_0_0 <- FindMarkers(
+  seurat,
+  ident.1 = "0_0",
+  ident.2 = c("0_1", "0_2"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+markers_0_1 <- FindMarkers(
+  seurat,
+  ident.1 = "0_1",
+  ident.2 = c("0_0", "0_2"),
+  only.pos = TRUE,
+  logfc.threshold = 0.75
+)
+markers_0_2 <- FindMarkers(
+  seurat,
+  ident.1 = "0_2",
+  ident.2 = c("0_1", "0_0"),
+  only.pos = TRUE,
+  logfc.threshold = 0.75
+)
+DT::datatable(markers_0_0, options = list(scrollX = TRUE))
+DT::datatable(markers_0_1, options = list(scrollX = TRUE))
+DT::datatable(markers_0_2, options = list(scrollX = TRUE))
+seurat_chrYneg <- subset(seurat, idents = c("0_0", "0_1", "0_2"))
+goi_chrY_neg <- rev(c("RIPOR2", "MARCH1", "PCDH9", "CCND3", "CD38", "TRAF5",
+                      "PRDM2", "RGS2", "CXCR4", "CD83", "EZR", "JUNB", "CD55", "BACH2", "BACH1", "CD69",
+                      "MIR155HG", "IL21R", "NFKBID", "BATF", "IRF4", "NFATC1"))
+DotPlot(
+  seurat_chrYneg,
+  features = goi_chrY_neg) +
+  coord_flip()
+
+
+
+# chrY+
+Idents(seurat) <- "seurat_clusters"
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "1",
+  graph.name = "RNA_snn",
+  subcluster.name = "chrYpos",
+  resolution = 0.15
+)
+DimPlot(seurat, group.by = "chrYpos", reduction = "umap")
+Idents(seurat) <- "chrYpos"
+# markers_0 <- FindAllMarkers(seurat, only.pos = TRUE, logfc.threshold = 0.8)
+markers_1_0 <- FindMarkers(
+  seurat,
+  ident.1 = "1_0",
+  ident.2 = c("1_1", "1_2", "1_3", "1_4"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+markers_1_1 <- FindMarkers(
+  seurat,
+  ident.1 = "1_1",
+  ident.2 = c("1_0", "1_2", "1_3", "1_4"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+markers_1_2 <- FindMarkers(
+  seurat,
+  ident.1 = "1_2",
+  ident.2 = c("1_0", "1_1", "1_3", "1_4"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+markers_1_3 <- FindMarkers(
+  seurat,
+  ident.1 = "1_3",
+  ident.2 = c("1_0", "1_1", "1_2", "1_4"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+markers_1_4 <- FindMarkers(
+  seurat,
+  ident.1 = "1_4",
+  ident.2 = c("1_0", "1_1", "1_2", "1_3"),
+  only.pos = TRUE,
+  logfc.threshold = 0.5
+)
+DT::datatable(markers_1_0, options = list(scrollX = TRUE))
+DT::datatable(markers_1_1, options = list(scrollX = TRUE))
+DT::datatable(markers_1_2, options = list(scrollX = TRUE))
+DT::datatable(markers_1_3, options = list(scrollX = TRUE))
+DT::datatable(markers_1_4, options = list(scrollX = TRUE))
+seurat_chrYpos <- subset(seurat, idents = c("1_0", "1_1", "1_2", "1_3", "1_4"))
+goi_chrY_pos <- rev(c("PRDM2", "RGS2", "CXCR4", "CD83", "EZR", "JUNB", "CD55", "FOS", "ZNF331",
+                      "TSHZ2", "CCSER1", "MECOM", "AFF2", "MARCH1",
+                       "MIR155HG", "IL21R", "NFKBID", "BATF", "IRF4", "NFATC1", "CCL22",
+                       "MT-ND2", "MT-ND1"))
+DotPlot(
+  seurat_chrYpos,
+  features = goi_chrY_pos) +
+  coord_flip()
+```
+
+
+Final clusters:
+
+```{r}
+seurat$final_clusters <- seurat$chrYneg
+seurat$final_clusters[seurat$final_clusters == "1"] <- str_subset(seurat$chrYpos, "^1_")
+Idents(seurat) <- "final_clusters"
+DimPlot(seurat, group.by = "final_clusters", reduction = "umap")
+```
+
+
+Summary clusters chrY-:
+
+* 0_0: MARCH1+PCDH9+CD83+PRDM2+
+* 0_1: CD69+JUNB+CXCR4+CD83+RGS2+
+* 0_2: MIR155HG+NKBID+
+
+Summary clusters chrY+:
+
+* 1_0: undefined, need to stratify
+* 1_1: CD69+JUNB+CXCR4+CD83+RGS2+
+* 1_2: TSHZ2+CCSER1+MARCH1+
+* 1_3: MIR155HG+NKBID+
+* 1_4: poor-quality cells
+
+
+Let us subset poor-quality cells and doublets:
+
+```{r}
+seurat <- seurat[, !(seurat$final_clusters %in% c("1_4", "3"))]
+DimPlot(seurat, reduction = "umap")
+```
+
+
+# Annotation
+
+```{r}
+seurat$annotation_20220523 <- case_when(
+  seurat$final_clusters == "0_0" ~ "chrY- PCDH9+MARCH1+",
+  seurat$final_clusters == "0_1" ~ "chrY- CD69+JUNB+CXCR4+",
+  seurat$final_clusters == "0_2" ~ "chrY- MIR155HG+NFKB1+MYC+",
+  seurat$final_clusters == "1_0" ~ "undefined",
+  seurat$final_clusters == "1_1" ~ "chrY+ CD69+JUNB+CXCR4+",
+  seurat$final_clusters == "1_2" ~ "chrY+ TSHZ2+MARCH1+",
+  seurat$final_clusters == "1_3" ~ "chrY+ MIR155HG+NFKB1+MYC+",
+  seurat$final_clusters == "2" ~ "cycling",
+  seurat$final_clusters == "4" ~ "non-tumoral B-cells",
+  seurat$final_clusters == "5" ~ "non-tumoral B-cells"
+)
+Idents(seurat) <- "annotation_20220523"
+seurat <- FindNeighbors(seurat, dims = 1:20, reduction = "pca")
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "cycling",
+  graph.name = "RNA_snn",
+  resolution = 0.1,
+  subcluster.name = "cycling"
+)
+DimPlot(seurat, group.by = "cycling", reduction = "umap")
+seurat$annotation_20220523[seurat$cycling == "cycling_0"] <- "Cycling tumoral"
+seurat$annotation_20220523[seurat$cycling == "cycling_1"] <- "non-tumoral B-cells"
+Idents(seurat) <- "annotation_20220523"
+DimPlot(seurat, reduction = "umap")
+```
+
+
+# Save
+
+```{r}
+#openxlsx::write.xlsx(list(markers = markers), file = path_to_save_xlsx)
+saveRDS(seurat, path_to_save_obj)
+```
+
+
+Save input to shiny app:
+
+```{r}
+#input_shiny <- seurat2shiny(
+#  seurat,
+#  assay = "RNA",
+#  slot = "data",
+#  reduction = "umap"
+#)
+#saveRDS(input_shiny$metadata, path_to_save_shiny_metadata)
+#saveRDS(input_shiny$expression, path_to_save_shiny_expression)
+```
+
+
+
+# Session information
+
+```{r}
+sessionInfo()
+```
+

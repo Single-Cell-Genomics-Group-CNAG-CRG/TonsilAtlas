@@ -1,0 +1,387 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+title: "Figure 2 - Spatial Panels"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to create the spatial pannels necessary for Figure 2.
+
+To do this we will load the MAGIC-denoised data to better visualize genes and ease with the annotation when using specific marker genes.
+The MAGIC denoised data was generated in the script **spatial_transcriptomics/CD4-analysis/MAGIC_denoising.Rmd**.
+
+## Libraries
+
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{fig2}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{fig2}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Load SPOTlight data
+spotlight_ls <- "{cd4}/{robj_dir}/spotlight_ls_cd4_new.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+
+# Load SPOTlight data
+nm_df <- "{cd4}/{robj_dir}/cd4_nm_df.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+```
+
+### Preprocess data
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 3 % of the spot
+decon_mtrx[decon_mtrx < 0.03] <- 0
+```
+
+Change column names
+```{r}
+new_cn <- data.frame(mod_nm = colnames(decon_mtrx)) %>%
+  dplyr::left_join(nm_df, by = "mod_nm") %>%
+  dplyr::mutate(plt_nm = dplyr::if_else(is.na(plt_nm), mod_nm, plt_nm)) %>%
+  dplyr::distinct() %>%
+  dplyr::pull(plt_nm)
+
+colnames(decon_mtrx) <- new_cn
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+merged_se@meta.data <- cbind(merged_se@meta.data, decon_mtrx)
+```
+
+Subset sample of interest
+```{r}
+sample_id <- "esvq52_nluss5"
+sp_sub <- merged_se[, merged_se@meta.data$gem_id == sample_id]
+sp_sub@images <- sp_sub@images[Seurat::Images(sp_sub) == sample_id]
+```
+
+Load MAGIC data from the script *MAGIC_denoising.Rmd*
+```{r eval=FALSE}
+magic_df <- "{cd4}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store ADT information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df))
+
+# add this assay to the previously created Seurat object
+merged_se[["MAGIC_Spatial"]] <- magic_assay
+```
+
+Load genes ofinterest
+```{r eval=FALSE}
+"{cd4}/gene_dict.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+
+gene_vec <- gene_vec[gene_vec %in% rownames(merged_se)]
+```
+
+## Panels
+
+### Correlation matrix
+Since we are working with sample esvq52_nluss5 in this example we will limit the correlation plot to this slide.
+```{r fig.height=9, fig.width=10, eval=FALSE}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+
+# Save necessary data for the plot
+"{fig2}/{plt_dir}/se_sub.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = se_sub,
+    file = .)
+
+(cor_mtrx <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = as.character(unique(unlist(gene_dict))),
+  assay = "MAGIC_Spatial",
+  slot = "data"))
+
+"{fig2}/{plt_dir}/magic_cor-mtrx_markers_plt.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx,
+    base_width = 9,
+    base_height = 9)
+
+"{fig2}/{plt_dir}/magic_cor-mtrx_markers_plt.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = cor_mtrx,
+    file = .)
+```
+
+Save correlation matrix separately so Paula can add "TADs"
+```{r eval=FALSE}
+se <- se_sub
+genes <- as.character(unique(unlist(gene_dict)))
+assay <- "MAGIC_Spatial"
+slot <- "data"
+cor_method <- "pearson"
+
+# Extract MAGIC expression matrix
+expr_mtrx <- Seurat::GetAssayData(object = se, assay = assay, slot = slot)
+# Extract genes found in the matrix
+genes_sub <- genes[genes %in% rownames(expr_mtrx)]
+# Get subsetted matrix
+mtrx <- t(as.matrix(expr_mtrx[genes_sub, ]))
+colnames(mtrx) <- genes_sub
+ 
+mtrx <- mtrx[, colSums(mtrx) > 0]
+mtrx_cor <- cor(as.matrix(mtrx))
+p_mat <- corrplot::cor.mtest(mat = mtrx, conf_int = 0.95,  method = cor_method)
+colnames(mtrx_cor) <- stringr::str_wrap(string = colnames(mtrx_cor), 
+    width = 30)
+rownames(mtrx_cor) <- stringr::str_wrap(string = rownames(mtrx_cor), 
+    width = 30)
+
+"{fig2}/{robj_dir}/magic_cor-mtrx_Fig2.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = list("cor" = mtrx_cor, "p_val" = p_mat[[1]]),
+    file = .)
+```
+
+### Trajectory
+We are going to look at how the genes change in a manually set path. To do this we use the SPATA2 package, vignette can be found [here](https://themilolab.github.io/SPATA2/articles/spata-v2-trajectory-analysis.html)
+
+We start by subsetting and converting to a SPATA object
+```{r eval=FALSE}
+# se_sub <- Seurat::RunTSNE(object = se_sub)
+spata_sub <- SPATA2::transformSeuratToSpata(
+  seurat_object = se_sub,
+  sample_name = "esvq52_nluss5",
+  image_name = "esvq52_nluss5",
+  assay_name = "MAGIC_Spatial",
+  assay_slot = "data",
+  method = "spatial",
+  coords_from = "umap",
+  verbose = TRUE)
+```
+
+#### Draw trajectories
+Spatial trajectories of a sample in a given spata-object can be drawn interactively using the function `createTrajectories()` as shown in the example below. `createTrajectories()` opens a mini-shiny application. This app allows one the one hand to investigate the sample with regards to spatial gene expression like `plotSurfaceInteractive()` does and on the other hand to draw trajectories through the areas of interest in four easy steps.
+```{r eval=FALSE}
+# open interactive application
+spata_sub <- SPATA2::createTrajectories(
+  object = spata_sub)
+
+# Check that the trajectory has been determined correctly
+names(spata_sub@trajectories$esvq52_nluss5)
+
+"{fig2}/{robj_dir}/spata-esvq52_nluss5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = spata_sub, file = .)
+```
+
+Load drawn trajectories
+```{r eval=FALSE}
+spata_sub <- "{fig2}/{robj_dir}/spata-esvq52_nluss5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+#### Visualization
+Look at the trajectory on the slide
+```{r  eval=FALSE, fig.width=9, fig.height=7}
+# Save necessary data for the plot
+"{fig2}/{plt_dir}/spata_sub.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = spata_sub,
+    file = .)
+
+(plt1 <- SPATA2::plotTrajectory(
+  object = spata_sub, 
+  trajectory_name = "Tfh-migration",
+  color_by = "annotation",
+  pt_clrp = "npg",
+  pt_size = 3,
+  pt_alpha = 1, # reduce alpha to highlight the trajectory's course
+  display_image = FALSE) +
+  SPATA2::legendTop())
+
+"{fig2}/{plt_dir}/magic_trajectories_markers_plt.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = plt1,
+    base_height = 9,
+    base_width = 10)
+
+"{fig2}/{plt_dir}/magic_trajectories_markers_plt.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = plt1,
+    file = .)
+```
+
+Look at all the genes in gene vec in the heatmap
+```{r  eval=FALSE, fig.width=12, fig.height=9}
+rm_genes <- c("IL6", "PROX1", "CD3E", "CD8A", "CD8B")
+hm_colors <- viridis::inferno(n = 100)
+
+(hm_plt <- SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration",
+  variables = gene_vec,
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5,
+  border_color = NA,
+  fontsize_row = 3,
+  fontsize = 3,
+  legend_breaks = 0:1,
+  legend_labels = c("Min", "Max"),
+  width = 8 * 0.3937,
+  height = 5 * 0.3937))
+
+"{fig2}/{plt_dir}/heatmap_markers_plt.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  ggsave2(
+    filename = .,
+    plot = hm_plt,
+    width = 8,
+    height = 5,
+    units = "cm",
+    dpi = 300)
+
+"{fig2}/{plt_dir}/heatmap_markers_plt.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(
+    object = hm_plt,
+    file = .)
+```
+
+### Trajectory trends
+
+Once a trajectory is drawn in the light of a biologic question or finding dynamics of additional variables can be easily visualized and investigated one by one. However, given that the average expression matrix contains tens of thousands of genes investigating all genes and gene-sets manually can quickly become a cumbersome task. By abstracting relevant biological dynamics into mathematical models the trajectory can be screened for variables (gene- and gene-set expression in particular) that correspond to these models. [SPATA2](https://themilolab.github.io/SPATA2/articles/spata-v2-trajectory-analysis.html)
+
+Right now we have the MAGIC data but we want to run the trend analysis on all the genes, not just the denoised ones. We change the assays to pass the lognorm instead:
+```{r eval=FALSE}
+spata_sub <- SPATA2::addExpressionMatrix(
+  object = spata_sub,
+  expr_mtr = se_sub@assays$Spatial@data,
+  mtr_name = "lognorm")
+
+spata_sub <- SPATA2::setActiveExpressionMatrix(
+  object = spata_sub,
+  mtr_name = "lognorm")
+
+# Confirm change is successful
+SPATA2::getActiveMatrixName(spata_sub)
+```
+
+Extract all genes for the analysis:
+```{r eval=FALSE}
+all_genes <- getGenes(spata_sub)
+```
+
+To find variables that follow a certain trend along the trajectory of interest use assessTrajectoryTrends(). It fits the trajectory-trends of all specified variables to a variety of patterns/mathematical models (Figure 4.1) and assesses their fit by calculating the area under the curve of the residuals. [SPATA2](https://themilolab.github.io/SPATA2/articles/spata-v2-trajectory-analysis.html)
+```{r eval=FALSE}
+# obtain an assessed trajectory data.frame for all genes
+atdf_genes <- assessTrajectoryTrends(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration",
+  variables = all_genes)
+```
+
+Save the list of genes by trajectory trend in an xlsx sheet
+```{r eval=FALSE}
+library(xlsx)
+
+out_file <- "{fig2}/{robj_dir}/gene_trajectory_trend.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file prior to writing it so that there is no overwriting issue
+file.remove(out_file)
+lapply(unique(as.character(atdf_genes$pattern)), function(i) {
+  tmp <- atdf_genes %>% dplyr::filter(pattern == i & auc < 0.5) %>% data.frame
+  if (nrow(tmp) > 0) {
+    xlsx::write.xlsx(
+      tmp,
+      file = out_file,
+      row.names = FALSE,
+      sheetName = i,
+      append = file.exists(out_file))
+  }
+  
+  })
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

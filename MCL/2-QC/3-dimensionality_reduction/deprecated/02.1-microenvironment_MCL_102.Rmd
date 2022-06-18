@@ -1,0 +1,357 @@
+---
+title: "Normalization and Batch Effect Correction: MCL (microenvironment)"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Objective
+
+Here we will focus in the microenvironment of patient M102
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(GenomicRanges)
+library(future)
+library(SeuratWrappers)
+library(harmony)
+library(EnsDb.Hsapiens.v86)
+library(stringr)
+library(dplyr)
+library(ggplot2)
+library(flexclust)
+library(class)
+library(caret)
+
+set.seed(173)
+```
+
+
+## Parameters
+
+```{r}
+path_to_102 <- "~/Desktop/data_MCL/results/R_objects/seurat_102_filtered.rds"
+# path_to_cd4_ref <- “/Volumes/Massoni_external/Google Drive/single_cell/PhD/B_cell_atlas/tonsil_atlas/tonsil_atlas_annotation/current (1)/level_5/CD4_T/CD4_T_subseted_integrated_level_5_2.rds”
+path_to_cd4_ref <- "~/Desktop/PhD/annotation_post_freeze/annotation/level_5/CD4_T/CD4_T_subseted_integrated_level_5_2.rds"
+path_to_save_102 <- "~/Desktop/data_MCL/results/R_objects/seurat_102_filtered_normalized.rds"
+
+
+# Variables
+labels_var <- "annotation_level_5"
+reduction <- "harmony"
+dims <- 1:30
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+```
+
+
+## Load Multiome filtered data
+
+```{r}
+seurat <- readRDS(path_to_102)
+cd4_ref <- readRDS(path_to_cd4_ref)
+seurat
+```
+
+
+# Subset microenvironment
+
+```{r}
+# Keep CD19 negative libraries
+seurat <- subset(seurat, library_name != "M102pos")
+
+
+# Remove doublets
+DefaultAssay(seurat) <- "RNA"
+seurat <- seurat %>%
+  NormalizeData() %>%
+  FindVariableFeatures(nfeatures = 2500) %>%
+  ScaleData() %>%
+  RunPCA()
+seurat <- RunUMAP(seurat, dims = 1:30, reduction = "pca")
+FeaturePlot(seurat, c("CD79A", "CD3D", "MKI67"))
+seurat <- FindNeighbors(seurat, reduction = "pca", dims = 1:30)
+seurat <- FindClusters(seurat, resolution = 0.1)
+DimPlot(seurat) # Cluster 4 are clear doublets
+seurat <- FindSubCluster(
+  seurat,
+  "5",
+  "RNA_snn",
+  "proliferative",
+  resolution = 0.2
+) # Contains proliferative T cells
+Idents(seurat) <- "proliferative"
+DimPlot(seurat, group.by = "proliferative")
+microenv <- subset(seurat, idents = c("2", "3", "5_1", "6"))
+DimPlot(microenv)
+```
+
+
+# Process microenvironment
+
+```{r}
+microenv <- microenv %>%
+  NormalizeData() %>%
+  FindVariableFeatures(nfeatures = 2500) %>%
+  ScaleData() %>%
+  RunPCA()
+microenv <- RunUMAP(microenv, dims = 1:30, reduction = "pca")
+
+DimPlot(microenv, split.by = "library_name")
+FeaturePlot(microenv, c("FDCSP", "LYZ", "CD3D", "IL7R", "NKG7", "CD4"))
+
+microenv <- FindNeighbors(microenv, reduction = "pca", dims = 1:30)
+microenv <- FindClusters(microenv, resolution = 0.1)
+DimPlot(microenv)
+cd4 <- subset(microenv, idents = "0")
+
+cd4 <- cd4 %>%
+  NormalizeData() %>%
+  FindVariableFeatures(nfeatures = 2500) %>%
+  ScaleData() %>%
+  RunPCA()
+cd4 <- RunUMAP(cd4, dims = 1:30, reduction = "pca")
+```
+
+
+# De novo integration
+
+```{r}
+cd4_ref$UMAP_1_CD4 <- cd4_ref@reductions$umap@cell.embeddings[, "UMAP_1"]
+cd4_ref$UMAP_2_CD4 <- cd4_ref@reductions$umap@cell.embeddings[, "UMAP_2"]
+cd4_ref <- DietSeurat(cd4_ref)
+cd4_ref@meta.data <- cd4_ref@meta.data[, c("gem_id", "assay", "age_group", "annotation_level_5", "nCount_RNA", "nFeature_RNA", "pct_mt", "UMAP_1_CD4", "UMAP_2_CD4")]
+cd4_ref$type <- "reference"
+cd4$type <- "query"
+cd4$age_group <- "MCL"
+cd4_rna <- cd4
+cd4_rna[["ATAC"]] <- NULL
+cd4_rna$assay <- "multiome_query"
+integrated <- merge(x = cd4_ref, y = cd4_rna)
+
+
+# Process
+seurat_list <- SplitObject(integrated, split.by = "assay")
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- Reduce(intersect, hvg)
+integrated <- integrated %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction = "pca", dims = 1:30)
+integrated <- RunUMAP(integrated, dims = 1:30, reduction = "harmony")
+DimPlot(integrated, split.by = "type")
+```
+
+
+# Label transfer with KNN classifier
+
+## Data Splicing
+
+Data splicing basically involves splitting the data set into training and testing data set.
+
+```{r}
+reference_cells <- colnames(integrated)[integrated$type == "reference"]
+query_cells <- colnames(integrated)[integrated$type == "query"]
+
+reduction_ref <- integrated@reductions[[reduction]]@cell.embeddings[reference_cells, dims]
+reduction_query <- integrated@reductions[[reduction]]@cell.embeddings[query_cells, dims]
+```
+
+
+## Cross-validation of the K parameter
+
+We’re going to calculate the number of observations in the training dataset that correspond to the Multiome data. The reason we’re doing this is that we want to initialize the value of ‘K’ in the KNN model. To do that, we split our training data in two part: a train.loan, that correspond to the random selection of the 70% of the training data and the test.loan, that is the remaining 30% of the data set. The first one is used to train the system while the second is uses to evaluate the learned system.
+
+```{r}
+dat.d <- sample(
+  1:nrow(reduction_ref),
+  size = nrow(reduction_ref) * 0.7,
+  replace = FALSE
+) 
+
+train.loan  <- reduction_ref[dat.d,] # 70% training data
+test.loan <- reduction_ref[-dat.d,] # remaining 30% test data
+
+train.loan_labels <- integrated@meta.data[row.names(train.loan),]$annotation_level_5
+test.loan_labels <- integrated@meta.data[row.names(test.loan),]$annotation_level_5
+
+k.optm <- c()
+k.values <- c()
+
+for (i in c(2,4,6,8,16,32,64,128,256)){
+ print(i)
+ knn.mod <- knn(
+   train = train.loan,
+   test = test.loan,
+   cl = train.loan_labels,
+   k = i
+  )
+ k.optm <- c(k.optm, 100 * sum(test.loan_labels == knn.mod)/NROW(test.loan_labels))
+ k.values <- c(k.values,i)
+}
+```
+
+
+Now we can plot the accuracy of the model taking in account a range of different K and selec the best one.
+
+```{r fig.wide=TRUE}
+k.optim <- data.frame(k.values, k.optm)
+
+p3 <- ggplot(data=k.optim, aes(x=k.values, y=k.optm, group=1)) +
+ geom_line() +
+ geom_point() + 
+ geom_vline(xintercept = 16, linetype="dashed", color = "red")
+
+p3
+```
+
+
+## Building a Machine Learning model with the optimal k value.
+
+```{r}
+train.loan  <- reduction_ref
+test.loan <- reduction_query
+
+train.loan_labels <- integrated@meta.data[row.names(train.loan),]$annotation_level_5
+test.loan_labels <- integrated@meta.data[row.names(test.loan),]$annotation_level_5
+
+knn.mod <- knn(
+  train = train.loan,
+  test = test.loan,
+  cl = train.loan_labels,
+  k = 6,
+  prob = TRUE
+)
+annotation_data <- data.frame(
+  query_cells = query_cells,
+  annotation = knn.mod,
+  annotation_prob = attr(knn.mod, "prob")
+)
+rownames(annotation_data) <- annotation_data$query_cells
+is_na_vector <- is.na(integrated$annotation_level_5)
+annotation_data$annotation <- unfactor(annotation_data$annotation)
+integrated$annotation_level_5[is_na_vector] <- annotation_data[colnames(integrated)[is_na_vector], "annotation"]
+Idents(integrated) <- "annotation_level_5"
+DimPlot(integrated, split.by = "type")
+```
+
+
+# Map against UMAP using KNN regression
+
+## Define training and test sets
+
+```{r}
+train_umap_1 <- cd4_ref$UMAP_1_CD4
+train_umap_2 <- cd4_ref$UMAP_2_CD4
+train_umap_1 <- train_umap_1[rownames(reduction_ref)]
+train_umap_2 <- train_umap_2[rownames(reduction_ref)]
+all(names(train_umap_1) == rownames(reduction_ref))
+all(names(train_umap_2) == rownames(reduction_ref))
+```
+
+
+## Train the model
+
+```{r}
+knn_reg_model_umap_1 <- knnreg(x = reduction_ref, y = train_umap_1, k = 16)
+str(knn_reg_model_umap_1)
+knn_reg_model_umap_2 <- knnreg(x = reduction_ref, y = train_umap_2, k = 16)
+str(knn_reg_model_umap_2)
+```
+
+
+# Predict
+
+```{r}
+umap_1_pred <- predict(knn_reg_model_umap_1, newdata = as.data.frame(reduction_query))
+umap_2_pred <- predict(knn_reg_model_umap_2, newdata = as.data.frame(reduction_query))
+```
+
+
+## Plot
+
+```{r}
+if (all(rownames(reduction_query) == colnames(cd4_rna))) {
+  cd4_rna$UMAP_1_CD4 <- umap_1_pred
+  cd4_rna$UMAP_2_CD4 <- umap_2_pred
+}
+cd4_rna$annotation_level_5 <- integrated$annotation_level_5[colnames(cd4_rna)]
+umap_predicted <- cd4_rna@meta.data %>%
+  ggplot(aes(UMAP_1_CD4, UMAP_2_CD4, color = annotation_level_5)) +
+    geom_point(size = 0.75) +
+    scale_color_manual(values = color_palette) +
+    labs(x = "UMAP_1", y = "UMAP_2", color = "") +
+    theme_classic()
+umap_predicted    
+```
+
+
+# Compositional analysis
+
+```{r}
+integrated$age_group2 <- integrated$age_group
+integrated$age_group2[str_detect(integrated$age_group2, "adult")] <- "adult"
+proportions_df <- find_proportions_df(
+  integrated,
+  x = "age_group2",
+  fill = "annotation_level_5"
+)
+new_levels <- c("kid", "adult", "MCL") 
+p4 <- proportions_df %>%
+  mutate(age_group2 = factor(age_group2, levels = new_levels)) %>% 
+  ggplot(aes(age_group2, percentage_cells, fill = annotation_level_5)) +
+    geom_col() +
+    scale_fill_manual(values = color_palette) +
+    labs(x = "", y = "Percetage of cells", fill = "") +
+    theme_bw()
+p4
+```
+
+# Differential expression analysis
+
+```{r}
+integrated_treg <- subset(
+  integrated,
+  annotation_level_5 %in% c("naive Treg IKZF2+", "IL2RA+FOXP3+ Treg", "Treg IKZF2+HPGD+")
+)
+Idents(integrated_treg) <- "type"
+dea <- FindMarkers(
+  integrated_treg,
+  ident.1 = "query",
+  ident.2 = "reference"
+)
+```
+

@@ -1,0 +1,611 @@
+---
+title: "Cellranger metric QC summarisation"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center")
+```
+
+# Introduction
+## Objective
+In this Rmarkdown document, we are going to perform a quality control (QC) analysis of the mapping results obtained by running [cellranger version 6.0.1]("https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger").
+
+# Pre-processing
+## Libraries
+```{r warning = FALSE, message = FALSE}
+library(tidyverse)
+library(gt)
+library(ggpubr)
+library(ggrepel)
+```
+
+## Define Parameters
+
+```{r}
+# Paths
+path_to_metadata <- "../1-cellranger_mapping/data/tonsil_atlas_metadata.csv"
+path_to_metrics_summary <- "../1-cellranger_mapping/results"
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **Tonsil Atlas (multi)** dataset.
+
+```{r}
+# Load metadata
+metadata <- read.csv(path_to_metadata)
+if (file.exists(paste(path_to_metrics_summary,"cellranger_mapping_metrics_gex.csv", sep="/"))) {
+  # Load cellranger metrics file [GEX], which includes all libraries of this subproject
+  cellranger_metrics <- unique(read_csv(paste(path_to_metrics_summary,"cellranger_mapping_metrics_gex.csv",sep="/"),
+    col_names = TRUE))
+  
+  # Clean metrics dataframe
+  colnames(cellranger_metrics)=str_replace_all(colnames(cellranger_metrics), "[[:punct:]]", "_")
+  colnames(cellranger_metrics)=str_replace_all(colnames(cellranger_metrics), " ", "_")
+  colnames(cellranger_metrics)=str_replace_all(colnames(cellranger_metrics), "__", "_")
+  colnames(cellranger_metrics)=str_replace_all(colnames(cellranger_metrics), "__[:digit:]", "")
+  
+  cellranger_metrics_gex_df <- as.data.frame(cellranger_metrics)
+  cellranger_metrics_gex_df$gem_id = paste(cellranger_metrics_gex_df$subproject,cellranger_metrics_gex_df$gem_id,sep = "-")
+  for (col in colnames(cellranger_metrics_gex_df)) {
+    if (any(str_detect(na.omit(cellranger_metrics_gex_df[, col]), "%"))) {
+      cellranger_metrics_gex_df[, col] <- as.double(str_remove(cellranger_metrics_gex_df[, col], "%"))
+    }
+  }
+} else {
+  cellranger_metrics_gex_df <- data.frame()
+}
+## CITEseq
+if (file.exists(paste(path_to_metrics_summary,"cellranger_mapping_metrics_adt.csv",sep="/"))) {
+  # Load cellranger metrics file [ADT], which includes all libraries of this subproject
+  cellranger_metrics_adt <- unique(read_csv(
+    paste(path_to_metrics_summary,"cellranger_mapping_metrics_adt.csv",sep="/"),
+    col_names = TRUE))
+  
+  # Clean metrics dataframe
+  colnames(cellranger_metrics_adt)=str_replace_all(colnames(cellranger_metrics_adt), "[[:punct:]]", "_")
+  colnames(cellranger_metrics_adt)=str_replace_all(colnames(cellranger_metrics_adt), " ", "_")
+  colnames(cellranger_metrics_adt)=str_replace_all(colnames(cellranger_metrics_adt), "__", "_")
+  colnames(cellranger_metrics_adt)=str_replace_all(colnames(cellranger_metrics_adt), "__[:digit:]", "")
+  
+  cellranger_metrics_adt_df <- as.data.frame(cellranger_metrics_adt)
+  cellranger_metrics_adt_df$gem_id = paste(cellranger_metrics_adt_df$subproject,cellranger_metrics_adt_df$gem_id,sep = "-")
+  for (col in colnames(cellranger_metrics_adt_df)) {
+    if (any(str_detect(na.omit(cellranger_metrics_adt_df[, col]), "%"))) {
+      cellranger_metrics_adt_df[, col] <- as.double(str_remove(cellranger_metrics_adt_df[, col], "%"))
+    }
+  }
+} else {
+  cellranger_metrics_adt_df <- data.frame()
+}
+if (file.exists(paste(path_to_metrics_summary,"cellranger_mapping_metrics_vdj_t.csv", sep = "/"))){
+  # Load cellranger metrics file [VDJ-T], which includes all libraries of this subproject
+  cellranger_metrics_vdj <- unique(read_csv(paste(path_to_metrics_summary,"cellranger_mapping_metrics_vdj_t.csv",sep="/"),
+    col_names = TRUE))
+  
+  # Clean metrics dataframe
+  colnames(cellranger_metrics_vdj)=str_replace_all(colnames(cellranger_metrics_vdj), "[[:punct:]]", "_")
+  colnames(cellranger_metrics_vdj)=str_replace_all(colnames(cellranger_metrics_vdj), " ", "_")
+  colnames(cellranger_metrics_vdj)=str_replace_all(colnames(cellranger_metrics_vdj), "__", "_")
+  colnames(cellranger_metrics_vdj)=str_replace_all(colnames(cellranger_metrics_vdj), "__[:digit:]", "")
+  
+  cellranger_metrics_vdj_df <- as.data.frame(cellranger_metrics_vdj)
+  cellranger_metrics_vdj_df$gem_id = paste(cellranger_metrics_vdj_df$subproject,cellranger_metrics_vdj_df$gem_id,sep = "-")
+  for (col in colnames(cellranger_metrics_vdj_df)) {
+    if (any(str_detect(na.omit(cellranger_metrics_vdj_df[, col]), "%"))) {
+      cellranger_metrics_vdj_df[, col] <- as.double(str_remove(cellranger_metrics_vdj_df[, col], "%"))
+    }
+  }  
+} else {
+  cellranger_metrics_vdj_df <- data.frame()
+}
+if (file.exists(paste(path_to_metrics_summary,"cellranger_mapping_metrics_vdj_b.csv",sep="/"))) {
+    # Load cellranger metrics file [VDJ-B], which includes all libraries of this subproject
+  cellranger_metrics_vdj_b <- unique(read_csv(
+    paste(path_to_metrics_summary,"cellranger_mapping_metrics_vdj_b.csv",sep="/"),
+    col_names = TRUE))
+  
+  # Clean metrics dataframe
+  colnames(cellranger_metrics_vdj_b)=str_replace_all(colnames(cellranger_metrics_vdj_b), "[[:punct:]]", "_")
+  colnames(cellranger_metrics_vdj_b)=str_replace_all(colnames(cellranger_metrics_vdj_b), " ", "_")
+  colnames(cellranger_metrics_vdj_b)=str_replace_all(colnames(cellranger_metrics_vdj_b), "__", "_")
+  colnames(cellranger_metrics_vdj_b)=str_replace_all(colnames(cellranger_metrics_vdj_b), "__[:digit:]", "")
+  
+  cellranger_metrics_vdj_b_df <- as.data.frame(cellranger_metrics_vdj_b)
+  cellranger_metrics_vdj_b_df$gem_id = paste(cellranger_metrics_vdj_b_df$subproject,cellranger_metrics_vdj_b_df$gem_id,sep = "-")
+   
+  for (col in colnames(cellranger_metrics_vdj_b_df)) {
+    if (any(str_detect(na.omit(cellranger_metrics_vdj_b_df[, col]), "%"))) {
+      cellranger_metrics_vdj_b_df[, col] <- as.double(str_remove(cellranger_metrics_vdj_b_df[, col], "%"))
+    }  
+  
+  }
+} else {
+  cellranger_metrics_vdj_b_df <- data.frame()
+} 
+```
+
+
+
+# Gene Expression QC
+We will start by showing the three most relevant metrics (number of reads, estimated number of recovered cells, fraction of reads in cells, mean reads per cell, fraction of reads mapped to exonic reads, and median genes per cell) obtained by cellranger for each of the working libraries. This information will give us an idea of the quality of the experiment as well as the sequencing and the mapping steps.
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_gex_df) == 0) {
+  print("GEX module not present")
+} else {
+  top_metrics_gex <- cellranger_metrics_gex_df[, c("gem_id", 
+                                               "Number_of_reads",
+                                               "Estimated_number_of_cells", 
+                                               "Fraction_reads_in_cells",
+                                               "Mean_reads_per_cell",
+                                               "Confidently_mapped_to_exonic_regions",
+                                               "Median_genes_per_cell")]
+  
+  top_metrics_gex %>%
+    gt() %>%
+    fmt_percent(columns = c("Fraction_reads_in_cells", "Confidently_mapped_to_exonic_regions"), 
+                scale_values = FALSE, decimals = 1) %>%
+    fmt_number(columns = "Number_of_reads", scale_by = 1 / 1E6, pattern = "{x}M") %>% 
+    tab_header(
+      title = md("**GEX QC metrics**"),
+      subtitle = ("cellranger v6.0.1")
+    ) %>%
+    cols_label(
+      gem_id = md("**GEM ID**"),
+      Number_of_reads = md("**Number of Reads**"),
+      Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+      Fraction_reads_in_cells = md("**Fraction of Reads in Cells**"),
+      Mean_reads_per_cell = md("**Mean Reads per Cell**"),
+      Confidently_mapped_to_exonic_regions = md("**Fraction of Reads Mapped to Exonic Reads**"),
+      Median_genes_per_cell = md("**Median Genes per Cell**")
+    )
+}
+```
+
+
+## Mapping QC
+Next, we will check the quality of the mapping step performed by `cellranger 6.0.1` across libraries. To do so, we will compare the percentage of reads mapped to the genome, and within these mapped reads, the amount of reads mapped to intergenic regions, intronic and exonic regions. We aim to obtain libraries with a high percentage of confidently mapped reads, and specially a high percentage of exonic reads, which correspond with gene expression or RNAs. The reads mapping to intergenic regions suggest contamination of ambient DNA, whereas reads mapping to intronic regions may come from pre-mRNAs or mature spliced isoforms that retain certain introns.
+
+```{r fig.height = 10, fig.width = 14}
+if (nrow(cellranger_metrics_gex_df) == 0) {
+  print("GEX module not present")
+} else {
+  qc_map_vars <- c("Confidently_mapped_to_genome",
+                 "Confidently_mapped_to_intergenic_regions",
+                 "Confidently_mapped_to_intronic_regions",
+                 "Confidently_mapped_to_exonic_regions", "Confidently_mapped_antisense", "Confidently_mapped_to_transcriptome")
+gg_qc_map <- purrr::map(qc_map_vars, function(var) {
+  ggplot(cellranger_metrics_gex_df, aes_string(x = "gem_id", y = var, fill = "gem_id")) +
+    geom_col() +
+    theme_bw() +
+    ylim(0, 100) +
+    labs(x = "Libraries (GEM IDs)",
+         y = str_c(str_replace_all(var, "_", " "), " (%)")) +
+    theme(axis.title = element_text(size = 12),
+          axis.text = element_text(size = 10),
+          axis.text.x = element_text(hjust = 1, angle = 45),
+          strip.placement = "outside",
+          strip.background = element_rect(colour = NA),
+          legend.position = "none")
+})
+ggarrange(plotlist = gg_qc_map, nrow = 2, ncol = 2)
+}
+```
+
+## Sequencing saturation and depth
+After assessing mapped reads, it is important to test which is the sequencing saturation and depth for each library. The sequencing saturation is dependent on the library complexity and sequencing depth. The library complexity is the total number of different transcripts present in the library and it varies between the cell types/tissues, whereas the sequencing depth is the number of paired reads per cell. For this reason, we will plot the number of detected genes as a function of depth (sequenced reads). As sequencing depth increases, more genes are detected, but this function reaches a plateau, whereby more sequenced reads does not result in more detected genes; therefore, at this point we assure we sequenced until saturation. More specifically, the sequencing saturation the fraction of confidently mapped, valid cell-barcode, valid UMI reads that had a non-unique (cell-barcode, UMI, gene).
+
+```{r fig.height = 10, fig.width = 14}
+if (nrow(cellranger_metrics_gex_df) == 0) {
+  print("GEX module not present")
+} else {
+  gg_lib_size <- cellranger_metrics_gex_df %>%
+  mutate(Number_of_Reads_mil = Number_of_reads / 1000000) %>%
+  ggplot(aes(x = gem_id, y = Number_of_Reads_mil, fill = gem_id)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +
+  labs(x = "Libraries (GEM IDs)", y = "Library size (in millions)") +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 8),
+        axis.text.x = element_text(hjust = 1, angle = 45),
+        strip.placement = "outside",
+        strip.background = element_rect(colour = NA),
+        legend.position = "none")
+gg_qc_seq_sat <- cellranger_metrics_gex_df %>%
+  mutate(Sequencing_Saturation_perc = Sequencing_saturation / 100,
+         Mean_Reads_per_Cell_tho = Mean_reads_per_cell / 1000) %>%
+  ggplot(aes(x = Mean_Reads_per_Cell_tho,
+             y = Sequencing_Saturation_perc, color = gem_id)) +
+  geom_point() +
+  theme_bw() +
+  ylim(0, 1) +
+  geom_text_repel(aes(label = gem_id), size = 4) +
+  labs(x = "Mean Reads per Cell (in thousands)", y = "Sequencing Saturation") +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+gg_qc_seq_depth_cell <- cellranger_metrics_gex_df %>%
+  mutate(Mean_Reads_per_Cell_tho = Mean_reads_per_cell / 1000) %>%
+  ggplot(aes(x = Mean_Reads_per_Cell_tho,
+             y = Median_genes_per_cell, color = gem_id)) +
+  geom_point() +
+  theme_bw() +
+  geom_text_repel(aes(label = gem_id), size = 4) +
+  labs(x = "Mean Reads per Cell (in thousands)", y = "Mean Detected Genes per Cell") +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+gg_qc_seq_depth <- cellranger_metrics_gex_df %>%
+  mutate(Number_of_Reads_mil = Number_of_reads / 1000000) %>%
+  ggplot(aes(x = Number_of_Reads_mil,
+             y = Total_genes_detected, color = gem_id)) +
+  geom_point() +
+  theme_bw() +
+  geom_text_repel(aes(label = gem_id), size = 4) +
+  labs(x = "Number of Reads (in millions)", y = "Total Genes Detected") +
+  theme(axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+cowplot::plot_grid(gg_lib_size, gg_qc_seq_sat, 
+                   gg_qc_seq_depth_cell, gg_qc_seq_depth, 
+                   nrow = 2, ncol = 2)
+}
+```
+
+
+# Feature Expression QC
+We will start by showing the three most relevant metrics (number of reads, estimated number of recovered cells, fraction of reads in cells, mean reads per cell, fraction of reads mapped to exonic reads, and median genes per cell) obtained by cellranger for each of the working libraries. This information will give us an idea of the quality of the experiment as well as the sequencing and the mapping steps.
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_adt_df) == 0) {
+  print("CITEseq not present")
+} else {
+  top_metrics_adt <- cellranger_metrics_adt_df[, c("gem_id", 
+    "Number_of_reads",
+     "Estimated_number_of_cells",
+     "Antibody_reads_usable_per_cell",
+    "Mean_reads_per_cell",
+    "Fraction_antibody_reads_in_aggregate_barcodes",
+     "Fraction_antibody_reads",
+     "Fraction_antibody_reads_usable",
+    "Fraction_unrecognized_antibody")]
+top_metrics_adt %>%
+  gt() %>%
+  fmt_percent(columns = c("Fraction_antibody_reads", "Fraction_antibody_reads_usable", "Fraction_unrecognized_antibody", "Fraction_antibody_reads_in_aggregate_barcodes"), 
+              scale_values = FALSE, decimals = 1) %>%
+  fmt_number(columns = "Number_of_reads", scale_by = 1 / 1E6, pattern = "{x}M") %>% 
+  tab_header(
+    title = md("**ADT QC metrics**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Number_of_reads = md("**Number of Reads**"),
+    Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+    Mean_reads_per_cell = md("**Mean Reads per cell**"),
+    Antibody_reads_usable_per_cell = md("**Fraction of Antibody Usable per Cells**"),
+    Fraction_antibody_reads_in_aggregate_barcodes = md("**Fraction antibody reads in aggregate barcodes**"),
+    Fraction_antibody_reads = md("**Fraction antibody reads**"),
+    Fraction_antibody_reads_usable = md("**Fraction antibody reads usable**"),
+    Fraction_unrecognized_antibody = md("**Fraction unrecognized antibody**")
+  )
+}
+```
+
+
+# VDJ-T QC
+We will start by showing the three most relevant metrics (number of reads, estimated number of recovered cells, fraction of reads in cells, mean reads per cell, fraction of reads mapped to any V(D)J gene, and cells with productive V-J Spanning Pair) obtained by cellranger for each of the working libraries. This information will give us an idea of the quality of the experiment as well as the sequencing and the mapping steps.
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_vdj_df) == 0) {
+  print("TCR not present")
+} else {
+top_metrics_vdj <- cellranger_metrics_vdj_df[, c("gem_id", 
+                                             "Number_of_reads",
+                                             "Estimated_number_of_cells",
+                                             "Fraction_reads_in_cells", 
+                                             "Mean_reads_per_cell", 
+                                             "Reads_mapped_to_any_V_D_J_gene",
+                                             "Number_of_cells_with_productive_V_J_spanning_pair")]
+top_metrics_vdj %>%
+  gt() %>%
+  fmt_percent(columns = c("Fraction_reads_in_cells", "Reads_mapped_to_any_V_D_J_gene"), 
+              scale_values = FALSE, decimals = 1) %>%
+  fmt_number(columns = "Number_of_reads", scale_by = 1 / 1E6, pattern = "{x}M") %>% 
+  tab_header(
+    title = md("**TCR-V(D)J QC metrics**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Number_of_reads = md("**Number of Reads**"),
+    Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+    Fraction_reads_in_cells = md("**Fraction of Reads in Cells**"),
+    Mean_reads_per_cell = md("**Mean Reads per Cell**"),
+    Reads_mapped_to_any_V_D_J_gene = md("**Fraction of Reads Mapped to any VDJ gene**"),
+    Number_of_cells_with_productive_V_J_spanning_pair = md("**Cells With Productive V-J Spanning Pair**")
+  )
+}
+```
+
+
+## Mapping QC
+Next, we will check the quality of the V(D)J mapping step performed by `cellranger 6.0.1` across libraries. To do so, we will compare the percentage of reads mapped to any germline V(D)J gene segment, and within these mapped reads, the amount of reads mapped TRA and TRB germline gene segment. 
+
+```{r fig.height = 5, fig.width = 14}
+if (nrow(cellranger_metrics_vdj_df) == 0) {
+  print("TCR not present")
+} else {
+qc_map_vars <- c("Reads_mapped_to_any_V_D_J_gene",
+                 "Reads_mapped_to_TRA",
+                 "Reads_mapped_to_TRB")
+gg_qc_map <- purrr::map(qc_map_vars, function(var) {
+  ggplot(cellranger_metrics_vdj_df, aes_string(x = "gem_id", y = var, fill = "gem_id")) +
+    geom_col() +
+    theme_bw() +
+    ylim(0, 100) +
+    labs(x = "Libraries (GEM IDs)",
+         y = str_c(str_replace_all(var, "_", " "), " (%)")) +
+    theme(axis.title = element_text(size = 12),
+          axis.text = element_text(size = 10),
+          axis.text.x = element_text(hjust = 1, angle = 45),
+          strip.placement = "outside",
+          strip.background = element_rect(colour = NA),
+          legend.position = "none")
+})
+ggarrange(plotlist = gg_qc_map, nrow = 1, ncol = 3)
+}
+```
+
+## V(D)J Expression
+Here, we will assess the median number of UMIs assigned to a TRA/TRB contig per cell. Low values for any of the two parameters can indicate cells with extremely low TRA/TRB expression or poor cell quality, among others.
+
+```{r}
+if (nrow(cellranger_metrics_vdj_df) == 0) {
+  print("TCR not present")
+} else {
+cellranger_metrics_vdj_df[, c("gem_id", 
+                              "Median_TRA_UMIs_per_Cell", 
+                              "Median_TRB_UMIs_per_Cell")] %>% 
+  gt() %>%
+  tab_header(
+    title = md("**V(D)J expression**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Median_TRA_UMIs_per_Cell = md("**Median TRA UMIs per Cell**"),
+    Median_TRB_UMIs_per_Cell = md("**Median TRB UMIs per Cell**"),
+  )
+}
+```
+
+## V(D)J Annotation
+Now, we will check the V(D)J annotation for the studied samples. To better interpret the obtained results, we will consider the information given in the cellranger web summary file. We will assess the fraction of cell-associated barcodes (with at least...), that are the following ones:
+
+* Cells With TRA/TRB Contig: one TRA/TRB contig annotated as a full or partial V(D)J gene.
+
+* Cells With CDR3-annotated TRA/TRB Contig: one TRA/TRB contig where a CDR3 was detected.
+
+* Cells With Productive TRA/TRB Contig: one contig that spans the 5' end of the V region to the 3' end of the J region for TRA/TRB, has a start codon in the expected part of the V sequence, has an in-frame CDR3, and has no stop codons in the aligned V-J region.
+
+* Cells With Productive V-J Spanning Pair: one productive contig for each chain of the receptor pair. As well as the correspondent the number of cells with productive V-J Spanning Pair.
+
+For all thre previous parameters, low values can indicate poor cell quality, low yield from the RT reaction, poor specificity of the V(D)J enrichment. Moreover, we will also check:
+
+* Paired Clonotype Diversit Effective diversity of the paired clonotypes. It is computed as the Inverse Simpson Index of the clonotype frequencies. A value of 1 indicates a minimally diverse sample - only one distinct clonotype was detected, whereas a value equal to the estimated number of cells indicates a maximally diverse sample.
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_vdj_df) == 0) {
+  print("TCR not present")
+} else {
+cellranger_metrics_vdj_df[, c("gem_id", 
+                              "Estimated_number_of_cells", 
+                              "Number_of_cells_with_productive_V_J_spanning_pair", 
+                              "Cells_with_productive_V_J_spanning_pair",
+                              "Paired_clonotype_diversity", 
+                              "Cells_with_productive_TRA_contig",
+                              "Cells_with_productive_TRB_contig")] %>% 
+  gt() %>%
+  tab_header(
+    title = md("**V(D)J annotation**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+    Number_of_cells_with_productive_V_J_spanning_pair = md("Cells"),
+    Cells_with_productive_V_J_spanning_pair = md("Fraction"),
+    Paired_clonotype_diversity = md("**Paired Clonotype Diversity**"),
+    Cells_with_productive_TRA_contig = md("TRA"),
+    Cells_with_productive_TRB_contig = md("TRB"),
+  ) %>% 
+  tab_spanner(
+    label = md("**Productive contig**"),
+    columns = vars(
+      Cells_with_productive_TRA_contig,
+      Cells_with_productive_TRB_contig)
+  )   %>% 
+  tab_spanner(
+    label = md("**Productive V-J Spanning Pair**"),
+    columns = vars(
+      Cells_with_productive_V_J_spanning_pair,
+      Number_of_cells_with_productive_V_J_spanning_pair)
+  )
+}
+```
+
+# VDJ-B QC
+
+We will start by showing the three most relevant metrics (number of reads, estimated number of recovered cells, fraction of reads in cells, mean reads per cell, fraction of reads mapped to any V(D)J gene, and cells with productive V-J Spanning Pair) obtained by cellranger for each of the working libraries. This information will give us an idea of the quality of the experiment as well as the sequencing and the mapping steps.
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_vdj_b_df) == 0) {
+  print("BCR not present")
+} else {
+top_metrics_vdj_b <- cellranger_metrics_vdj_b_df[, c("gem_id", 
+                                             "Number_of_reads",
+                                             "Estimated_number_of_cells",
+                                             "Fraction_reads_in_cells", 
+                                             "Mean_reads_per_cell", 
+                                             "Reads_mapped_to_any_V_D_J_gene",
+                                             "Number_of_cells_with_productive_V_J_spanning_pair")]
+top_metrics_vdj_b %>%
+  gt() %>%
+  fmt_percent(columns = c("Fraction_reads_in_cells", "Reads_mapped_to_any_V_D_J_gene"), 
+              scale_values = FALSE, decimals = 1) %>%
+  fmt_number(columns = "Number_of_reads", scale_by = 1 / 1E6, pattern = "{x}M") %>% 
+  tab_header(
+    title = md("**BCR-V(D)J QC metrics**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Number_of_reads = md("**Number of Reads**"),
+    Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+    Fraction_reads_in_cells = md("**Fraction of Reads in Cells**"),
+    Mean_reads_per_cell = md("**Mean Reads per Cell**"),
+    Reads_mapped_to_any_V_D_J_gene = md("**Fraction of Reads Mapped to any VDJ gene**"),
+    Number_of_cells_with_productive_V_J_spanning_pair = md("**Cells With Productive V-J Spanning Pair**")
+  )
+}
+```
+
+
+
+## Mapping QC
+Next, we will check the quality of the V(D)J mapping step performed by `cellranger 6.0.1` across libraries. To do so, we will compare the percentage of reads mapped to any germline V(D)J gene segment, and within these mapped reads, the amount of reads mapped IGH, IGK and IGL germline gene segment. 
+
+```{r fig.height = 5, fig.width = 14}
+if (nrow(cellranger_metrics_vdj_b_df) == 0) {
+  print("BCR not present")
+} else {
+qc_map_vars <- c("Reads_mapped_to_any_V_D_J_gene",
+                 "Reads_mapped_to_IGH",
+				 "Reads_mapped_to_IGK",
+                 "Reads_mapped_to_IGL")
+gg_qc_map <- purrr::map(qc_map_vars, function(var) {
+  ggplot(cellranger_metrics_vdj_b_df, aes_string(x = "gem_id", y = var, fill = "gem_id")) +
+    geom_col() +
+    theme_bw() +
+    ylim(0, 100) +
+    labs(x = "Libraries (GEM IDs)",
+         y = str_c(str_replace_all(var, "_", " "), " (%)")) +
+    theme(axis.title = element_text(size = 12),
+          axis.text = element_text(size = 10),
+          axis.text.x = element_text(hjust = 1, angle = 45),
+          strip.placement = "outside",
+          strip.background = element_rect(colour = NA),
+          legend.position = "none")
+})
+ggarrange(plotlist = gg_qc_map, nrow = 1, ncol = 3)
+}
+```
+
+## V(D)J Expression
+Here, we will assess the median number of UMIs assigned to a IGH/IGK/IGL contig per cell. Low values for any of the three parameters can indicate cells with extremely low IGH/IGK/IGL expression or poor cell quality, among others.
+```{r}
+if (nrow(cellranger_metrics_vdj_b_df) == 0) {
+  print("BCR not present")
+} else {
+cellranger_metrics_vdj_b_df[, c("gem_id", 
+                              "Median_IGH_UMIs_per_Cell", 
+                              "Median_IGK_UMIs_per_Cell",
+							  "Median_IGL_UMIs_per_Cell")] %>% 
+  gt() %>%
+  tab_header(
+    title = md("**V(D)J expression**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Median_IGH_UMIs_per_Cell = md("**Median IGH UMIs per Cell**"),
+    Median_IGK_UMIs_per_Cell = md("**Median IGK UMIs per Cell**"),
+	Median_IGL_UMIs_per_Cell = md("**Median IGL UMIs per Cell**"),
+  )
+}
+```
+
+## V(D)J Annotation
+Now, we will check the V(D)J annotation for the studied samples. To better interpret the obtained results, we will consider the information given in the cellranger web summary file. We will assess the fraction of cell-associated barcodes (with at least...), that are the following ones:
+
+* Cells With IGH/IGK/IGL Contig: one IGH/IGK/IGL contig annotated as a full or partial V(D)J gene.
+
+* Cells With CDR3-annotated IGH/IGK/IGL Contig: one IGH/IGK/IGL contig where a CDR3 was detected.
+
+* Cells With Productive IGH/IGK/IGL Contig: one contig that spans the 5' end of the V region to the 3' end of the J region for IGH/IGK/IGL, has a start codon in the expected part of the V sequence, has an in-frame CDR3, and has no stop codons in the aligned V-J region.
+
+* Cells With Productive V-J Spanning Pair: one productive contig for each chain of the receptor pair. As well as the correspondent the number of cells with productive V-J Spanning Pair.
+
+For all thre previous parameters, low values can indicate poor cell quality, low yield from the RT reaction, poor specificity of the V(D)J enrichment. Moreover, we will also check:
+
+* Paired Clonotype Diversit Effective diversity of the paired clonotypes. It is computed as the Inverse Simpson Index of the clonotype frequencies. A value of 1 indicates a minimally diverse sample - only one distinct clonotype was detected, whereas a value equal to the estimated number of cells indicates a maximally diverse sample.
+
+
+
+```{r fig.width=14}
+if (nrow(cellranger_metrics_vdj_b_df) == 0) {
+  print("BCR not present")
+} else {
+cellranger_metrics_vdj_b_df[,c("gem_id", "Estimated_number_of_cells", "Number_of_cells_with_productive_V_J_spanning_pair", "Cells_with_productive_V_J_spanning_IGK_IGH_pair", "Cells_with_productive_V_J_spanning_IGL_IGH_pair", "Paired_clonotype_diversity", "Cells_with_productive_IGH_contig", "Cells_with_productive_IGK_contig", "Cells_with_productive_IGL_contig")] %>% 
+  gt()  %>%
+  tab_header(
+    title = md("**V(D)J annotation**"),
+    subtitle = ("cellranger v6.0.1")
+  ) %>%
+  cols_label(
+    gem_id = md("**GEM ID**"),
+    Estimated_number_of_cells = md("**Estimated Number of Recovered Cells**"),
+    Number_of_cells_with_productive_V_J_spanning_pair = md("Cells"),
+    Cells_with_productive_V_J_spanning_IGK_IGH_pair = md("Fraction IGK IGH Pair"),
+	Cells_with_productive_V_J_spanning_IGL_IGH_pair = md("Fraction IGL IGH Pair"),
+    Paired_clonotype_diversity = md("**Paired Clonotype Diversity**"),
+	  Cells_with_productive_IGH_contig = md("IGH"),
+    Cells_with_productive_IGK_contig = md("IGK"),
+	Cells_with_productive_IGL_contig = md("IGL"),
+  ) %>%  
+  tab_spanner(
+    label = md("**Productive contig**"),
+    columns = vars(
+      Cells_with_productive_IGH_contig,
+      Cells_with_productive_IGK_contig,
+	  Cells_with_productive_IGL_contig)
+  )   %>% 
+  tab_spanner(
+    label = md("**Productive V-J Spanning Pair**"),
+    columns = vars(
+      Cells_with_productive_V_J_spanning_IGK_IGH_pair,
+	  Cells_with_productive_V_J_spanning_IGL_IGH_pair,
+      Number_of_cells_with_productive_V_J_spanning_pair)
+  )
+}
+```
+
+# Data overview
+```{r}
+# Print loaded data
+print("Libraries metadata")
+metadata
+print("GEX QC summary table")
+cellranger_metrics_gex_df
+print("CITEseq QC summary table")
+cellranger_metrics_adt_df
+print("VDJ-T QC summary table")
+cellranger_metrics_vdj_df
+print("VDJ-B QC summary table")
+cellranger_metrics_vdj_b_df
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

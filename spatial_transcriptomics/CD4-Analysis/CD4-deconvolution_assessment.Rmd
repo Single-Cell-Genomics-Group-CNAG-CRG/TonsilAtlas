@@ -1,0 +1,627 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+title: "CD4 deconvolution assessment"
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to map T-cell subtypes onto the Visium slides.
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(SPOTlight)
+library(SPATA2)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{cd4}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{cd4}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = ,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+set.seed(123)
+```
+
+Extract sample id and get Donor ID
+```{r}
+# sample_id <- params$sample_id
+sample_id <- "esvq52_nluss5"
+donor_id <- id_sp_df[id_sp_df$gem_id == sample_id, ] %>% dplyr::pull(donor_id)
+```
+
+Set gene dictionary
+```{r}
+"{cd4}/gene_dict.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+```
+
+## Load data
+We have 8 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering_integration.Rmd* while the sc data can be found in Ramon's scRNAseq analysis: **/scratch/devel/rmassoni/tonsil_atlas_private/2-DOWNSTREAM_PROCESSING/results/R_objects/processed_seurat_objects/processed_seurat_objects/tonsil_integrated_with_harmony_scrublet_annotated.rds**. \
+```{r}
+sp_obj <- "misc/{robj_dir}/20220215_tonsil_atlas_spatial_seurat_obj.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# Load SPOTlight data
+spotlight_ls <- "{cd4}/{robj_dir}/spotlight_ls_cd4_new.rds" %>%
+  glue::glue() %>% 
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load MAGIC data from the script *MAGIC_denoising.Rmd*
+```{r eval=FALSE}
+magic_df <- "{cd4}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store ADT information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df))
+
+# add this assay to the previously created Seurat object
+sp_obj[["MAGIC_Spatial"]] <- magic_assay
+
+Seurat::DefaultAssay(sp_obj) <- "MAGIC_Spatial"
+```
+
+Add colors to cell types
+```{r}
+col_vec <- c(
+  "Naive" = "gray88",
+  # "CM Pre-non-Tfh" = "gray71",
+  # "CM PreTfh" = "gray59",
+  "CM PreTfh/Pre-non-Tfh" = "gray59",
+  "Tfh T:B border" = "#67a9cf",
+  "Tfh-LZ-GC" = "#3690c0",
+  "GC-Tfh-SAP" = "#02818a",
+  "GC-Tfh-0X40"= "#016c59",
+  "Tfh-Mem" = "#014636",
+  "T-Trans-Mem" = "#fd8d3c",
+  "T-Eff-Mem" = "#e31a1c",
+  "T-helper" = "#800026",
+  "Eff-Tregs" = "#df65b0",
+  "non-GC-Tf-regs" = "#e7298a",
+  "GC-Tf-regs" = "#ce1256"
+)
+
+(nm_df <- data.frame(col_vec))
+nm_df$plt_nm <- rownames(nm_df)
+nm_df$mod_nm <- stringr::str_replace_all(
+  string = rownames(nm_df),
+  pattern = "[[:punct:]]|[[:space:]]",
+  replacement = ".")
+```
+
+## Analysis
+
+### Preprocess data
+```{r}
+decon_mtrx <- spotlight_ls[[2]]
+decon_mtrx <- decon_mtrx[, colnames(decon_mtrx) != "res_ss"]
+
+# Set as 0 cell types predicted to be under 3 % of the spot
+decon_mtrx[decon_mtrx < 0.03] <- 0
+```
+
+Change column names
+```{r}
+new_cn <- data.frame(mod_nm = colnames(decon_mtrx)) %>%
+  dplyr::left_join(nm_df, by = "mod_nm") %>%
+  dplyr::mutate(plt_nm = dplyr::if_else(is.na(plt_nm), mod_nm, plt_nm)) %>%
+  dplyr::distinct() %>%
+  dplyr::pull(plt_nm)
+
+colnames(decon_mtrx) <- new_cn
+```
+
+We are going to add the deconvolution to the Seurat object.
+```{r}
+sp_obj@meta.data <- cbind(sp_obj@meta.data, decon_mtrx)
+```
+
+Subset sample of interest
+```{r}
+sp_sub <- sp_obj[, sp_obj@meta.data$gem_id == sample_id]
+sp_sub@images <- sp_sub@images[Seurat::Images(sp_sub) == sample_id]
+```
+
+### Look at SPOTlight results
+Check Topic profiles
+```{r fig.height=8, fig.width=8}
+nmf_mod_ls <- spotlight_ls[[1]]
+nmf_mod <- nmf_mod_ls[[1]]
+
+h <- NMF::coef(nmf_mod)
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod_ls[[2]])
+
+topic_profile_plts[[2]] +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90), 
+                 axis.text = ggplot2::element_text(size = 12))
+```
+
+Look at all cells profiles
+```{r fig.height=20, fig.width=20}
+topic_profile_plts[[1]] +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_blank(),
+    axis.text.x = ggplot2::element_blank(),
+    axis.title = ggplot2::element_blank())
+```
+
+Look at cells topic profile
+```{r}
+basis_spotlight <- data.frame(NMF::basis(spotlight_ls[[1]][[1]]))
+
+train_labs <- spotlight_ls[[1]][[2]]
+colnames(basis_spotlight) <- unique(stringr::str_wrap(train_labs, width = 30))
+
+basis_spotlight[basis_spotlight < 0.0000001] <- 0
+
+DT::datatable(basis_spotlight, filter = "top")
+```
+
+#### Cell type location
+Look at the location of each cell type in each slice separately
+```{r fig.height=25, fig.width=25}
+# Iterate over cell types
+ct <- colnames(decon_mtrx)
+
+# Iterate over images
+lapply(names(sp_obj@images), function(nm) {
+  print(nm)
+  nm_donor <- id_sp_df %>% dplyr::filter(gem_id == nm) %>% dplyr::pull(donor_id)
+  # Iterate over cell types
+  ct_plt_ls <- lapply(ct, function(i) {
+    tmp_plt <- Seurat::SpatialFeaturePlot(
+      object = sp_obj,
+      features = i,
+      alpha = c(0, 1),
+      images = nm) +
+      ggplot2::scale_fill_gradientn(
+        colors = heat.colors(10, rev = TRUE)) +
+      ggplot2::scale_alpha(range = c(0, 1)) +
+      ggplot2::labs(title = stringr::str_wrap(string = i,
+                                     width = 25),
+           fill = "") +
+      ggplot2::theme(
+        plot.title = ggplot2::element_text(
+          hjust = 0.5,
+          size = 20,
+          face = "bold"))
+    
+    if (sum(sp_sub@meta.data[, i]) == 0) {
+      tmp_plt <- suppressMessages(tmp_plt + ggplot2::scale_alpha(range = c(0,0)))
+    }
+    
+    return(tmp_plt)
+  })
+  
+  (plt_arr <- cowplot::plot_grid(
+    plotlist = ct_plt_ls,
+    axis = "trbl",
+    align = "hv",
+    nrow = 5,
+    ncol = 5))
+  
+  "{cd4}/{plt_dir}/cell_type_location_cd4_{nm_donor}_new.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = plt_arr,
+      base_height = 25,
+      base_width = 25)
+  })
+```
+
+
+### Cell type - Gene
+Look at correlation between cell types and markers
+```{r}
+sp_sub <- sp_obj[, sp_obj@meta.data$gem_id == sample_id]
+sp_sub@images <- sp_sub@images[Seurat::Images(sp_sub) == sample_id]
+```
+
+```{r}
+scatterplot2 <- function(se_obj, x, y, color) {
+  df <- data.frame(
+    feat1 = se_obj@assays$MAGIC_Spatial@data[x, ],
+    feat2 = se_obj@meta.data[, y],
+    color = se_obj@meta.data[, color]
+    )
+  
+  ggplot2::ggplot(df,
+                  ggplot2::aes(x = feat1,
+                               y = feat2)) +
+    ggplot2::geom_point(ggplot2::aes(color = color)) +
+    ggplot2::geom_smooth(method = "loess", se = FALSE) +
+    # ggplot2::geom_smooth(method = lm, se = FALSE) +
+    ggplot2::theme_classic() +
+    ggplot2::labs(
+      x = x,
+      y = glue::glue("Proportion of\n{y}"),
+      color = color)
+
+}
+```
+
+#### BCL6 
+
+```{r eval=FALSE, fig.width=25, fig.height=25}
+bcl6_ls <- lapply(ct, function(ii) {
+  scatterplot2(
+    se_obj = sp_sub,
+    x = "BCL6",
+    y = ii,
+    color = "annotation")
+})
+
+patchwork::wrap_plots(bcl6_ls, ncol = 5) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+
+#### PRDM1 
+
+```{r eval=FALSE, fig.width=25, fig.height=25}
+prdm1_ls <- lapply(ct, function(ii) {
+  scatterplot2(
+    se_obj = sp_sub,
+    x = "PRDM1",
+    y = ii,
+    color = "annotation")
+})
+
+patchwork::wrap_plots(prdm1_ls, ncol = 5) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+#### TCF7 
+
+```{r eval=FALSE, fig.width=25, fig.height=25}
+tcf7_ls <- lapply(ct, function(ii) {
+  scatterplot2(
+    se_obj = sp_sub,
+    x = "TCF7",
+    y = ii,
+    color = "annotation")
+})
+
+patchwork::wrap_plots(tcf7_ls, ncol = 5) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+#### LEF1 
+
+```{r eval=FALSE, fig.width=25, fig.height=25}
+lef1_ls <- lapply(ct, function(ii) {
+  scatterplot2(
+    se_obj = sp_sub,
+    x = "LEF1",
+    y = ii,
+    color = "annotation")
+})
+
+patchwork::wrap_plots(lef1_ls, ncol = 5) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+#### CXCR5 
+
+```{r eval=FALSE, fig.width=25, fig.height=25}
+cxcr5_ls <- lapply(ct, function(ii) {
+  scatterplot2(
+    se_obj = sp_sub,
+    x = "CXCR5",
+    y = ii,
+    color = "annotation")
+})
+
+patchwork::wrap_plots(cxcr5_ls, ncol = 5) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+### T cell markers
+```{r fig.width=25, fig.height=10}
+Seurat::SpatialFeaturePlot(
+  object = sp_obj,
+  features = c("CD3D", "CD4", "CD8A", "CD8B"),
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  slot = "data") |
+    Seurat::SpatialFeaturePlot(
+    object = sp_obj,
+    features = c("Cytotoxic", "Naive"),
+    alpha = c(0, 1),
+    images = "esvq52_nluss5")
+
+```
+
+Correlation between markers
+```{r eval=FALSE, fig.width=15, fig.height=10}
+(scatterplot(se_obj = sp_sub, x = "CD4", y = "CD8A", color = "annotation") |
+  scatterplot(se_obj = sp_sub, x = "CD4", y = "CD3D", color = "annotation")) /
+  (scatterplot(se_obj = sp_sub, x = "CD8A", y = "CD3D", color = "annotation") | 
+  scatterplot(se_obj = sp_sub, x = "CD4", y = "CXCR5", color = "annotation")) +
+  patchwork::plot_layout(guides = "collect") &
+  ggplot2::theme(legend.position = "right")
+```
+
+### Boxplots
+Prepare data for boxplots
+```{r}
+metadata_long <- sp_sub@meta.data %>% 
+  # tidyr::pivot_longer(cols = c("annotation"),
+  #                     names_to = "stratification_id",
+  #                     values_to = "stratification_val") %>%
+  tidyr::pivot_longer(cols = all_of(ct), names_to = "ct_key", values_to = "ct_val") %>%
+  # dplyr::left_join(col_df, by = c("ct_key" = "ct_name")) %>%
+  dplyr::mutate(ct_val = dplyr::if_else(ct_val > 0.001, ct_val, 0))
+```
+
+Box plot of cell type proportion between stratified regions showing the unadjusted ANOVA Pvalue
+
+```{r fig.width=30, fig.height=20}
+keep_ct <- metadata_long %>%
+  dplyr::group_by(ct_key) %>%
+  dplyr::summarise(prop_sum = sum(ct_val)) %>% 
+  dplyr::filter(prop_sum > 0) %>%
+  dplyr::pull(ct_key)
+
+(bplt <- metadata_long %>%
+  dplyr::filter(ct_key %in% keep_ct) %>%
+  dplyr::mutate(
+    ct_key = stringr::str_wrap(string = ct_key,
+                                   width = 30)) %>%
+  # dplyr::mutate(stratification_val = factor(stratification_val, 
+  #                                           levels = c("Fibrotic", "HER2+/ESR1+",
+  #                                                      "HER2+/ESR1-", "HER2-/ESR1+",
+  #                                                      "HER2-/ESR1-"))) %>%
+  # dplyr::filter(! plt_name %in% c("CD8 EM-like", "CD4 naive-like")) %>%
+  ggpubr::ggboxplot(data = .,
+                    x = "annotation_20220215",
+                    y = "ct_val",
+                    facet.by = "ct_key",
+                    color = "annotation_20220215",
+                    fill = "annotation_20220215",
+                    add = "jitter",
+                    scales = "free",
+                    repel = TRUE,
+                    outlier.shape = NA,
+                    alpha = 0.6,
+                    palette = "Set1",
+                    ncol = 6) +
+  ggplot2::theme(
+    strip.text = ggplot2::element_text(size = 18, face = "bold"),
+    axis.text.y = ggplot2::element_text(size = 16),
+    axis.title.y = ggplot2::element_text(size = 20),
+    # axis.text.x = element_text(size = 12, angle = 90, vjust = 0.5, hjust = 0.5),
+    axis.text.x = ggplot2::element_blank(),
+    legend.text = ggplot2::element_text(size = 18),
+    legend.title = ggplot2::element_blank(),
+    strip.background = ggplot2::element_blank()) +
+  ggplot2::labs(
+    y = "Proportion",
+    color = "Regions",
+    fill = "Regions"))
+# bplt <- bplt +
+#   ggpubr::stat_compare_means(method = "anova", size = 6) +
+#   ggplot2::scale_y_continuous(
+#     expand = expansion(mult = c(0, 0.1)),
+#     labels = function(x) sprintf("%.2f", x))
+
+"{cd4}/{plt_dir}/strat_bplot_{donor_id}.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = bplt,
+    base_height = 20,
+    base_width = 25)
+```
+
+### Genes of interest
+```{r fig.width=12, fig.height=5}
+Seurat::DefaultAssay(sp_obj) <- "Spatial"
+
+Seurat::SpatialFeaturePlot(
+  object = sp_obj,
+  features = c("KLRB1", "PRDM1"),
+  ncol = 2,
+  images = "esvq52_nluss5",
+  alpha = c(0, 1))
+```
+
+### Integrated UMAP
+```{r fig.width=12, fig.height=5}
+Seurat::DimPlot(
+  object = sp_obj,
+  group.by = c("annotation", "sample_id"))
+```
+
+Next we want to look at the piecharts in the UMAP
+```{r fig.width=25, fig.height=20, eval=FALSE}
+# Loading libraries
+suppressMessages(require(ggplot2))
+suppressMessages(require(dplyr))
+suppressMessages(require(tibble))
+suppressMessages(require(grid))
+
+
+metadata_ds <- data.frame(sp_obj@meta.data)
+
+colnames(metadata_ds) <- colnames(sp_obj@meta.data)
+cell_types_all <- ct
+cell_types_interest <- cell_types_all
+
+# If not all cell types are in the cell types of interest we only want to keep those spots which have at least one of the cell types of interest
+if (!all(cell_types_all %in% cell_types_interest)) {
+
+  metadata_ds <- metadata_ds %>%
+    tibble::rownames_to_column("barcodeID") %>%
+    dplyr::mutate(rsum = base::rowSums(.[, cell_types_interest,
+                                         drop = FALSE])) %>%
+    dplyr::filter(rsum != 0) %>%
+    dplyr::select("barcodeID") %>%
+    dplyr::left_join(metadata_ds %>% tibble::rownames_to_column("barcodeID"),
+                     by = "barcodeID") %>%
+    tibble::column_to_rownames("barcodeID")
+}
+
+## Preprocess data
+umap_coord <- data.frame(sp_obj@reductions$umap@cell.embeddings[, c("UMAP_1", "UMAP_2")]) %>%
+  tibble::rownames_to_column("barcodeID") %>%
+  dplyr::inner_join(metadata_ds %>% tibble::rownames_to_column("barcodeID"),
+                    by = "barcodeID")
+
+## Plot spatial scatterpie plot
+(umap_pie_plt <- ggplot2::ggplot() +
+    scatterpie::geom_scatterpie(
+      data = umap_coord,
+      ggplot2::aes(
+        x = UMAP_1,
+        y = UMAP_2),
+      # Fill the pie chart
+      cols = cell_types_all,
+      pie_scale = 0.15,
+      # Remove black outline
+      color = NA) +
+    ggplot2::scale_fill_manual(
+      breaks = col_df$plt_nm,
+      values = col_df$color))
+
+"{cd4}/{plt_dir}/UMAP_piehcart_integrated.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = umap_pie_plt,
+    base_height = 20,
+    base_width = 25)
+```
+
+### Cell type correlation matrix
+```{r}
+# se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+# se_sub
+# se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+
+(cor_mtrx_ct <- SCrafty::correlation_heatmap( 
+  se = sp_obj,
+  feats = ct,
+  assay = "MAGIC_Spatial",
+  slot = "data") +
+   ggplot2::labs(
+     title = "Integrated cell-type correlation matrix"))
+
+"{cd4}/{plt_dir}/magic_cor-mtrx_cell-type_integrated.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx_ct,
+    base_height = 9,
+    base_width = 10)
+```
+
+### Cell type trajectories
+Lastly we also want to take a look at how the cell-type vary over the trajectories previously defined.
+
+Load drawn trajectories on slide *esvq52_nluss5*
+```{r}
+spata_sub <- "{anot}/{robj_dir}/spata-esvq52_nluss5.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Add cell type proportions to it:
+```{r}
+decon_mtrx_t <- t(decon_mtrx)
+colnames(decon_mtrx_t) <- colnames(sp_obj)
+
+spata_sub <- SPATA2::addExpressionMatrix(
+  object = spata_sub,
+  expr_mtr = decon_mtrx_t,
+  mtr_name = "decomp")
+
+# Set as active assay
+spata_sub <- SPATA2::setActiveExpressionMatrix(
+  object = spata_sub,
+  mtr_name = "decomp")
+```
+
+Look at all the genes in gene vec in the heat map
+```{r fig.width=20, fig.height=15}
+hm_colors <- viridis::inferno(n = 100)
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration",
+  variables = ct,
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+
+SPATA2::plotTrajectoryHeatmap(
+  object = spata_sub,
+  trajectory_name = "Tfh-migration-quiescent",
+  variables = ct,
+  arrange_rows = "maxima",
+  colors = hm_colors,
+  show_rownames = TRUE,
+  split_columns = TRUE, 
+  smooth_span = 0.5)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

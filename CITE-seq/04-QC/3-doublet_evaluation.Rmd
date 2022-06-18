@@ -1,0 +1,202 @@
+---
+title: "Doublet Evaluation"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(stringr)
+```
+
+## Define Parameters
+
+```{r}
+# Paths
+path_to_save_obj <- "../results"
+path_to_saved_post_QC_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_postQC.rds",
+  sep = "/"
+)
+path_to_save_seurat_assess_doublets_obj <- str_c(
+  path_to_save_obj,
+  "seurat_object_cite_seq_seurat_eval_doublets.rds",
+  sep = "/"
+)
+saved_cell_cycle_obj <- str_c(
+  "../data/cycle.rda",
+  sep = "/"
+)
+```
+
+## Read saved seurat object post QC
+
+```{r}
+filtered_bcll.combined <- readRDS(path_to_saved_post_QC_obj)
+```
+
+# Normalize
+
+To normalize by sequencing depth, we will divide each count by the library size of the cell (total number of UMI) and log-transform it, similarly to other high-quality atlases, like the [thymus](https://science.sciencemag.org/content/367/6480/eaay3224) and the [heart](https://www.nature.com/articles/s41586-020-2797-4) atlas.
+
+```{r}
+filtered_bcll.combined <- NormalizeData(
+  filtered_bcll.combined,
+  normalization.method = "LogNormalize",
+  scale.factor = 1e4
+)
+filtered_bcll.combined[["RNA"]]@data[1:10, 1:10]
+```
+
+
+# Visualize UMAP without batch effect correction
+
+```{r fig.wide=TRUE}
+filtered_bcll.combined <- filtered_bcll.combined %>%
+  FindVariableFeatures(nfeatures = 3000) %>%
+  ScaleData() %>% 
+  RunPCA() %>%
+  RunUMAP(reduction = "pca", dims = 1:30)
+```
+
+## Plot UMAP with respect to donor_id
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "donor_id", pt.size = 0.1) + NoLegend()
+```
+
+## Plot UMAP with respect to subproject
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "subproject", pt.size = 0.1)
+```
+
+## Plot UMAP with respect to gem_id
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "gemid", pt.size = 0.1)
+```
+
+## Plot UMAP with respect to seurat
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "scrublet_predicted_doublet", pt.size = 0.1)
+```
+
+```{r}
+FeaturePlot(filtered_bcll.combined, features = "scrublet_doublet_scores")
+```
+
+## Check vireo doublets
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "genotype_based_doublet_flag", pt.size = 0.1)
+```
+
+## Unassigned to any donor 
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "genotype_based_unassigned_flag", pt.size = 0.1)
+```
+
+## Check doublet feature scatter
+
+## Doublets defined by scrublet
+
+```{r}
+filtered_bcll.combined_scrublet_doublet = subset(filtered_bcll.combined, subset = scrublet_predicted_doublet == 'True')
+p1 <- FeatureScatter(filtered_bcll.combined_scrublet_doublet, feature1 = "CD4", feature2 = "CD8", group.by
+ = "donor_id")
+p2 <- FeatureScatter(filtered_bcll.combined_scrublet_doublet, feature1 = "CD19", feature2 = "CD3E", group.by
+ = "donor_id")
+p3 <- FeatureScatter(filtered_bcll.combined_scrublet_doublet, feature1 = "CD79B", feature2 = "CD3E", group.by
+ = "donor_id")
+p1
+p2
+p3
+```
+
+## Check genotype doublet feature scatter
+
+```{r}
+filtered_bcll.combined_genotype_doublet = subset(filtered_bcll.combined, subset = genotype_based_doublet_flag == 'T')
+p1 <- FeatureScatter(filtered_bcll.combined_genotype_doublet, feature1 = "CD4", feature2 = "CD8", group.by
+ = "donor_id")
+p2 <- FeatureScatter(filtered_bcll.combined_genotype_doublet, feature1 = "CD19", feature2 = "CD3E", group.by
+ = "donor_id")
+p3 <- FeatureScatter(filtered_bcll.combined_genotype_doublet, feature1 = "CD79B", feature2 = "CD3E", group.by
+ = "donor_id")
+p1
+p2
+p3
+```
+
+## Check genotype unassigned feature scatter
+
+```{r}
+filtered_bcll.combined_genotype_unassigned = subset(filtered_bcll.combined, subset = genotype_based_unassigned_flag == 'T')
+p1 <- FeatureScatter(filtered_bcll.combined_genotype_unassigned, feature1 = "CD4", feature2 = "CD8", group.by
+ = "donor_id")
+p2 <- FeatureScatter(filtered_bcll.combined_genotype_unassigned, feature1 = "CD19", feature2 = "CD3E", group.by
+ = "donor_id")
+p3 <- FeatureScatter(filtered_bcll.combined_genotype_unassigned, feature1 = "CD79B", feature2 = "CD3E", group.by
+ = "donor_id")
+p1
+p2
+p3
+```
+
+
+## Check for Cell cycle stages variability between clusters
+
+```{r}
+load(saved_cell_cycle_obj)
+filtered_bcll.combined <- CellCycleScoring(filtered_bcll.combined, 
+                                 g2m.features = g2m_genes, 
+                                 s.features = s_genes)
+```
+
+## Cell Cycle 
+
+```{r}
+# Plot the PCA colored by cell cycle phase
+DimPlot(filtered_bcll.combined,
+        reduction = "pca",
+        group.by= "Phase",
+        split.by = "Phase")
+```
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = 'Phase', pt.size = 0.1)
+```
+
+## Check cells containing both TCR and BCR
+
+## Plot UMAP with respect to TCR
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "tcr_flag", pt.size = 0.1)
+```
+
+## Plot UMAP with respect to BCR
+
+```{r}
+DimPlot(filtered_bcll.combined, group.by = "bcr_flag", pt.size = 0.1)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

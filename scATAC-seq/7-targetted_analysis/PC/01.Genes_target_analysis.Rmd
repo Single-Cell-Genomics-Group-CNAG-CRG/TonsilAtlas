@@ -1,0 +1,405 @@
+---
+title: "PC: Gene target chromatin analysis"
+author: "Paula Soler-Vila & Sergio Aguilar"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+In this notebook, we are going to assess the general concordance between  gene expression and chromatin accessibility status of key cell fate regulators for PC.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(GenomicRanges)
+library(pheatmap)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(plyr)
+library(stringr)
+library(UCell)
+library(grid)
+library(gridExtra)
+library(unikn)
+library(biomaRt)
+```
+
+## Parameters
+```{r parameters}
+cell_type = "PC"
+
+color_palette <- c("#73787E", "#B8BCC1","#FECFC7" ,
+                   "#FF8E7B","#a13b53","#A6E1F4", 
+                   "#586BA4", "#323734","#035F72",
+                   "#9CC6CF" ,"#198C19","#006600","#FFD8B1")
+
+cels_order <- c("Dark Zone GCBC",
+                "Light Zone GCBC",
+                "PC committed Light Zone GCBC",
+                "Early PC precursor",
+                "PB",
+                "IgG+ PC precursor",
+                "IgM+ PC precursor",
+                "IgD PC precursor", 
+                "preMature IgG+ PC",
+                "preMature IgM+ PC",
+                "Mature PC",
+                "MBC derived PC precursor",
+                "class switch MBC")
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = "")
+
+
+path_to_obj_SIX5 <- paste0(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+  "/SIX5_regulon_activity_per_etagroups.rds")
+
+
+path_to_obj_RNA <- paste0(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+  "/PC_seu_obj_level_5_eta.rds")
+
+path_to_save <- str_c(
+  here::here("scATAC-seq/results/plots/"))
+```
+
+## Colors scRNAseq
+```{r colors}
+Precursor <- c("PC committed Light Zone GCBC", "Early PC precursor")
+IgM_pathway <- c("Short lived IgM+ PC","IgM+ early PC precursor", 
+                 "IgM+ PC precursor", "preMature IgM+ PC", "Mature IgM+ PC")
+IgG_pathway <- c("IgG+ PC precursor", "preMature IgG+ PC")
+Proli <- c("PB committed early PC precursor", 
+           "Transitional PB", "PB")
+Mature_IgG <- c( "Mature IgG+ PC", "MBC derived IgG+ PC")
+Mature_IgA <- c( "Mature IgA+ PC", "MBC derived IgA+ PC")
+IgD <- c("IgD PC precursor")
+Memory <- c("class switch MBC", "MBC derived early PC precursor",
+            "MBC derived PC precursor")
+DZ <- c("Dark Zone GCBC", "Light Zone GCBC", "DZ migratory PC precursor")
+
+
+my_pal_prec <- c(seecol("pal_peach", n=5)[c(2,5)])
+names(my_pal_prec) <- Precursor
+#my_pal_igm <- seecol("pal_seegruen", n=length(IgM_pathway))
+my_pal_igm <- c("#99CC99", "#66B266", "#198C19", "#006600", "#003300")
+names(my_pal_igm) <- IgM_pathway
+my_pal_igg <- seecol("pal_seeblau", n=5)[c(2,5)]
+names(my_pal_igg) <- IgG_pathway
+my_pal_matureigg <- rev(seecol("pal_karpfenblau", n=5)[c(3,5)])
+names(my_pal_matureigg) <- Mature_IgG
+#my_pal_matureiga <- rev(seecol("pal_bordeaux", n=5)[c(2,5)])
+my_pal_matureiga <- rev(c("#896B60", "#4A332D"))
+names(my_pal_matureiga) <- Mature_IgA
+my_pal_mbc <- rev(seecol("pal_petrol",  n=5)[c(1,3,5)])
+names(my_pal_mbc) <- Memory
+my_pal_proli <- rev(seecol("pal_pinky", n=length(Proli)))
+names(my_pal_proli) <- Proli
+my_pal_igd <- c('#FFD8B1')
+names(my_pal_igd) <- IgD
+my_pal_dz <- c(seecol("pal_grau", n=2), "#D94701") #E56C72
+names(my_pal_dz) <- DZ
+
+palette <- c(my_pal_prec, my_pal_igm, my_pal_igg, my_pal_matureigg, my_pal_matureiga, my_pal_mbc, my_pal_proli, my_pal_igd, my_pal_dz)
+
+DZ <- c("Dark Zone GCBC", "DZ migratory PC precursor", "Light Zone GCBC")
+IgM_pathway <- c("IgM+ early PC precursor", "IgM+ PC precursor", "preMature IgM+ PC", "Mature IgM+ PC", "Short lived IgM+ PC")
+```
+
+# Load Gene reference data
+```{r}
+ensembl <- useMart(biomart = "ensembl",dataset="hsapiens_gene_ensembl")
+Datasets <- listDatasets(ensembl)
+Datasets[grep("hsapiens_gene_ensembl",Datasets$dataset),]
+
+hg38.gene.annot <- getBM(attributes = c("ensembl_gene_id",
+                                        "entrezgene_id",
+                                        "hgnc_symbol",
+                                        "chromosome_name",
+                                        "start_position",
+                                        "end_position",
+                                        "strand","band",
+                                        "gene_biotype"),
+                         mart = ensembl)
+
+## Arrange also strand info.
+hg38.gene.annot$chromosome_name <- paste0("chr",hg38.gene.annot$chromosome_name)
+hg38.gene.annot$strand[which(hg38.gene.annot$strand==1)] <- "+"
+hg38.gene.annot$strand[which(hg38.gene.annot$strand=="-1")] <- "-"
+
+##polish gene annotation
+hg38.gene.annot$hgnc_symbol[which(hg38.gene.annot$hgnc_symbol=="")] <- NA
+
+##make GRange object
+hg38.gene.annot.GR <- GRanges(seqnames = hg38.gene.annot$chromosome_name,
+                              ranges = IRanges(hg38.gene.annot$start_position,
+                                               end = hg38.gene.annot$end_position),
+                              strand = hg38.gene.annot$strand)
+
+mcols(hg38.gene.annot.GR) <- hg38.gene.annot[,grep("^chromosome_name$|^start_position$|^end_position|^strand$$",
+                                                   colnames(hg38.gene.annot),value = T,invert = T)]
+hg38.gene.annot.GR <- sort(sortSeqlevels(hg38.gene.annot.GR))
+
+## Extend 2,000bps upstream of promoters
+hg38.gene.annot.2000.GR <- punion(promoters(x = hg38.gene.annot.GR,
+                                            upstream = 2000,
+                                            downstream = 0),
+                                  hg38.gene.annot.GR)
+
+hg38.gene.annot.2000.GR$gene_name <- hg38.gene.annot.GR$hgnc_symbol
+```
+
+## PC data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat_peaks <- seurat@assays$peaks_level_5@ranges
+seurat
+
+p1 <- DimPlot(seurat, 
+    cols = color_palette,
+    pt.size = 0.8)
+
+p1
+```
+
+
+```{r}
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+
+cell_types <- names(table(seurat_RNA$names_level_5_clusters_eta))
+cell_types[!(cell_types %in% names(palette))]
+
+seurat_RNA$names_level_5_clusters_eta <- factor(seurat_RNA$names_level_5_clusters_eta, 
+                                                levels = c(DZ, Precursor, Proli, IgG_pathway, Mature_IgG, Mature_IgA, Memory, IgM_pathway, IgD))
+Idents(seurat_RNA) <- "names_level_5_clusters_eta"
+
+p2 <- DimPlot(seurat_RNA, 
+    cols = palette,
+    pt.size = 0.5) + NoLegend()
+p2
+```
+# Study the chromatin dynamics in specific genes
+
+## Manual selection of genes candidates.
+
+```{r}
+list_regs <- c("PDK1", "TMEM198" ,"ITM2C" ,
+               "BHLHA15" ,"SLC38A2" ,"TSC22D3") 
+
+target_genes <- c("SUGCT", "AICDA","CXCR4",
+              "LMO2", "CD83", "BCL2A1", 
+              "BCL6", "IRF8", "MEF2B", "MS4A1", "PAX5",   
+              "PRDM1", "XBP1", "IRF4", "SLAMF7", "SSR4", 
+              "MZB1", "DERL3", "CREB3L2", "FKBP11",
+              "IGHG1", "IGHA1", "IGHA2","IGHM",
+              "BANK1","CELF2","TXNIP",
+              "CD9", "CD44") 
+```
+
+
+## Average chromatin accesibility per gene
+```{r}
+hg38.gene.annot_targetted <- hg38.gene.annot.2000.GR[which(hg38.gene.annot.2000.GR$gene_name %in% target_genes),]
+
+## Overlapping of the DE genes coordinates with the total number of peaks detected.
+gr1 <- seurat_peaks
+gr2 <- hg38.gene.annot_targetted
+m <- findOverlaps(gr1, gr2)
+gr1.matched <- gr1[queryHits(m)]
+
+mcols(gr1.matched) <- cbind.data.frame(
+    mcols(gr1.matched),
+    mcols(gr2[subjectHits(m)]));
+
+gr1.matched$peaks <- paste0(seqnames(gr1.matched),"-",
+                             start(gr1.matched),"-",
+                             end(gr1.matched))
+
+gr1.matched_df <- as.data.frame(gr1.matched)
+
+
+avgexpr_mat <- AverageExpression(features = unique(gr1.matched$peaks),
+               seurat,
+               assays = "peaks_level_5",
+               return.seurat = F,
+               group.by = "annotation_level_5",
+               slot = "data")
+
+avgexpr_df <- as.data.frame(avgexpr_mat$peaks_level_5)
+avgexpr_df$peaks <- row.names(avgexpr_df)
+
+DA_DE_merge <- merge(avgexpr_df,
+                       gr1.matched_df[c("peaks","gene_name")],
+                       by=c("peaks"))  
+
+DA_DE_merge_melt <- melt(DA_DE_merge)
+
+# Computing the mean accessibility/expression per gene 
+mean_accessibility <- tapply(DA_DE_merge_melt$value,
+                     list(DA_DE_merge_melt$gene_name, 
+                          DA_DE_merge_melt$variable),
+                          mean)
+
+# Scaling matrix
+input_mat <- t(apply(mean_accessibility, MARGIN = 1, 
+                     FUN = function(X) (X - min(X))/diff(range(X))))
+mean_columns <- colMeans(input_mat)
+
+input_mat <- rbind(input_mat,mean_columns)
+
+cell_types <- names(table(seurat$annotation_level_5))
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+mycolors <- color_palette
+names(mycolors) <- cell_types
+mycolors_list <- list(mycolors)
+names(mycolors_list) <- "cell_type"
+
+colfunc <- colorRampPalette(c("#4575B4", "#FFFFBF","darkgreen"))
+
+pheatmap(input_mat[target_genes,cels_order],
+      color = colfunc(100),
+      annotation_col = annotation_col,
+      annotation_colors = mycolors_list,
+      annotation_names_col = F,
+      annotation_legend = F,
+      show_rownames=T, 
+      show_colnames = F, 
+      border_color = "white",
+      cluster_rows = F,
+      cluster_cols = F,
+      fontsize_row = 8,
+      gaps_row = c(3,6,11,20,24,27))
+
+
+grid.ls(grid.force()) # "col_annotation" looks like it's the one to edit
+grid.gedit("col_annotation", gp = gpar(col="black"))
+```       
+
+
+# Computing the SIX5 signature using UCell
+```{r}
+hg38.gene.annot_regulators <- hg38.gene.annot.2000.GR[which(hg38.gene.annot.2000.GR$gene_name %in% list_regs),]
+
+overlapping_six5_peaks <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, 
+hg38.gene.annot_regulators)),]
+
+six_seurat_peaks_features <- paste0(
+  seqnames(overlapping_six5_peaks),"-",
+  start(overlapping_six5_peaks),"-",
+  end(overlapping_six5_peaks))
+  
+seurat <- AddModuleScore_UCell(
+  obj = seurat,
+  assay = "peaks_level_5",
+  features = list(six_seurat_peaks_features),
+  name = 'SIX5_UCell')
+
+
+FeaturePlot(
+  order = T,
+  seurat,
+  min.cutoff = "q5", 
+  max.cutoff = "q95",
+  raster = F,
+  features = "signature_1SIX5_UCell",
+  pt.size = 0.7)
+```
+
+## Combining SIX5 chromatin signature with the SIX5 activity signature
+```{r}
+# SIX5_activity
+SIX5_activity <- readRDS(path_to_obj_SIX5)
+
+# SIX5_accessibility
+signature_1SIX5_UCell <- data.frame(seurat$signature_1SIX5_UCell,
+                                    seurat$annotation_level_5)
+SIX5_mean_accessibility <- tapply(signature_1SIX5_UCell$seurat.signature_1SIX5_UCell,
+signature_1SIX5_UCell$seurat.annotation_level_5,mean)
+
+input_mat <- rbind(SIX5_activity,SIX5_mean_accessibility)
+row.names(input_mat) <- c("Activity","Accesibility")
+
+
+scale_mat <- t(apply(input_mat, MARGIN = 1, 
+                     FUN = function(X) (X - min(X))/diff(range(X))))
+
+cell_types <- names(table(seurat$annotation_level_5))
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+mycolors <- color_palette
+names(mycolors) <- cell_types
+mycolors_list <- list(mycolors)
+names(mycolors_list) <- "cell_type"
+
+pdf(file=paste0(path_to_save,"heatmap_SIX5_1.pdf"))
+colfunc <- colorRampPalette(c("#4575B4", "#FFFFBF","darkgreen"))
+pheatmap(scale_mat,
+  color = colfunc(100),
+  annotation_col = annotation_col,
+  annotation_colors = mycolors_list,
+  annotation_names_col = F,
+  annotation_legend = F,
+  show_rownames=T, show_colnames = F, 
+  border_color = "black",
+  cluster_rows = F,
+  cluster_cols = F,
+  fontsize_row = 8) 
+
+grid.ls(grid.force()) # "col_annotation" looks like it's the one to edit
+dev.off()
+
+pdf(file=paste0(path_to_save,"heatmap_SIX5_2.pdf"))
+colfunc <- colorRampPalette(c("lightgrey", "red"))
+pheatmap(scale_mat,
+  color = colfunc(200),
+  annotation_col = annotation_col,
+  annotation_colors = mycolors_list,
+  annotation_names_col = F,
+  annotation_legend = F,
+  show_rownames=T, show_colnames = F, 
+  border_color = "black",
+  cluster_rows = F,
+  cluster_cols = F,
+  fontsize_row = 8)
+
+grid.ls(grid.force()) # "col_annotation" looks like it's the one to edit
+dev.off()
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

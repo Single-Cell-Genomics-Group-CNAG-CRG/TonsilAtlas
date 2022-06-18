@@ -1,0 +1,160 @@
+---
+title: "Normalization and Batch Effect Correction (with doublets)"
+author: "Ramon Massoni-Badosa"
+date: "2021/01/29"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+To correct for batch effects, we will use the [Harmony](https://www.nature.com/articles/s41592-019-0619-0) package, since it was reported to be the fastest and most accurate method in a [recent benchmarking effort](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1850-9). To this end, we will follow the ["Integration of datasets using Harmony"](https://htmlpreview.github.io/?https://github.com/satijalab/seurat.wrappers/blob/master/docs/harmony.html) vignette of the [SeuratWrappers](https://github.com/satijalab/seurat-wrappers) package.
+
+Importantly, we will use the harmony coordinates (batch-corrected principal components) to compute a k-nearest neighbors (KNN) graph, which will be used to compute the proportion of doublet nearest neighbors (pDNN) for each cell (see the following notebook).
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/seurat_merged_all.rds")
+path_to_save_obj <- here::here("scRNA-seq/results/R_objects/seurat_integrated_with_doublets.rds")
+path_tmp_dir <- here::here("scRNA-seq/2-QC/5-batch_effect_correction/1-doublet_exclusion/tmp/")
+path_to_save_knn <- str_c(path_tmp_dir, "integrated_knn_graph.rds", sep = "")
+path_to_save_doubl_annot <- str_c(path_tmp_dir, "doublet_preliminary_annotations.rds", sep = "") 
+  
+
+# Set k for the KNN graph
+k <- 75
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+tonsil
+```
+
+
+# Normalize
+
+To normalize by sequencing depth, we will divide each count by the library size of the cell (total number of UMI) and log-transform it, similarly to other high-quality atlases, like the [thymus](https://science.sciencemag.org/content/367/6480/eaay3224) and the [heart](https://www.nature.com/articles/s41586-020-2797-4) atlas.
+
+```{r}
+tonsil <- NormalizeData(
+  tonsil,
+  normalization.method = "LogNormalize",
+  scale.factor = 1e4
+)
+tonsil[["RNA"]]@data[1:10, 1:10]
+```
+
+
+# Visualize UMAP without batch effect correction
+
+```{r fig.wide=TRUE}
+tonsil <- tonsil %>%
+  FindVariableFeatures(nfeatures = 3000) %>%
+  ScaleData() %>% 
+  RunPCA() %>%
+  RunUMAP(reduction = "pca", dims = 1:30)
+p1 <- DimPlot(tonsil, group.by = "library_name", pt.size = 0.1) + NoLegend()
+p2 <- DimPlot(tonsil, group.by = "sex", pt.size = 0.1)
+p3 <- DimPlot(tonsil, group.by = "age_group", pt.size = 0.1)
+p4 <- DimPlot(tonsil, group.by = "is_hashed", pt.size = 0.1)
+print("UMAP colored by GEM:")
+p1
+print("UMAP colored by sex:")
+p2
+print("UMAP colored by age:")
+p3
+print("UMAP colored by whether it's hashed:")
+p4
+```
+
+
+# Run and visualize Harmony's integration
+
+```{r fig.wide=TRUE}
+tonsil <- tonsil %>%
+  RunHarmony(reduction = "pca", dims = 1:30, group.by.vars = "gem_id") %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+p1_corr <- DimPlot(tonsil, group.by = "library_name", pt.size = 0.1) +
+  NoLegend()
+p2_corr <- DimPlot(tonsil, group.by = "sex", pt.size = 0.1)
+p3_corr <- DimPlot(tonsil, group.by = "age_group", pt.size = 0.1)
+p4_corr <- DimPlot(tonsil, group.by = "is_hashed", pt.size = 0.1)
+print("UMAP colored by GEM:")
+p1_corr
+print("UMAP colored by sex:")
+p2_corr
+print("UMAP colored by age:")
+p3_corr
+print("UMAP colored by whether it's hashed:")
+p4_corr
+```
+
+
+# Compute KNN graph
+
+```{r}
+tonsil <- FindNeighbors(
+  tonsil,
+  reduction = "harmony",
+  dims = 1:30,
+  k.param = k,
+  compute.SNN = FALSE
+)
+tonsil
+```
+
+
+# Save
+
+```{r}
+# If it doesn't exist create temporal directory
+dir.create(path_tmp_dir, showWarnings = FALSE)
+
+
+# Save
+selected_cols <- c("HTO_classification.global", "has_high_lib_size",
+                   "scrublet_predicted_doublet", "scrublet_doublet_scores",
+                   "scrublet_doublet_scores_scaled")
+doublet_annot_df <- tonsil@meta.data[, selected_cols]
+
+knn_graph <- as(tonsil@graphs$RNA_nn, "sparseMatrix")
+saveRDS(knn_graph, path_to_save_knn)
+saveRDS(tonsil, path_to_save_obj)
+#saveRDS(tonsil@graphs$RNA_nn, path_to_save_knn)
+saveRDS(doublet_annot_df, path_to_save_doubl_annot)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

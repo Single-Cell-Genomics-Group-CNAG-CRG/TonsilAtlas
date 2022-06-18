@@ -1,0 +1,119 @@
+---
+title: "Precursor T cells analysis"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The objective of this notebook is to reanalyze the precursor T cells to validate their annotation. We will analyze them jointly with the precursor B cells and plasmacytoid dendritic cells (PDC). The 3 cell types clustered together in level 1.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(here)
+library(pals)
+library(DT)
+```
+
+
+## Define parameters
+
+```{r}
+path_to_preT <- here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_preT_seurat_obj.rds")
+path_to_preB <- here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_preB_seurat_obj.rds")
+path_to_pdc <- here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_PDC_seurat_obj.rds")
+path_to_save <- here("data/raw_data_figures/seurat_obj_pdc_preB_preT_fig1.rds")
+
+cols <- pals::polychrome()
+names(cols) <- NULL
+```
+
+
+## Read data
+
+```{r}
+preT <- readRDS(path_to_preT)
+preB <- readRDS(path_to_preB)
+pdc <- readRDS(path_to_pdc)
+```
+
+
+# Merge and reprocess
+
+```{r}
+merged <- merge(x = preT, y = c(preB, pdc))
+merged <- merged %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunUMAP(dims = 1:15, reduction = "pca")
+DimPlot(merged, group.by = "annotation_figure_1", cols = cols)
+DimPlot(merged, group.by = "annotation_20220215", cols = cols)
+```
+
+
+# Markers
+
+```{r}
+# Markers all
+Idents(merged) <- "annotation_20220215"
+markers_all <- FindAllMarkers(merged, only.pos = TRUE)
+markers_all <- markers_all[markers_all$p_val_adj < 0.001, ]
+DT::datatable(markers_all, options = list(scrollX = TRUE))
+
+
+# Precursor-specific markers
+markers_precursor <- FindMarkers(
+  merged,
+  ident.1 = c("preT", "preB"),
+  only.pos = TRUE
+)
+markers_precursor <- markers_precursor[markers_precursor$p_val_adj < 0.001, ]
+DT::datatable(markers_precursor, options = list(scrollX = TRUE))
+
+
+# Interferon+ PDC-specific genes
+markers_ifn <- FindMarkers(
+  merged,
+  ident.1 = "IFN1+ PDC",
+  ident.2 = "PDC",
+  only.pos = TRUE
+)
+markers_ifn <- markers_ifn[markers_ifn$p_val_adj < 0.001, ]
+DT::datatable(markers_ifn, options = list(scrollX = TRUE))
+```
+
+
+# Save
+
+```{r}
+saveRDS(merged, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

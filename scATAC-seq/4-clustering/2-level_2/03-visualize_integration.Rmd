@@ -1,0 +1,270 @@
+---
+author: "Paula Soler-Vila & Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+params:
+  cell_type: PC
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Visualize integration (level 2):", params$cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+The objectives of this notebook are:
+
+- Visualize how well we could remove technical variability associated with the assay (scATAC or multiome). We should see a high degree of intermixing between the 2 assays.
+
+- Plot several markers of potential doublets or problematic cells: 
+       - scRNAseq doublets determined by 10X Multiome
+       - Scrublet doublet predictions
+       - nCount and nFeatures of scATAC
+       - Chromatin Signature
+       - Projection of the scRNA-seq clusters defined at level 3
+       
+The broader objective of level 2 is to eliminate most remaining doublets and poor-quality cells, as we will discuss in future notebooks. These visualizations will allow us to explore this. We will also plot their location in the UMAP obtained at level 1.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+```
+
+
+## Parameters
+```{r}
+# Paths
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_2/"),
+  params$cell_type,
+  "/",
+  params$cell_type,
+  "_integrated_level_2.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- str_c(
+  here::here("scRNA-seq/3-clustering/3-level_3/"),
+  params$cell_type,
+  "_clustered_level_3_with_pre_freeze.rds",
+  sep = ""
+)
+
+path_to_doublets <- here::here("scRNA-seq/3-clustering/2-level_2/tmp/doublets_multiome_df_all.rds")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+
+tonsil_RNA_annotation <- seurat_RNA@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode", "seurat_clusters")
+```
+
+
+### Visualization of the data
+```{r fig.wide=TRUE}
+p1 <- DimPlot(seurat,
+  pt.size = 0.1)
+
+p2 <- DimPlot(seurat_RNA,
+  group.by = "seurat_clusters",
+  pt.size = 0.1, label = T) + NoLegend()
+
+p1 + p2
+```
+
+# Assess integration
+
+## Technical variability |
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "assay")
+p_assay
+```
+
+## Technical variability ||
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "hospital")
+p_assay
+```
+
+## Biological variability | 
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "age_group")
+p_assay
+```
+
+## Biological variability || 
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "sex")
+p_assay
+```
+
+# Spot potential doublets
+
+## Multiome scRNA-seq data
+
+### Doublets detected in scRNA-seq data from Multiome.
+Here, we can see the count of doublets detected by cell-type. Note that for the level1 annotation there are not doublets detected in the Naive and Memory B cell cluster. 
+
+```{r fig.wide=TRUE}
+multiome_doublets <- readRDS(path_to_doublets)
+
+dfm = melt(table(multiome_doublets$cell_type))
+dfm$value = as.numeric(as.character(dfm$value))
+ggbarplot(dfm, x = "Var1", y = "value",
+          fill = "Var1",   
+          palette = "jco",
+          sort.val = "desc",         
+          sort.by.groups = FALSE,    
+          x.text.angle = 90          
+          )
+```
+
+
+```{r}
+doublets_cells <- colnames(seurat)[which(colnames(seurat) %in% multiome_doublets$barcode)]
+length(doublets_cells)
+```
+
+## Visualize the projection of the doublets cells onto the scATAC-seq UMAP
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat, reduction = "umap",
+  cols.highlight = "darkred", cols= "grey",
+  cells.highlight= doublets_cells,
+  pt.size = 0.1
+)
+
+```
+## Scrublet prediction
+
+```{r}
+# Scrublet
+DimPlot(seurat, group.by = "scrublet_predicted_doublet_atac")
+table(seurat$scrublet_predicted_doublet_atac)
+```
+
+## QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_peaks",
+  "nFeature_peaks"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x)
+  p
+})
+qc_gg
+```
+
+## Annotation probability
+
+```{r}
+qc_vars <- c(
+  "annotation_prob")
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x)
+  p
+})
+qc_gg
+```
+
+## Chromatin Signature
+
+```{r}
+qc_vars <- c("NBC.MBC", "GCBC", "PC", "CD4.T", "Cytotoxic",
+             "myeloid", "FDC", "PDC")
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, feature = x, max.cutoff = 4, min.cutoff = -4) + scale_color_viridis_c(option = "magma")
+  p
+})
+qc_gg
+```
+
+## Projection of the scRNA-seq clusters to scATAC-seq UMAP
+Annotation level 3 for scATAC will be defined "a priori" as unannotated and the scRNA annotation will be transfered to the scATAC-multiome cells based on the same cell barcode.
+
+```{r fig.wide=TRUE}
+cell_testing <- c("NBC_MBC", "GCBC", "PC", "CD4_T","Cytotoxic")
+
+if (unique(seurat$annotation_level_1) %in% cell_testing){
+  seurat_df <- data.frame(cell_barcode = colnames(seurat)[seurat$assay == "scATAC"])
+  seurat_df$seurat_clusters <- "unannotated"
+  
+  df_all <- rbind(tonsil_RNA_annotation,seurat_df)
+  rownames(df_all) <- df_all$cell_barcode
+  df_all <- df_all[colnames(seurat), ]
+  
+  seurat$seurat_clusters <- df_all$seurat_clusters
+  seurat@meta.data$annotation_prob  <- 1
+  melt(table(seurat$seurat_clusters))
+  table(is.na(seurat$seurat_clusters))
+
+  p3 <- DimPlot(seurat,
+              group.by = "seurat_clusters",
+              pt.size = 0.5) 
+  p3
+}
+
+p2
+```
+
+## UMAP level 1
+
+```{r}
+umap_level_1 <- FeatureScatter(
+  seurat,
+  "UMAP_1_level_1",
+  "UMAP_2_level_1",
+  group.by = "annotation_level_1"
+)
+umap_level_1 <- umap_level_1 +
+  theme(
+    #legend.position = "none",
+    plot.title = element_blank()
+  )
+umap_level_1
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

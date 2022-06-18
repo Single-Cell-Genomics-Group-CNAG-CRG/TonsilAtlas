@@ -1,0 +1,16 @@
+subproject,gem_id,Library_Estimated_number_of_cells,Library_Fraction_reads_in_cells,Library_Mean_reads_per_cell,Library_Mean_used_reads_per_cell,Library_Number_of_reads,Library_Reads_mapped_to_TRA,Library_Reads_mapped_to_TRB,Library_Reads_mapped_to_any_V(D)J_gene,Library_Valid_barcodes,Sample_Cells_with_productive_TRA_contig,Sample_Cells_with_productive_TRB_contig,"Sample_Cells_with_productive_V-J_spanning_(TRA,_TRB)_pair",Sample_Cells_with_productive_V-J_spanning_pair,Sample_Estimated_number_of_cells,Sample_Median_TRA_UMIs_per_Cell,Sample_Median_TRB_UMIs_per_Cell,Sample_Number_of_cells_with_productive_V-J_spanning_pair,Sample_Paired_clonotype_diversity
+BCLLATLAS_33,ifZOgenn_TpMNTvBa,330,20.98%,"167,384","18,356","55,236,687",11.74%,19.19%,31.38%,75.51%,87.88%,99.09%,86.97%,86.97%,330,9,25,287,318.42
+BCLLATLAS_33,mLuLpVxi_v0fLyotc,304,19.63%,"298,858","30,473","90,852,959",13.78%,18.73%,33.02%,75.82%,89.14%,97.70%,86.84%,86.84%,304,10,25,264,285.23
+BCLLATLAS_38,B20O1bh7_VmM99YZJ,206,17.55%,"676,355","41,357","139,329,171",20.59%,17.22%,37.94%,78.61%,89.81%,99.51%,89.32%,89.32%,206,8,18,184,204.02
+BCLLATLAS_38,WToIzInl_LudU7hVX,316,24.52%,"393,738","27,904","124,421,241",12.39%,14.08%,26.70%,76.34%,89.24%,98.10%,87.34%,87.34%,316,7,16,276,316.00
+BCLLATLAS_38,rdFRFhrU_ZdYeOZlf,237,18.07%,"602,527","42,757","142,799,012",17.61%,21.56%,39.49%,78.57%,92.41%,99.58%,91.98%,91.98%,237,8,25,218,235.02
+BCLLATLAS_40,CfdzDgHe_IMOTbrIP,280,10.29%,"196,638","7,149","55,058,595",5.21%,7.15%,16.08%,68.74%,73.21%,97.50%,70.71%,70.71%,280,6,23,198,266.67
+BCLLATLAS_40,LxBTpkPO_8TcNpBg4,290,9.07%,"277,735","7,734","80,543,017",4.72%,6.54%,15.42%,68.64%,75.86%,98.62%,74.48%,74.48%,290,7,24,216,271.29
+BCLLATLAS_40,pseMjZsU_qgZNOhOQ,293,9.80%,"164,061","5,929","48,069,798",5.12%,6.92%,15.05%,70.38%,70.65%,98.29%,68.94%,68.94%,293,6,24,202,276.04
+BCLLATLAS_40,ujxNn2kq_lG2VLlYd,288,9.77%,"223,600","7,493","64,396,693",4.22%,7.86%,15.45%,73.81%,59.03%,97.57%,56.60%,56.60%,288,5,19,163,222.97
+BCLLATLAS_40,uqJAc4r9_BYScOzxA,297,9.66%,"228,706","8,452","67,925,766",4.93%,8.18%,17.33%,69.09%,63.30%,98.65%,61.95%,61.95%,297,7,22,184,283.63
+BCLLATLAS_46,BZEECBEG_GXkc6Q1y,"1,249",40.25%,"48,097","12,705","60,072,660",22.66%,36.18%,59.20%,85.97%,88.31%,98.40%,86.71%,86.71%,"1,249",7,18,"1,083","1,193.57"
+BCLLATLAS_46,HjqdPU0E_aGDmEY5F,720,29.75%,"88,674","16,313","63,845,576",24.42%,30.27%,55.13%,81.16%,89.44%,99.31%,88.75%,88.75%,720,7,20,639,691.20
+BCLLATLAS_46,KETfaLdx_Ub1mtE13,"1,626",41.46%,"22,757","6,326","37,003,653",20.05%,37.78%,58.33%,87.05%,83.39%,98.52%,81.92%,81.92%,"1,626",6,15,"1,332","1,446.32"
+BCLLATLAS_46,SOJZt9kY_qpnv20QN,817,31.16%,"81,452","15,351","66,546,184",20.41%,33.19%,54.29%,80.63%,85.68%,99.02%,84.70%,84.70%,817,8,20,692,757.65
+BCLLATLAS_46,XV1SLOR2_HRF5D9A3,"1,005",33.54%,"64,699","13,521","65,022,199",24.32%,32.16%,56.97%,81.41%,92.64%,98.61%,91.24%,91.24%,"1,005",8,20,917,915.71

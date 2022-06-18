@@ -1,0 +1,155 @@
+---
+title: "Merging Multiome libraries"
+author: "Paula Soler-Vila"
+output: 
+    BiocStyle::html_document:
+    toc: true
+toc_float: true
+number_sections: true
+---
+
+ ```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Objective
+
+The objective of this notebook is to merge multiple Multiome Seurat objects combining the scRNA data and the unified scATAC data.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(EnsDb.Hsapiens.v86)
+library(ggpubr)
+
+set.seed(173)
+```
+
+## Parameters
+```{r}
+# Paths
+path_to_object <- here::here("multiome/results/R_objects/2.tonsil_multiome_filtered.rds")
+path_to_save_object <- here::here("multiome/results/R_objects/3.tonsil_multiome_filtered_combined.rds")
+```
+
+## Functions
+
+```{r}
+peaks_quantification <- function(seurat_filtered, peaks = combined.peaks){ 
+    counts <- FeatureMatrix(
+    fragments = Fragments(seurat_filtered),
+    features = combined.peaks,
+    cells = colnames(seurat_filtered))
+    seurat_filtered[["peaks"]] <- CreateChromatinAssay(
+      counts, 
+      genome = "hg38",
+      fragments = Fragments(seurat_filtered),
+      annotation = annotation)
+    
+    return(seurat_filtered)
+}
+
+default_assays <- function(seurat_object){
+  DefaultAssay(seurat_object) <- "ATAC"
+  return(seurat_object)
+}
+```
+
+
+## Load list of filtered seurat objects
+```{r}
+tonsil_data_filtered = readRDS(path_to_object)
+```
+
+### Filter out the entire BCLL2 sample
+Looking at the overall quality control and the analysis performed at the scRNAseq data level, we observed that this sample could lead to misinterpretation of the data. We have seen specific clusters of this sample without knowing whether it is a technical or biological variability and for this reason we decided to eliminate it from the scATAC analysis.
+
+```{r}
+unique(tonsil_data_filtered[[9]]$library_name)
+unique(tonsil_data_filtered[[10]]$library_name)
+unique(tonsil_data_filtered[[11]]$library_name)
+
+tonsil_data_filtered <- tonsil_data_filtered[1:8]
+```
+
+## Gene annotation
+Extraction of gene annotations from EnsDb using hg38 as the reference assembly.
+
+```{r}
+annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86,standard.chromosomes = T)
+seqlevelsStyle(annotation) <- "UCSC"
+genome(annotation) <- "hg38"
+```
+
+## scATAC data
+
+### Unified peaks
+When we merge multiples scATACseq experiments, it's essential to be aware that the peak calling was done individually per each library, which means that peaks are unlikely to be exactly the same. We need to create a common set of peaks across the cells doing the intersection of them.
+
+```{r fig.wide=TRUE}
+# Create a unified set of peaks
+tonsil_data_filtered <- lapply(tonsil_data_filtered, default_assays)
+combined.peaks <- UnifyPeaks(object.list = tonsil_data_filtered, mode = "reduce") 
+
+# Keeping only standard chromosomes
+combined.peaks <- keepStandardChromosomes(combined.peaks, pruning.mode = 'coarse')
+peakwidths <- width(combined.peaks)
+
+ggviolin(peakwidths,add = "boxplot",fill = "gray") + scale_y_log10() + 
+  geom_hline(yintercept = c(20,10000), linetype='dashed', col = 'black')
+
+combined.peaks <- combined.peaks[peakwidths < 10000 & peakwidths > 20]
+combined.peaks
+
+tonsil_filtered_unified_peaks <- lapply(tonsil_data_filtered, peaks_quantification)
+```
+
+# Removing ATAC assay to reduce the size of the final seurat object,
+```{r}
+remove_assays <- function(seurat_object){
+  DefaultAssay(seurat_object) <- "peaks"
+  seurat_object@assays[["ATAC"]] <- NULL
+  
+  RenameAssays(object = seurat_object, peaks = 'ATAC')
+  return(seurat_object)
+}
+
+tonsil_filtered_unified_peaks <- lapply(tonsil_filtered_unified_peaks, remove_assays)
+```
+
+## Merging dataset
+```{r}
+object1 <- tonsil_filtered_unified_peaks[[1]]
+object2 <- tonsil_filtered_unified_peaks[[2]]
+object3 <- tonsil_filtered_unified_peaks[[3]]
+object4 <- tonsil_filtered_unified_peaks[[4]]
+object5 <- tonsil_filtered_unified_peaks[[5]]
+object6 <- tonsil_filtered_unified_peaks[[6]]
+object7 <- tonsil_filtered_unified_peaks[[7]]
+object8 <- tonsil_filtered_unified_peaks[[8]]
+
+merged <- merge(object1, y = list(object2, object3, object4, object5, object6,
+                                  object7, object8), 
+add.cell.ids = c("co7dzuup_xuczw9vc","qmzb59ew_t11l8dzm","ulx1v6sz_8a2nvf1c",
+                 "wdp0p728_jf6w68km","pd9avu0k_kf9ft6kk","vuuqir4h_wfkyb5v8",
+                 "admae8w2_89i88tvv","sr20954q_yiuuoxng"))
+
+## Adding gem_id column using the ids from each cell.
+
+m = strsplit(colnames(merged), '_')
+merged$gem_id <- sapply(lapply(m, '[', 1:2), paste, collapse = '_')
+
+saveRDS(merged,path_to_save_object)
+```
+
+```{r}
+sessionInfo()
+```

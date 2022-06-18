@@ -1,0 +1,10 @@
+FileNotFoundError in line 20 of /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/Snakefile:
+[Errno 2] No such file or directory: 'data/tonsil_atlas_metadata.csv'
+  File "/home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/Snakefile", line 20, in <module>
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 605, in read_csv
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 457, in _read
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 814, in __init__
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 1045, in _make_engine
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 1862, in __init__
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/parsers.py", line 1357, in _open_handles
+  File "/scratch/groups/hheyn/software/anaconda3/envs/snakemake_env/lib/python3.9/site-packages/pandas/io/common.py", line 639, in get_handle

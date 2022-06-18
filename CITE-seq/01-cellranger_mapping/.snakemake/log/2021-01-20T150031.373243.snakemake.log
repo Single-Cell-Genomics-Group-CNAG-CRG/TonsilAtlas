@@ -1,0 +1,78 @@
+Building DAG of jobs...
+Using shell: /bin/bash
+Provided cores: 4
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	15	make_cellranger
+	2	write_fastqs
+	18
+Select jobs to execute...
+
+[Wed Jan 20 15:00:32 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_33/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_33/jobs/ifZOgenn_TpMNTvBa/ifZOgenn_TpMNTvBa.cmd
+    jobid: 19
+    wildcards: subproject=BCLLATLAS_33, gem_id=ifZOgenn_TpMNTvBa
+
+
+[Wed Jan 20 15:00:32 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_33/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_33/jobs/mLuLpVxi_v0fLyotc/mLuLpVxi_v0fLyotc.cmd
+    jobid: 8
+    wildcards: subproject=BCLLATLAS_33, gem_id=mLuLpVxi_v0fLyotc
+
+
+[Wed Jan 20 15:00:32 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/XV1SLOR2_HRF5D9A3/XV1SLOR2_HRF5D9A3.cmd
+    jobid: 4
+    wildcards: subproject=BCLLATLAS_46, gem_id=XV1SLOR2_HRF5D9A3
+
+
+[Wed Jan 20 15:00:32 2021]
+localrule make_cellranger:
+    input: projects/BCLLATLAS_46/fastq_paths.csv, data/tonsil_atlas_metadata.csv, data/tonsil_atlas_cite_seq_reference.csv
+    output: projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd
+    jobid: 15
+    wildcards: subproject=BCLLATLAS_46, gem_id=HjqdPU0E_aGDmEY5F
+
+[Wed Jan 20 15:00:33 2021]
+Error in rule make_cellranger:
+    jobid: 15
+    output: projects/BCLLATLAS_46/jobs/HjqdPU0E_aGDmEY5F/HjqdPU0E_aGDmEY5F.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_46 --gem_id HjqdPU0E_aGDmEY5F --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_46/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:00:33 2021]
+Error in rule make_cellranger:
+    jobid: 8
+    output: projects/BCLLATLAS_33/jobs/mLuLpVxi_v0fLyotc/mLuLpVxi_v0fLyotc.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_33 --gem_id mLuLpVxi_v0fLyotc --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_33/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:00:33 2021]
+Error in rule make_cellranger:
+    jobid: 19
+    output: projects/BCLLATLAS_33/jobs/ifZOgenn_TpMNTvBa/ifZOgenn_TpMNTvBa.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_33 --gem_id ifZOgenn_TpMNTvBa --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_33/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+[Wed Jan 20 15:00:33 2021]
+Error in rule make_cellranger:
+    jobid: 4
+    output: projects/BCLLATLAS_46/jobs/XV1SLOR2_HRF5D9A3/XV1SLOR2_HRF5D9A3.cmd
+    shell:
+        python scripts/3-make_cellranger.py --subproject BCLLATLAS_46 --gem_id XV1SLOR2_HRF5D9A3 --metadata data/tonsil_atlas_metadata.csv --feat_ref data/tonsil_atlas_cite_seq_reference.csv --fastq_paths projects/BCLLATLAS_46/fastq_paths.csv
+        (one of the commands exited with non-zero exit code; note that snakemake uses bash strict mode!)
+
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look above for error message
+Complete log: /home/devel/srashmi/tonsil_atlas_20210114/1-cellranger_mapping/.snakemake/log/2021-01-20T150031.373243.snakemake.log

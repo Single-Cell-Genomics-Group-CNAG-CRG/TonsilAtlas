@@ -1,0 +1,228 @@
+---
+title: "Project ATAC-seq onto multiome (level 1)"
+author: "Paula Soler-Vila and Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+This script transfers the annotation (level 1) and UMAP coordinates from multiome to scATAC-seq.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(harmony)
+library(caret)
+library(class)
+library(tidyverse)
+library(here)
+```
+
+
+## Parameters
+
+```{r}
+# Parameters and thresholds
+optimal_k <- 5
+
+
+# Source functions
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+# source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/SLOcatoR_functions.R")
+
+
+
+# path_to_save_integrated <- here::here("scATAC-seq/results/R_objects/integrated_atac_seq_multiome.rds")
+```
+
+
+## Read data
+
+```{r}
+integrated <- readRDS(path_to_atac_seq)
+final_cells_df <- readRDS(path_to_save_df_multi_myeloid)
+# integrated <- readRDS("~/Desktop/PhD/scATAC/8.3.tonsil_peakcalling_annotation_level1_signature_downsampled.rds")
+# final_cells_df <- readRDS("~/Desktop/PhD/scATAC/dataframe_with_all_cells_20210929.rds")
+integrated
+head(final_cells_df)
+```
+
+
+# Harmonize dataset
+
+Here we will save the Seurat object derived from the chromatin accessibility analysis to distribute with the preprint. Thus, let us harmonize the column names of the metadata, in line with what we did for other omics
+
+```{r}
+integrated$barcode <- colnames(integrated)
+integrated$is_facs_sorted <- integrated$technique
+integrated$UMAP_1_level_1 <- NA
+integrated$UMAP_2_level_1 <- NA
+integrated$annotation_figure_1 <- NA
+integrated$annotation_prob <- NA
+integrated$UMAP_1_20220215 <- Embeddings(integrated, "umap")[, "UMAP_1"]
+integrated$UMAP_2_20220215 <- Embeddings(integrated, "umap")[, "UMAP_2"]
+if (all(selected_cols_atac %in% colnames(integrated@meta.data))) {
+  integrated@meta.data <- integrated@meta.data[, selected_cols_atac]
+} else {
+  stop("Some columns are not present!")
+}
+```
+
+
+We noticed that the ATAC-seq fraction of the BCLL-2-T donor (old adult) profiled with multiome was of poor-quality, so we excluded it. We will use as training set the multiome cells that were used in both gene expression and chromatin accessibility analysis, and as test set (1) multiome cells that were only used in ATAC and (2) scATAC-seq cells:
+
+```{r}
+integrated$type <- ifelse(
+  colnames(integrated) %in% final_cells_df$barcode,
+  "reference",
+  "query"
+)
+Idents(integrated) <- "assay"
+
+
+# Define variables to predict
+ref_barcodes <- colnames(integrated)[integrated$type == "reference"]
+annot_figure_1 <- final_cells_df[ref_barcodes, "annotation_figure_1"]
+umap_1_level_1 <- final_cells_df[ref_barcodes, "UMAP_1_level_1"]
+umap_2_level_1 <- final_cells_df[ref_barcodes, "UMAP_2_level_1"]
+integrated$annotation_figure_1[ref_barcodes] <- annot_figure_1
+integrated$UMAP_1_level_1[ref_barcodes] <- umap_1_level_1
+integrated$UMAP_2_level_1[ref_barcodes] <- umap_2_level_1
+```
+
+
+
+# Integrate with Harmony
+
+```{r}
+# Not needed in the end because I do not subset, so we keep the same harmony and UMAP coords!
+
+# integrated <- integrate_assays_atac(
+#   seurat_obj = integrated,
+#   n_dim = 40,
+#   assay_use = "peaks_macs",
+#   group_by_vars = "gem_id",
+#   reduction = "lsi"
+# )
+# integrated <- RunUMAP(integrated, dims = 2:40, reduction = "harmony")
+# DimPlot(integrated, split.by = "assay", group.by = "assay")
+# VlnPlot(integrated, "nFeature_peaks", group.by = "assay", pt.size = 0)
+```
+
+
+# Create training and test sets
+
+
+```{r}
+data_sets <- split_training_and_test_sets(
+  integrated,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+data_sets$training_set <- data_sets$training_set[, 2:30]
+data_sets$test_set <- data_sets$test_set[, 2:30]
+```
+
+
+# Find optimal K
+
+```{r}
+# optimal_k_df <- find_optimal_k(
+#   seurat_obj = integrated,
+#   training_set = data_sets$training_set,
+#   response_var = "annotation_level_1",
+#   return_plot = TRUE
+# )
+# optimal_k_df$df
+# optimal_k_df$plot
+```
+
+
+# Transfer label
+
+```{r}
+annotation_data  <- transfer_label(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  response_var = "annotation_figure_1"
+)
+```
+
+
+# Predict UMAP coords
+
+```{r}
+umap_coords <- transfer_umap_coords(
+  seurat_obj = integrated,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = optimal_k,
+  umap1_var = "UMAP_1_level_1",
+  umap2_var = "UMAP_2_level_1"
+)
+
+annotation_atac_df <- left_join(
+  annotation_data,
+  umap_coords,
+  by = "query_cells"
+)
+annotation_atac_df <- as.data.frame(annotation_atac_df)
+rownames(annotation_atac_df) <- annotation_atac_df$query_cells
+ggplot(annotation_atac_df, aes(UMAP1, UMAP2, color = annotation)) +
+  geom_point(size = 0.4) +
+  scale_color_manual(values = color_palette) +
+  theme_classic()
+ggplot(annotation_atac_df, aes(UMAP1, UMAP2, color = annotation_prob)) +
+  geom_point(size = 0.4) +
+  scale_color_viridis_c(option = "magma") +
+  theme_classic()
+```
+
+
+# Save
+
+```{r}
+# Update and save scATAC-seq object
+integrated$annotation_figure_1[rownames(annotation_atac_df)] <- annotation_atac_df$annotation
+integrated$annotation_prob[rownames(annotation_atac_df)] <- annotation_atac_df$annotation_prob
+integrated$UMAP_1_level_1[rownames(annotation_atac_df)] <- annotation_atac_df$UMAP1
+integrated$UMAP_2_level_1[rownames(annotation_atac_df)] <- annotation_atac_df$UMAP2
+saveRDS(integrated, path_to_save_tonsil_atac)
+
+
+# Save metadata to plot figure 1
+saveRDS(integrated@meta.data, path_to_save_atac_seq_df)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

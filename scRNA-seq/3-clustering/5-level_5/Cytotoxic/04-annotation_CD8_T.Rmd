@@ -1,0 +1,110 @@
+---
+title: "Cytotoxic: Annotation level 5"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here we will annotate the CD8 T cells, as established by the annotation team. 
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+path_to_cd8 <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/paper/CD8_T_level_5_integrated_all_scRNA_multiome.rds"
+path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_5/Cytotoxic/paper/CD8_T_level_5_annotated_level_5.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+```
+
+
+## Read data
+
+```{r}
+seurat <- readRDS(path_to_cd8)
+DimPlot(seurat, cols = color_palette)
+```
+
+
+# Annotation
+
+```{r}
+seurat$clusters_level_5 <- seurat$annotation_level_5
+seurat$annotation_paper <- case_when(
+  seurat$clusters_level_5 == "0" ~ "Naive CD8 T",
+  seurat$clusters_level_5 == "1" ~ "CXCR6+ RM CD8 T",
+  seurat$clusters_level_5 == "3" ~ "CM CD8 T",
+  seurat$clusters_level_5 == "4" ~ "DN",
+  seurat$clusters_level_5 == "5" ~ "RM CD8 T",
+  seurat$clusters_level_5 == "8_0" ~ "TCRVδ+ gd T",
+  seurat$clusters_level_5 == "8_1" ~ "CD56+ gd T",
+  seurat$clusters_level_5 == "9" ~ "DC recruiters CD8 T",
+  seurat$clusters_level_5 == "10" ~ "SCM CD8 T",
+  seurat$clusters_level_5 == "11" ~ "CD8 Tf",
+  seurat$clusters_level_5 == "12" ~ "MAIT",
+  seurat$clusters_level_5 == "13" ~ "TCRVδ+ gd T",
+  seurat$clusters_level_5 == "14" ~ "Nksig CD8 T",
+  seurat$clusters_level_5 == "15" ~ "doublets",
+  seurat$clusters_level_5 == "16" ~ "IFN CD8 T"
+)
+cd8_levels <- c("Naive CD8 T", "SCM CD8 T", "CM CD8 T", "RM CD8 T",
+                "CXCR6+ RM CD8 T", "DC recruiters CD8 T", "CD8 Tf",
+                "IFN CD8 T", "Nksig CD8 T", "CD56+ gd T", "TCRVδ+ gd T",
+                "MAIT", "DN", "doublets")
+seurat$annotation_paper <- factor(
+  seurat$annotation_paper,
+  levels = cd8_levels
+)
+Idents(seurat) <- "annotation_paper"
+DimPlot(seurat, cols = color_palette)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

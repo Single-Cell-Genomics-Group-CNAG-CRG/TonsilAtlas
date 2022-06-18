@@ -1,0 +1,18 @@
+#!/bin/bash
+    
+#SBATCH --job-name="indj51br_urakqcmi"
+#SBATCH --workdir=.
+#SBATCH --mail-type=all
+#SBATCH --mail-user=ramon.massoni@cnag.crg.eu
+#SBATCH --error=./log/indj51br_urakqcmi_%x_%J.err
+#SBATCH --output=./log/indj51br_urakqcmi_%x_%J.out
+#SBATCH --time=20:00:00
+#SBATCH --cpus-per-task=16
+
+
+echo [`date "+%Y-%m-%d %T"`] starting job on $HOSTNAME
+
+/scratch/groups/hheyn/software/cellranger/4.0.0/cellranger count --fastqs /scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_07/jobs/indj51br_urakqcmi/fastq --id indj51br_urakqcmi --chemistry SC3Pv3 --expect-cells 5000 --localcores 24 --localmem 64 --transcriptome /scratch/groups/hheyn/data/reference/refdata-gex-GRCh38-2020-A;
+
+
+echo [`date "+%Y-%m-%d %T"`] job finished

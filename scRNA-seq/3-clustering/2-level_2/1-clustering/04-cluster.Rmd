@@ -1,0 +1,91 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Cluster (level 2):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+# Introduction
+
+The objective of this notebook is to cluster cells at a low resolution that allows us to "fetch" the clusters that are potential doublets, so that we can easily exclude them.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- str_c(
+  here::here("scRNA-seq/results/R_objects/level_2/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_integrated_level_2.rds",
+  sep = ""
+)
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "chocolate1", "coral2", "blueviolet",
+                   "brown1", "darkmagenta", "deepskyblue1", "dimgray",
+                   "deeppink1", "green", "lightgray", "hotpink1",
+                   "indianred4", "khaki", "mediumorchid2")
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Cluster
+
+```{r}
+resolutions <- c(0.025, 0.05, 0.1, 0.2, 0.3, 0.4)
+seurat <- FindClusters(seurat, resolution = resolutions)
+vars <- str_c("RNA_snn_res.", resolutions)
+umap_clusters <- purrr::map(vars, function(x) {
+  p <- DimPlot(seurat, group.by = x, cols = color_palette)
+  p
+})
+umap_clusters
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

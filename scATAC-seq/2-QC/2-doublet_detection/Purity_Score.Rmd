@@ -1,0 +1,181 @@
+---
+title: "Purity Score"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Objective
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(ComplexUpset)
+library(ggplot2)
+library(plyr)
+
+set.seed(173)
+options(scipen=999)
+```
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scATAC-seq/results/R_objects/8.tonsil_atac_integrated_with_multiome_annotated_level1.rds")
+path_to_macs2 <- here::here("scATAC-seq/results/files/1.MACS_annotation_level_1.tsv")
+```
+
+# Preliminary annotation level 1
+
+```{r fig.wide=TRUE}
+tonsil.atac = readRDS(path_to_obj)
+tonsil.atac
+
+DimPlot(
+  tonsil.atac, 
+  group.by = "annotation_level_1",
+  cols = c("#a6cee3", "#1f78b4","#b2df8a", 
+             "#33a02c", "#fb9a99","#e31a1c", 
+             "#fdbf6f", "#ff7f00","#cab2d6",
+             "#6a3d9a","#ffff99"),
+  pt.size = 0.1
+)
+```
+
+# Spot potential doublets
+
+## Scrublet prediction
+
+```{r fig.wide=TRUE}
+FeaturePlot(tonsil.atac, "scrublet_doublet_scores_atac")
+```
+
+## QC metrics
+
+```{r fig.wide=TRUE}
+qc_vars <- c(
+  "nCount_ATAC",
+  "nFeature_ATAC"
+  )
+
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(tonsil.atac, features = x)
+  p
+})
+qc_gg
+```
+
+## Purity Score
+
+### Intersection peaks
+
+```{r}
+peaks = read.table(path_to_macs2)
+peaks_freq = data.frame(table(peaks$peak_called_in))
+nrow(peaks_freq)
+
+data_filter = peaks_freq[peaks_freq$Freq > 50,]
+nrow(data_filter)
+
+dat <- peaks_freq
+groups <- as.character(levels(tonsil.atac$annotation_level_1))
+subsets <- peaks$peak_called_in
+
+mat <- map_dfc(subsets, str_detect, groups) %>%
+    data.frame() %>%
+    t() %>% # transpose the result, ugh
+    as_tibble()
+colnames(mat)  <- groups
+mat$count <- dat$count
+```
+
+
+```{r}
+options(repr.plot.width=20, repr.plot.height=10)
+
+ComplexUpset::upset(data = mat, intersect = groups,
+      name="Peaks Groupings by Cell Type", 
+      min_size = 1000,
+      width_ratio = 0.125) 
+```
+
+
+### Purity score
+From the intersection data, we decided to create a purity score to asses how many a peak are unique or share across cell type.
+
+```{r}
+purity_score <- function(peaks_freq = peaks_freq, cluster_type)
+{
+  cluster = peaks_freq[grep(cluster_type, peaks_freq$Var1),]
+  cluster_sharing= nchar(gsub('[^,]', '', cluster[grep(cluster_type, cluster$Var1),]$Var1))+1
+  cluster$peaks_cluster = cluster$Freq * cluster_sharing
+  PS = cluster[cluster$Var1 == cluster_type,]$peaks_cluster / sum(cluster[cluster$Var1 != 1,]$peaks_cluster)
+  return(PS)
+  }
+```
+
+```{r fig.wide=TRUE}
+cluster_types = levels(tonsil.atac$annotation_level_1)
+ps_values = c()
+
+for (cluster in cluster_types) 
+{
+ ps_value = purity_score(peaks_freq = peaks_freq, cluster)
+ ps_values = c(ps_values,ps_value)
+}
+
+df = data.frame(cluster_types,ps_values)
+df$ps_values = round(df$ps_values,4)
+colnames(df) <- c("seurat_clusters","purity_score")
+ 
+ggplot(data=df, aes(x=as.factor(cluster_types), y=ps_values/sum(ps_values))) +
+  geom_bar(stat="identity") + theme_minimal()
+```
+
+```{r}
+tonsil.atac@meta.data$purity_score <- revalue(
+  tonsil.atac@meta.data$annotation_level_1,
+  c(
+    "NBC_MBC" = 0.0198,
+    "GCBC" = 0.0525,
+    "PC" = 0.0107,
+    "CD4_T" = 0.0248,
+    "Cytotoxic" = 0.0085,
+    "myeloid" = 0.0246,
+    "FDC" = 0.0839,
+    "PDC" = 0.0102,
+    "epithelial" = 0.0744
+  )
+)
+
+tonsil.atac@meta.data$purity_score <- log10(as.numeric(as.character(tonsil.atac@meta.data$purity_score)))
+```
+
+```{r fig.wide=TRUE}
+options(repr.plot.width=10, repr.plot.height=10)
+FeaturePlot(tonsil.atac, "purity_score",cols = c("red", "blue"))
+```
+```{r}
+sessionInfo()
+```
+

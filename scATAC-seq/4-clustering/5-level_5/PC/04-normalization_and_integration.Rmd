@@ -1,0 +1,204 @@
+---
+title: "Normalization and Batch Effect Correction after the new Peak calling"
+author: "Paula Soler-Vila & Sergio Aguilar-Fernández"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The new peak calling round applied on the previous notebook significantly increased the number of the features identified in our dataset. Therefore, we must need to repeat the standard downstream analysis, including data normalization, dimensionality reduction analysis and batch correction to account for this change in the number of features detected.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(Signac)
+library(harmony)
+library(tidyverse)
+library(unikn) 
+
+set.seed(1234)
+```
+
+## Parameters
+
+```{r parameters}
+cell_type = "PC"
+
+# Paths
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/03.",
+  cell_type,
+  "_peak_calling_level_5.rds",
+  sep = ""
+)
+
+path_to_save <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+```
+
+## Color palette
+```{r palette}
+Precursor <- c("PC committed Light Zone GCBC", "Early PC precursor")
+IgM_pathway <- c("Short lived IgM+ PC","IgM+ early PC precursor", "IgM+ PC precursor", "preMature IgM+ PC", "Mature IgM+ PC")
+IgG_pathway <- c("IgG+ PC precursor", "preMature IgG+ PC")
+Proli <- c("PB committed early PC precursor", "Transitional PB", "PB")
+Mature_IgG <- c( "Mature IgG+ PC", "MBC derived IgG+ PC")
+Mature_IgA <- c( "Mature IgA+ PC", "MBC derived IgA+ PC")
+IgD <- c("IgD PC precursor")
+Memory <- c("class switch MBC", "MBC derived early PC precursor", "MBC derived PC precursor")
+DZ <- c("Dark Zone GCBC", "Light Zone GCBC", "DZ migratory PC precursor")
+
+
+
+my_pal_prec <- c(seecol("pal_peach", n=5)[c(2,5)])
+names(my_pal_prec) <- Precursor
+#my_pal_igm <- seecol("pal_seegruen", n=length(IgM_pathway))
+my_pal_igm <- c("#99CC99", "#66B266", "#198C19", "#006600", "#003300")
+names(my_pal_igm) <- IgM_pathway
+my_pal_igg <- seecol("pal_seeblau", n=5)[c(2,5)]
+names(my_pal_igg) <- IgG_pathway
+my_pal_matureigg <- rev(seecol("pal_karpfenblau", n=5)[c(3,5)])
+names(my_pal_matureigg) <- Mature_IgG
+#my_pal_matureiga <- rev(seecol("pal_bordeaux", n=5)[c(2,5)])
+my_pal_matureiga <- rev(c("#896B60", "#4A332D"))
+names(my_pal_matureiga) <- Mature_IgA
+my_pal_mbc <- rev(seecol("pal_petrol",  n=5)[c(1,3,5)])
+names(my_pal_mbc) <- Memory
+my_pal_proli <- rev(seecol("pal_pinky", n=length(Proli)))
+names(my_pal_proli) <- Proli
+my_pal_igd <- c('#FFD8B1')
+names(my_pal_igd) <- IgD
+my_pal_dz <- c(seecol("pal_grau", n=2), "#D94701") #E56C72
+names(my_pal_dz) <- DZ
+
+
+palette <- c(my_pal_prec, my_pal_igm, my_pal_igg, my_pal_matureigg, my_pal_matureiga, my_pal_mbc, my_pal_proli, my_pal_igd, my_pal_dz)
+```
+
+## Load data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+# Visualize UMAP without batch effect correction
+```{r}
+# Normalization, dimensionality reduction 
+seurat <- seurat %>%
+  RunTFIDF() %>% 
+  FindTopFeatures(min.cutoff = 5) %>%
+  RunSVD() %>%
+  RunUMAP(reduction = "lsi", dims = 2:40)
+
+DepthCor(seurat)
+```
+
+```{r}
+DimPlot(seurat, 
+        pt.size = 0.1)
+```
+
+```{r}
+# Visualize UMAP's confounders
+confounders <- c("library_name", "sex", "age_group", "hospital", "assay")
+umaps_before_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_before_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_before_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_before_integration[2:length(umaps_before_integration)]
+```
+
+# Run and visualize Harmony’s integration
+```{r}
+seurat <- RunHarmony(
+  object = seurat,
+  dims = 2:40,
+  group.by.vars = 'gem_id',
+  reduction = 'lsi',
+  assay.use = 'peaks_level_5',
+  project.dim = FALSE,
+  max.iter.harmony = 20)
+    
+# Non-linear dimension reduction and clustering
+seurat <- RunUMAP(seurat, dims = 2:11, reduction = 'harmony')
+
+p1 <- DimPlot(seurat, order = F,
+  cols = c("#73787E", "#B8BCC1",
+           "#FECFC7" ,"#FF8E7B",
+           "#a13b53",
+           "#A6E1F4", "#586BA4", 
+           "#323734","#035F72",
+           "#9CC6CF" ,"#198C19",
+           "#006600","#FFD8B1"),
+  pt.size = 0.6) + NoLegend()
+
+p2 <- FeaturePlot(seurat,"annotation_prob")
+
+p1 
+
+p2
+
+pdf(file = here::here("scATAC-seq/results/plots/PC/UMAP_final_annotation.pdf"), 
+    width = 6, height = 6)
+p1 
+dev.off()
+```
+
+```{r}
+# Visualize UMAP's confounders
+umaps_after_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_after_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_after_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, cell hashing status, sampling center and assay:")
+umaps_after_integration[2:length(umaps_before_integration)]
+```
+
+# Save
+
+```{r}
+# Save integrated Seurat object
+saveRDS(seurat, path_to_save)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+
+
+
+

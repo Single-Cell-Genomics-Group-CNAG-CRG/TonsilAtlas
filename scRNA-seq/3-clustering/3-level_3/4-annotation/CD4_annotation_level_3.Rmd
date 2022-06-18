@@ -1,0 +1,322 @@
+---
+title: "CD4 T: Annotation (level 3)"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The purpose of this notebook is to find subclusters and annotate CD4 T cells with the feedback we received from the annotation team.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/level_3/CD4_T/CD4_T_clustered_level_3_with_pre_freeze.rds")
+path_to_save <- here::here("scRNA-seq/results/R_objects/level_3/CD4_T/CD4_T_annotated_level_3.rds")
+path_to_save_df <- here::here("scRNA-seq/3-clustering/3-level_3/tmp/CD4_T/CD4_T_annotation_level_3_df.rds")
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Additional function
+plot_subcluster <- function(seurat_obj, pattern) {
+  p <- seurat_obj@reductions$umap@cell.embeddings %>%
+    as.data.frame() %>%
+    mutate(cluster = seurat_obj$annotation_level_3) %>%
+    filter(str_detect(cluster, pattern)) %>%
+    ggplot(aes(UMAP_1, UMAP_2, color = cluster)) +
+      geom_point(size = 0.1) +
+      theme_classic()
+  p
+}
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+```
+
+
+# Find Subclusters
+
+## Cluster 1
+
+```{r}
+seurat$annotation_level_3 <- seurat$seurat_clusters
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "1",
+  graph.name = "RNA_nn",
+  resolution = 0.25,
+  subcluster.name = "annotation_level_3"
+)
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+plot_subcluster(seurat, "^1_")
+```
+
+Markers:
+
+```{r}
+clusters_1 <- seurat$annotation_level_3 %>%
+  unique() %>%
+  str_subset("^1_") %>%
+  sort()
+markers_1 <- purrr::map(clusters_1, function(x) {
+  group_1 <- clusters_1[which(clusters_1 == x)]
+  group_2 <- clusters_1[which(clusters_1 != x)]
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_1) <- clusters_1
+DT::datatable(markers_1$`1_0`)
+DT::datatable(markers_1$`1_1`)
+```
+
+
+## Cluster 5
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "5",
+  graph.name = "RNA_snn",
+  resolution = 0.3,
+  subcluster.name = "annotation_level_3"
+)
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+plot_subcluster(seurat, "^5_")
+```
+
+
+Markers:
+
+```{r}
+clusters_5 <- seurat$annotation_level_3 %>%
+  unique() %>%
+  str_subset("^5_") %>%
+  sort()
+markers_5 <- purrr::map(clusters_5, function(x) {
+  group_1 <- clusters_5[which(clusters_5 == x)]
+  group_2 <- clusters_5[which(clusters_5 != x)]
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_5) <- clusters_5
+DT::datatable(markers_5$`5_0`)
+DT::datatable(markers_5$`5_1`)
+DT::datatable(markers_5$`5_2`)
+DT::datatable(markers_5$`5_3`)
+```
+
+
+## Cluster 9
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "9",
+  graph.name = "RNA_snn",
+  resolution = 0.15,
+  subcluster.name = "annotation_level_3"
+)
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+plot_subcluster(seurat, "^9_")
+```
+
+Markers:
+
+```{r}
+clusters_9 <- seurat$annotation_level_3 %>%
+  unique() %>%
+  str_subset("^9_") %>%
+  sort()
+markers_9 <- purrr::map(clusters_9, function(x) {
+  group_1 <- clusters_9[which(clusters_9 == x)]
+  group_2 <- clusters_9[which(clusters_9 != x)]
+  print(group_1)
+  print(group_2)
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_9) <- clusters_9
+DT::datatable(markers_9$`9_0`)
+DT::datatable(markers_9$`9_1`)
+DT::datatable(markers_9$`9_2`)
+DT::datatable(markers_9$`9_3`)
+```
+
+
+## Cluster 11
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "11",
+  graph.name = "RNA_nn",
+  resolution = 0.25,
+  subcluster.name = "annotation_level_3"
+)
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+plot_subcluster(seurat, "^11_")
+```
+
+
+Markers:
+
+```{r}
+clusters_11 <- seurat$annotation_level_3 %>%
+  unique() %>%
+  str_subset("^11_") %>%
+  sort()
+markers_11 <- purrr::map(clusters_11, function(x) {
+  group_1 <- clusters_11[which(clusters_11 == x)]
+  group_2 <- clusters_11[which(clusters_11 != x)]
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_11) <- clusters_11
+DT::datatable(markers_11$`11_0`)
+DT::datatable(markers_11$`11_1`)
+```
+
+
+# Annotation
+
+```{r}
+annotation_level_3 <- c(
+  "0" = "Naive",
+  "1_0" = "Follicular Th CXCL13+CBLB+",
+  "1_1" = "Follicular Th TOX2+",
+  "2" = "Follicular Th CXCR5+",
+  "3" = "Mitochondrial+ T cells",
+  "4" = "Central Mem PASK-",
+  "5_0" = "IL2RA+FOXP3+ Treg",
+  "5_1" = "Th17",
+  "5_2" = "Memory T cells",
+  "5_3" = "Doublets",
+  "6" = "CD8",
+  "7" = "Central Mem PASK+",
+  "8" = "Doublets",
+  "9_0" = "CD200+TOX+",
+  "9_1" = "Naive",
+  "9_2" = "metabolic/poor-quality",
+  "9_3" = "activated CD4 T",
+  "10" = "CD4 Non-Tfh KLRB1+ ",
+  "11_0" = "naive Treg IKZF2+",
+  "11_1" = "Treg IKZF2+HPGD+",
+  "12" = "Proliferative",
+  "13" = "Proliferative",
+  "14" = "poor-quality",
+  "15" = "poor-quality"
+)
+seurat$annotation_level_3 <- annotation_level_3[seurat$annotation_level_3]
+DimPlot(
+  seurat,
+  group.by = "annotation_level_3",
+  cols = color_palette,
+  pt.size = 0.2
+)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+seurat$cell_barcode <- colnames(seurat)
+df <- seurat@meta.data[, c("cell_barcode", "annotation_level_3")]
+saveRDS(df, path_to_save_df)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

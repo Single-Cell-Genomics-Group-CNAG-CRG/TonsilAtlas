@@ -1,0 +1,409 @@
+---
+title: "CD4-T III: BCL6 as a master regulator"
+author: "Paula Soler-Vila & Juan Nieto"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+Multiples factors play an important function during the naive CD4-T cell differentiation where Blimp1 (encoded by Prdm1) and Bcl6 are the masters. Taking advantatge of the Cicero's prediction, we are going to characterize the accessibility pattern not only at th level of specific gene, but also at the level of the co-accessibility regions to which gene belongs.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(GenomicRanges)
+library(pheatmap)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(data.table)
+library(ggpubr)
+library(plyr)
+library(stringr)
+```
+
+## Parameters
+```{r parameters}
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0",
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA",
+                    "#FBE426", "#16FF32",  "black",  "#3283FE",
+                    "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3", 
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", 
+                    "#822E1C", "coral2",  "#1CFFCE", "#1CBE4F", 
+                    "#3283FE", "#FBE426", "#F7E1A0", "#325A9B", 
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD",
+                    "#FEAF16", "#683B79", "#B10DA1", "#1C7F93", 
+                    "#F8A19F", "dark orange", "#FEAF16", 
+                    "#FBE426", "Brown")
+
+cell_type <- "CD4_T"
+
+path_to_obj <- paste0(
+  here::here("scATAC-seq/results/R_objects/level_5/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_5.rds",
+  sep = ""
+)
+
+path_to_cicero <- paste0(
+  here::here("scATAC-seq/results/Cicero/"),
+  cell_type,"/",
+  sep = ""
+)
+
+path_to_obj_general <- here::here("scATAC-seq/results/R_objects/8.4.tonsil_peakcalling_annotation_level1_chromVar.rds")
+
+upstream <- 2000
+```
+
+## Functions
+
+```{r functions}
+plot_dim <- function(seurat, group){
+  DimPlot(seurat, 
+  group.by = group,
+  cols = color_palette,
+  pt.size = 0.1,raster=FALSE)
+}
+
+mat_heatmap <- function(seurat, features, group,
+                        cutree_ncols,cutree_nrows){
+  avgexpr_mat <- AverageExpression(
+  features = features,
+  seurat,
+  assays = "peaks_level_5",
+  return.seurat = F,
+  group.by = group,
+  slot = "data")
+  
+  p1 <- pheatmap(avgexpr_mat$peaks_level_5, scale = "row",
+                angle_col = 45,
+                show_rownames=T,
+               border_color = "white",
+               cluster_rows = T,
+               cluster_cols = T,
+               fontsize_col = 10,
+               clustering_distance_rows = "euclidean",
+               clustering_distance_cols = "euclidean", 
+               clustering_method = "ward.D2",
+               cutree_rows = cutree_nrows, 
+               cutree_cols = cutree_ncols)
+  return(p1)}
+```
+
+
+# Load data
+
+## Gene reference data
+```{r}
+gene_reference <-  here::here("scATAC-seq/Cicero/genes.gtf")
+gtf <- rtracklayer::import(gene_reference)
+gtf_df <- as.data.frame(gtf)
+
+gtf_df_gene <- gtf_df[gtf_df$type == "gene",]
+DT::datatable(gtf_df_gene)
+
+# We are going to add 2000 bp upstream of each gene to take in acccount the proximal promoter regions
+gtf_df_gene$start <- gtf_df_gene$start - upstream
+```
+
+## Entire tonsil data
+```{r}
+tonsil <- readRDS(path_to_obj_general)
+tonsil
+
+tonsil_peaks <- tonsil@assays$peaks_macs@ranges
+
+plot_dim(tonsil, group = "annotation_level_1") 
+```
+
+## CD4-T cells data
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_peaks <- seurat@assays$peaks_level_5@ranges
+
+plot_dim(seurat, group = "annotation_paper") 
+```
+
+### Grouping the cells in Non-Tfh & Tfh groups
+At low level of resolution, we want to detect the main epigenomic changes between Non-Tfh vs Tfh. For this reason, we decide to group the cells in 4 clusters: Non-Tfh, Tfh, Central Memory and Naive.
+
+```{r}
+seurat@meta.data <- seurat@meta.data %>% mutate(Group =
+  case_when(annotation_paper == "Naive" ~ "Naive",
+    annotation_paper == "CM Pre-non-Tfh" ~ "Central Memory",
+    annotation_paper == "CM PreTfh" ~ "Central Memory",
+    annotation_paper == "T-Trans-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-Eff-Mem" ~ "Non-Tfh",
+    annotation_paper == "T-helper" ~ "Non-Tfh",
+    annotation_paper == "Tfh T:B border" ~ "Tfh",
+    annotation_paper == "Tfh-LZ-GC" ~ "Tfh",
+    annotation_paper == "GC-Tfh-SAP" ~ "Tfh",
+    annotation_paper == "GC-Tfh-0X40" ~ "Tfh",
+    annotation_paper == "Tfh-Mem" ~ "Tfh",
+    annotation_paper == "Memory T cells" ~ "Non-Tfh",
+    annotation_paper == "Eff-Tregs" ~ "Non-Tfh",
+    annotation_paper == "non-GC-Tf-regs" ~ "Non-Tfh",
+    annotation_paper == "GC-Tf-regs" ~ "Non-Tfh"))
+
+plot_dim(seurat, group = "Group") 
+```
+
+
+## Master regulators: BCL6 and PRDM1
+```{r}
+bcl6 <- gtf_df_gene[which(gtf_df_gene$gene_name %in% "BCL6"),]
+bcl6_gr <- makeGRangesFromDataFrame(bcl6)
+
+prdm1 <- gtf_df_gene[which(gtf_df_gene$gene_name %in% "PRDM1"),]
+prdm1_gr <- makeGRangesFromDataFrame(prdm1)
+```
+
+# Cicero
+```{r}
+conns <- read.table(paste0(path_to_cicero,
+                           "level_5_conns.tsv"), header = T)
+ccans <- read.table(paste0(path_to_cicero,
+                           "level_5_ccans.tsv"), header = T)
+
+links_T <- ConnectionsToLinks(conns = conns, 
+                              ccans = ccans, threshold = 0)
+Links(seurat) <- links_T
+```
+
+## BCL6
+
+```{r}
+# Overlapping bcl6 with seurat_peaks
+overlapping_bcl6_peaks <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, 
+bcl6_gr)),]
+
+bcl6_seurat_peaks_features <- paste0(
+  seqnames(overlapping_bcl6_peaks),"-",
+  start(overlapping_bcl6_peaks),"-",
+  end(overlapping_bcl6_peaks))
+
+
+# Overlapping bcl6 with links
+overlapping <- links_T[queryHits(findOverlaps(links_T, bcl6_gr)),]
+overlapping_peaks <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, 
+overlapping)),]
+
+features <- paste0(seqnames(overlapping_peaks),"-",
+                   start(overlapping_peaks),"-",
+                   end(overlapping_peaks))
+
+region_bcl6_links <-  paste0(unique(seqnames(overlapping_peaks)),"-",
+                       min(start(overlapping_peaks)),"-",
+                       max(end(overlapping_peaks)))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/bcl6_coverage_plot.pdf"), 
+ #   width = 10, 
+  #  height = 6)
+
+region.highlight_enhancer <- GRanges(seqnames = "chr3",
+                             ranges = IRanges(start = 187910000, 
+                                              end = 188001000))
+  
+CoveragePlot(object = seurat, 
+             region.highlight = region.highlight_enhancer,
+             group = "annotation_paper", 
+             region = region_bcl6_links)
+```
+
+
+```{r}
+mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "Group",
+            cutree_ncols = 2,
+            cutree_nrows = 1)
+
+mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "annotation_paper",
+            cutree_ncols = 2,cutree_nrows = 1)
+```
+
+### Potential enhancer of BCL6 at CD4 T cells level
+
+```{r}
+enhancer_region <- overlapping_peaks[start(overlapping_peaks) >= 187900000,]
+
+enhancer_features <- unique(paste0("chr3", "-",
+                          start(ranges(enhancer_region)), "-",
+                          end(ranges(enhancer_region))))
+
+region_plot <- paste0("chr3", "-",
+                      min(start(ranges(enhancer_region))),"-",
+                      max(end(ranges(enhancer_region))))
+
+
+CoveragePlot(object = seurat, 
+             region.highlight = region.highlight_enhancer,
+             group = "annotation_paper", 
+             region = region_plot)
+```
+
+
+#### AddChromatin module
+Finally, we can compute a combinatory score taking into account the peaks located at BCL6 gene level and the peaks located on the super enhancer region.
+
+```{r}
+seurat = AddModuleScore(
+  object = seurat,
+  features = list(bcl6_seurat_peaks_features),
+  name = 'BCL6_gene')
+
+seurat = AddModuleScore(
+  object = seurat,
+  features = list(enhancer_features),
+  name = 'BCL6_enhancer')
+
+bcl6_umap <- FeaturePlot(
+  seurat, min.cutoff = "q5", 
+  max.cutoff = "q95",
+  raster = F,
+  features = "BCL6_gene1",
+  pt.size = 0.3)
+
+bcl6_enhancer_umap <- FeaturePlot(seurat, 
+  min.cutoff = "q5", 
+  max.cutoff = "q95",
+  raster = F,
+  features = "BCL6_enhancer1",
+  pt.size = 0.3)
+
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/bcl6_umap_enhancer.pdf"), 
+#    width = 10, 
+#    height = 6)
+
+join = bcl6_umap |  bcl6_enhancer_umap
+print(join)
+
+#dev.off()
+```
+
+
+### Potential enhancer of BCL6 at tonsil level
+
+```{r}
+overlapping_bcl6_gw <- tonsil_peaks[queryHits(findOverlaps(tonsil_peaks, bcl6_gr)),]
+
+bcl6_peaks_gw <- paste0("chr3", "-",
+start(ranges(overlapping_bcl6_gw)),  "-",
+end(ranges(overlapping_bcl6_gw)))
+
+enhancer_region_gw <- tonsil_peaks[seqnames(tonsil_peaks) == "chr3" & 
+start(tonsil_peaks) >= 187910000 & 
+end(tonsil_peaks) <= 188001000,]
+
+enhancer_features_gw  <- unique(paste0("chr3", "-",
+start(ranges(enhancer_region_gw)), "-",
+end(ranges(enhancer_region_gw))))
+```
+
+
+#### AddChromatin module
+Finally, we can compute a combinatory score taking into account the peaks located at BCL6 gene level and the peaks located on the super enhancer region.
+
+```{r}
+tonsil = AddModuleScore(
+object = tonsil,
+features = list(bcl6_peaks_gw),
+name = 'BCL6_gene'
+)
+
+tonsil = AddModuleScore(
+object = tonsil,
+features = list(enhancer_features_gw),
+name = 'BCL6_enhancer'
+)
+
+bcl6_umap <- FeaturePlot(
+tonsil, 
+min.cutoff = "q5", 
+max.cutoff = "q95",
+raster = F,
+features = "BCL6_gene1",
+pt.size = 0.3)
+
+bcl6_enhancer_umap <- FeaturePlot(
+tonsil, 
+min.cutoff = "q5", 
+max.cutoff = "q95",
+raster = F,
+features = "BCL6_enhancer1",
+pt.size = 0.3)
+
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/entire_tonsil_umap_enhancer.pdf"), 
+ #   width = 10, 
+  #  height = 6)
+
+join = bcl6_umap |  bcl6_enhancer_umap
+print(join)
+```
+
+## PRDM1
+```{r}
+overlapping <- links_T[queryHits(findOverlaps(links_T, prdm1_gr)),]
+overlapping_peaks <- seurat_peaks[queryHits(findOverlaps(seurat_peaks, 
+                                                         overlapping)),]
+
+features <- paste0(seqnames(overlapping_peaks),"-",
+                   start(overlapping_peaks),"-",
+                   end(overlapping_peaks))
+
+region_plot <-  paste0(unique(seqnames(overlapping_peaks)),"-",
+                       min(start(overlapping_peaks)),"-",
+                       max(end(overlapping_peaks)))
+
+#pdf(file = here::here("scATAC-seq/results/plots/CD4-T/prdm1_coverage_plot.pdf"), 
+  #  width = 10, 
+ #   height = 6)
+
+CoveragePlot(object = seurat, group = "annotation_paper", region = region_plot)
+```
+
+
+```{r}
+mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "Group",
+            cutree_ncols = 2,
+            cutree_nrows = 1)
+
+mat_heatmap(seurat = seurat, 
+            features = features, 
+            group = "annotation_paper",
+            cutree_ncols = 2,cutree_nrows = 1)
+```
+
+```{r}
+sessionInfo()
+```
+

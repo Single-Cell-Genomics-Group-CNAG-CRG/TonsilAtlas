@@ -1,0 +1,65 @@
+###############################################################################
+#######################Snakefile tonsil atlas Multi    ########################
+###############################################################################
+
+# import modules
+import numpy as np
+import pandas as pd
+import os
+import sys
+sys.path.insert(1, "scripts/")
+import config_vars as cfg
+import subprocess
+
+
+# determine which rules to run in the login (head) node
+localrules: all, lims, write_fastqs, make_cellranger
+
+
+# Read metadata, define target files
+metadata = pd.read_csv("data/tonsil_atlas_metadata.csv", header = 0)
+JOBSCRIPTS = []
+for i in metadata.index:
+    subproject = metadata.loc[i, "subproject"]
+    gem_id = metadata.loc[i, "gem_id"]
+    JOBSCRIPTS.append("projects/{}/jobs/{}/{}.cmd".format(subproject, gem_id, gem_id))
+JOBSCRIPTS = list(set(JOBSCRIPTS))
+print(JOBSCRIPTS)
+
+
+# Execute pipeline for all target files
+rule all:
+    input: JOBSCRIPTS
+
+
+# obtain library-specific information from laboratory information management system (lims)
+rule lims:
+    output:
+        "projects/{subproject}/info.txt"
+    shell:
+        "./scripts/1-lims.sh {wildcards.subproject}"
+
+
+# get fastq paths by combining flowcell, lane and index for each library
+rule write_fastqs:
+    input:
+        info_file="projects/{subproject}/info.txt",
+        metadata="data/tonsil_atlas_metadata.csv"
+    output:
+        "projects/{subproject}/fastq_paths.csv"
+    shell:
+        "python scripts/2-write_fastq_paths.py --subproject {wildcards.subproject} --info_file {input.info_file} --metadata {input.metadata}"
+
+
+# create cellranger script and supporting files for each Gelbeads-in-Emulsion (GEM) well
+rule make_cellranger:
+    input:
+        fastq_paths="projects/{subproject}/fastq_paths.csv",
+        metadata="data/tonsil_atlas_metadata.csv",
+        feat_ref="data/tonsil_atlas_cite_seq_reference.csv"
+    output:
+        "projects/{subproject}/jobs/{gem_id}/{gem_id}.cmd"
+    shell:
+        "python scripts/3-make_cellranger.py --subproject {wildcards.subproject} --gem_id {wildcards.gem_id} --metadata {input.metadata} --feat_ref {input.feat_ref} --fastq_paths {input.fastq_paths}"
+
+

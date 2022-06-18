@@ -1,0 +1,151 @@
+---
+title: "Calling Peaks"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+Looking at the scATAC-seq coverage plots, it's possible to vislumbrate that, as a consequence of the merging process, some peaks show a considerable increase in size. This can create a problem for certain analysis such as motif enrichment analysis. In order to solve it, we decided to do a new round of peak calling using MACS2 for each group of cells annotated at level 1, helping to identify specifics peaks for rarer populations.  
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(reshape)
+library(ggplot2)
+library(GenomicRanges)
+library(seqsetvis)
+library(EnsDb.Hsapiens.v86)
+
+```
+
+## Parameters
+
+```{r parameters}
+path_to_ATAC <- here::here("scATAC-seq/results/R_objects/8.tonsil_atac_integrated_with_multiome_annotated_level1.rds")
+path_to_save <- here::here("scATAC-seq/results/files/1.MACS_annotation_level_1.tsv")
+path_to_ATAC_newpeaks <-  here::here("scATAC-seq/results/R_objects/8.1.tonsil_atac_integrated_with_multiome_annotated_level1_new_peakcalling.rds")
+```
+
+## Functions
+
+```{r functions}
+peaks_quantification <- function(seurat_filtered, new_peaks){ 
+    
+  annotation <- GetGRangesFromEnsDb(ensdb = EnsDb.Hsapiens.v86,standard.chromosomes = T)
+    seqlevelsStyle(annotation) <- "UCSC"
+    genome(annotation) <- "hg38"
+
+    macs2_counts <- FeatureMatrix(
+    fragments = Fragments(seurat_filtered),
+    features = new_peaks,
+    cells = colnames(seurat_filtered))
+    
+    seurat_filtered[["peaks_macs"]] <- CreateChromatinAssay(
+      counts = macs2_counts, 
+      genome = "hg38",
+      fragments = Fragments(seurat_filtered),
+      annotation = annotation)
+    
+    return(seurat_filtered)
+}
+```
+
+# Load data
+
+We need to load the scATAC integrated object and the Multiome weighted object. 
+
+```{r}
+tonsil.atac <- readRDS(path_to_ATAC)
+```
+
+Here, we can see the main clusters annotated thanks to the scRNA-seq data from the same cells and for the KNN algorithm.
+```{r fig.wide=TRUE}
+tonsil.atac <- SetIdent(tonsil.atac, value = tonsil.atac@meta.data$annotation_level_1)
+
+DimPlot(
+  tonsil.atac, reduction = "umap",
+  cols = c("#a6cee3", "#1f78b4","#b2df8a", 
+             "#33a02c", "#fb9a99","#e31a1c", 
+             "#fdbf6f", "#ff7f00","#cab2d6",
+             "#6a3d9a"),
+  pt.size = 0.1
+)
+
+CoveragePlot(
+  object = tonsil.atac,
+  region = "chr3-187896600-187940000",
+  extend.upstream = 1000,
+  extend.downstream = 1000
+)
+
+CoveragePlot(
+  object = tonsil.atac,
+  region = "chr19-45764231-45769352",
+  extend.upstream = 1000,
+  extend.downstream = 1000
+)
+```
+
+# New round of Peak Calling using MACS2 on each annotated cell type at level 1.
+
+```{r}
+peaks <- CallPeaks(
+  object = tonsil.atac,
+  group.by = "annotation_level_1",
+  macs2.path = "/Users/pauli/opt/anaconda3/envs/Tonsil_atlas/bin/macs2")
+
+write.table(peaks,path_to_save,sep = "\t",quote = F)
+```
+
+```{r}
+peaks_level1 = makeGRangesFromDataFrame(read.table(path_to_save))
+# remove peaks on nonstandard chromosomes and in genomic blacklist regions
+peaks_level1 <- keepStandardChromosomes(peaks_level1, pruning.mode = "coarse")
+peaks_level1 <- subsetByOverlaps(x = peaks_level1, ranges = blacklist_hg38_unified, invert = TRUE)
+
+CoveragePlot(
+  object = tonsil.atac,
+  region = "chr3-187896600-187940000",
+  extend.upstream = 1000,
+  extend.downstream = 1000,
+  ranges = peaks_level1,
+  ranges.title = "MACS2"
+)
+
+```
+
+# Quantification of the new peak counts in the entire dataset
+
+```{r}
+tonsil.atac_peaks_level1 <- peaks_quantification(tonsil.atac, peaks_level1)
+```
+
+```{r}
+# remove the initial peaks annotation
+DefaultAssay(tonsil.atac_peaks_level1) <- 'peaks_macs'
+tonsil.atac_peaks_level1[['peaks']] <- NULL
+tonsil.atac_peaks_level1
+
+saveRDS(tonsil.atac_peaks_level1,path_to_ATAC_newpeaks)
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```

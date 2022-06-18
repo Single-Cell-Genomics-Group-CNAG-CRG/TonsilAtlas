@@ -1,0 +1,87 @@
+---
+title: "Extracting coordinates per cell type"
+author: "Paula Soler-Vila"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Introduction
+In this notebook, we are going to extract the coordinates of the detected peaks to convert them to Bigwig format to visuliaze in the Genome Browser Tool.
+
+# Pre-processing
+
+## Load packages
+
+```{r libraries} 
+library(Seurat)
+library(Signac)
+library(textTinyR)
+```
+
+## Parameters
+```{r parameters}
+path_to_ATAC <- here::here("scATAC-seq/results/R_objects/8.1.tonsil_atac_integrated_with_multiome_annotated_level1_new_peakcalling.rds")
+path_to_save <- here::here("scATAC-seq/results/Visualization/")
+chrom.sizes <- here::here("scATAC-seq/Visualization/chrom.sizes")
+```
+
+# Load and visulization of the data 
+```{r}
+seurat <- readRDS(path_to_ATAC)
+seurat
+```
+
+```{r fig.wide=TRUE}
+DimPlot(
+  seurat, 
+  group.by = "annotation_level_1",
+  cols = c("#a6cee3", "#1f78b4","#b2df8a", 
+             "#33a02c", "#fb9a99","#e31a1c", 
+             "#fdbf6f", "#ff7f00","#cab2d6",
+             "#6a3d9a"),
+  pt.size = 0.1
+)
+```
+
+# Extract coordinates for each cell type.
+
+```{r}
+
+coordinates_extraction <- function(cell_type)
+{
+  print(cell_type)
+  cells.use <- WhichCells(seurat, ident = cell_type)
+  print(length(cells.use))
+  file_name <- paste0(path_to_save, cell_type, ".bedGraph")
+  counts <- GetAssayData(seurat, assay = 'peaks_macs', slot = 'counts')[, cells.use]
+  peaks_cell_type <- sparse_Means(counts, rowMeans = TRUE)
+  
+  names <- gsub('-', ' ', row.names(counts))
+  write.table(data.frame(names,peaks_cell_type), 
+            file_name, 
+            col.names = F, row.names = F,
+            quote =F, sep = "\t")
+}
+
+cell_types <- c("NBC_MBC", "GCBC", "PC", "CD4_T", "Cytotoxic",  "myeloid",  "FDC", "PDC" ,"epithelial")
+
+lapply(cell_types, coordinates_extraction)
+```
+
+# Session Information
+```{r session}
+sessionInfo()
+```
+
+

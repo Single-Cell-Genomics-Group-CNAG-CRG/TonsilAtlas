@@ -1,0 +1,141 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "`r sprintf('%s L1 SC mapping', params$donor_id)`"
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+title: `r params$donor_id`
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = FALSE,
+                      cache.lazy = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to map level 1 cell types onto the Visium slides.
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(SPOTlight)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+dir.create(path = here::here(sprintf("%s/%s", decon_32, plt_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+
+dir.create(path =here::here(sprintf("%s/%s", decon_32, robj_dir)),
+           showWarnings = FALSE,
+           recursive = TRUE)
+```
+
+Extract sample id and get Donor ID
+```{r}
+sample_id <- params$sample_id
+# sample_id <- "esvq52_nluss5"
+donor_id <- id_df[id_df$gem_id == sample_id, "BCLL_ID"]
+```
+
+## Load data
+We have 4 different datasets that we are going to analyze separately.
+The spatial data comes from the script *03-clustering/03-clustering.Rmd* while the sc data can be found in Ramon's scRNAseq analysis: **/scratch/devel/rmassoni/tonsil_atlas_private/2-DOWNSTREAM_PROCESSING/results/R_objects/processed_seurat_objects/processed_seurat_objects/tonsil_integrated_with_harmony_scrublet_annotated.rds**. \
+In each Rmarkdown notebook we analyze 1 dataset. \
+```{r}
+se_obj <- readRDS(file = here::here(glue::glue("{clust_32}/{robj_dir}/clust_se_{sample_id}.RDS")))
+
+sc_obj <- readRDS(file = "/scratch/devel/rmassoni/tonsil_atlas_private/2-DOWNSTREAM_PROCESSING/results/R_objects/processed_seurat_objects/processed_seurat_objects/tonsil_integrated_with_harmony_scrublet_annotated.rds")
+```
+
+## Analysis
+We are going to use SPOTlight to deconvolute the spatial spots and map the cell types.
+```{r}
+sc_obj@meta.data %>%
+  dplyr::count(annotation_level1)
+```
+
+1st we need to determine the marker genes for each high-level cluster
+```{r}
+if (file.exists(here::here(glue::glue("{decon_32}/{robj_dir}/markers_l1.RDS")))) {
+  
+  markers <- readRDS(file = here::here(glue::glue("{decon_32}/{robj_dir}/markers_l1.RDS")))
+  
+} else {
+  #### Extract marker genes from each cluster ####
+  Seurat::Idents(object = sc_obj) <- sc_obj@meta.data$annotation_level1
+  markers <- Seurat::FindAllMarkers(
+    object = sc_obj, 
+    assay = "RNA",
+    slot = "data",
+    verbose = TRUE, 
+    only.pos = TRUE,
+    max.cells.per.ident = 200)
+  
+  saveRDS(object = markers,
+          file = here::here(glue::glue("{decon_32}/{robj_dir}/markers_l1.RDS")))
+}
+```
+
+2nd run deconvolution
+```{r}
+spotlight_ls <- spotlight_deconvolution(
+  se_sc = sc_obj,
+  counts_spatial = se_obj@assays$Spatial@counts,
+  clust_vr = "annotation_level1",
+  cluster_markers = markers,
+  cl_n = 75,
+  hvg = 3000,
+  ntop = NULL,
+  transf = "uv",
+  method = "nsNMF",
+  min_cont = 0)
+```
+
+3rd Check Topic profiles
+```{r fig.height=8, fig.width=8}
+nmf_mod_ls <- spotlight_ls[[1]]
+nmf_mod <- nmf_mod_ls[[1]]
+
+h <- NMF::coef(nmf_mod)
+rownames(h) <- paste("Topic", 1:nrow(h), sep = "_")
+topic_profile_plts <- SPOTlight::dot_plot_profiles_fun(
+  h = h,
+  train_cell_clust = nmf_mod_ls[[2]])
+
+topic_profile_plts[[2]] + theme(axis.text.x = element_text(angle = 90), 
+                                axis.text = element_text(size = 12))
+```
+
+## Save data
+```{r}
+saveRDS(object = spotlight_ls,
+        file = here::here(glue::glue("{decon_32}/{robj_dir}/spotlight_ls_l1_{sample_id}.rds")))
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

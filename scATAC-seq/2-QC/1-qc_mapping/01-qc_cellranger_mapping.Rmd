@@ -1,0 +1,206 @@
+---
+title: "Cellranger Mapping QC"
+author: "Paula Soler-Vila"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+---
+
+ ```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+output_dir <- " reports/"
+```
+# Introduction
+The objective of this notebook is to perform a basic quality control (QC) analysis of the mapping performed with [Cellranger](https://support.10xgenomics.com/single-cell-atac/software/pipelines/latest/what-is-cell-ranger-atac).
+
+The expected values (EV) included in the notebook are obtained from this [technical_note](https://assets.ctfassets.net/an68im79xiti/Cts31zFxXFXVwJ1lzU3Pc/fe66343ffd3039de73ecee6a1a6f5b7b/CG000202_TechnicalNote_InterpretingCellRangerATACWebSummaryFiles_Rev-A.pdf).
+
+# Pre-processing
+
+## Load packages
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(plyr)
+library(reshape2)
+library(data.table)
+library(knitr)
+library(kableExtra)
+```
+
+## Parameters
+```{r}
+path_to_ATAC <- here::here("scATAC-seq/results/tables/cellranger_mapping/cellranger_mapping_metrics_atac.csv")
+path_to_proj_metadata <- here::here("scATAC-seq/1-cellranger_mapping/data/tonsil_atlas_metadata_atac.csv")
+```
+
+## Load data
+
+```{r}
+qc_samples <- read.csv(path_to_ATAC)
+metadata <- read.csv(path_to_proj_metadata)
+```
+
+```{r}
+qc_samples <- merge(metadata[,c(2,4,5)], qc_samples, by = "gem_id")
+```
+
+```{r}
+knitr::kable(qc_samples, row.names = TRUE) %>%
+  kable_styling(
+    bootstrap_options = c("striped"),
+    full_width = T,
+    font_size = 12
+  ) %>%
+  scroll_box(height = "300px")
+```
+
+# Overall statistics
+
+## Estimated number of cells
+Let us start by plotting the estimated number of cells per library. Note this this number will differ a lot from the final number of cells after applying future QC filters:
+
+```{r}
+number_cells <- qc_samples[, c("library_name", "annotated_cells")]
+```
+```{r fig.wide = TRUE}
+ggbarplot(number_cells,
+  x = "library_name",
+  y = "annotated_cells",
+  fill = "gray70",
+  label = TRUE,
+  legend = NULL,
+  position = position_dodge(0.9),
+  font.label = list(color = "white", size = 10, vjust = 0.4),
+  ggtheme = theme_pubr()
+) +
+  geom_hline(yintercept = 0.65, linetype = 2, color = "black") +
+  theme_pubr(x.text.angle = 45) + ylim(c(0, max(number_cells$annotated_cells) + 300))
+```
+
+## Median number of fragments per cell
+
+```{r  fig.wide = TRUE}
+ggbarplot(qc_samples,
+  x = "library_name",
+  y = "median_fragments_per_cell",
+  fill = "gray70",
+  label = TRUE,
+  position = position_dodge(0.9),
+  font.label = list(color = "white", size = 10, vjust = 0.4),
+  ggtheme = theme_pubr()
+) +
+  geom_hline(yintercept = 0.65, linetype = 2, color = "black") +
+  theme_pubr(x.text.angle = 45) + ylim(c(0, max(qc_samples$median_fragments_per_cell) + 1000))
+```
+
+# Sequencing 
+
+## Total number of read pairs
+The suggested sequencing depth value is ~25,000 read pairs per cell. 
+
+```{r fig.wide = TRUE}
+qc_samples$fragments_percell <- round(qc_samples$num_fragments/qc_samples$cells_detected,2)
+
+ggbarplot(qc_samples,
+  x = "library_name",
+  y = "fragments_percell",
+  fill = "gray70",
+  label = TRUE,
+  font.label = list(color = "white", size = 9, vjust = 0.4),
+  ggtheme = theme_pubr()
+) +
+  geom_hline(yintercept = 25000, linetype = 2, color = "black") +
+  theme_pubr(x.text.angle = 45) 
+```
+
+## Percentatge of Q30 bases 
+To quantify the quality of our sequenced libraries prior to mapping, we will leverage the “Q30” variables in our dataset.
+
+```{r}
+q30.melt <- melt((qc_samples[, c("library_name", "r1_q30_bases_fract", "r2_q30_bases_fract", "bc_q30_bases_fract")]))
+q30.melt$value <- round(q30.melt$value, 2)
+```
+
+```{r fig.wide = TRUE}
+ggbarplot(q30.melt,
+  x = "library_name",
+  y = "value",
+  fill = "variable",
+  label = TRUE,
+  position = position_dodge(0.9),
+  font.label = list(color = "white", size = 9, vjust = 0.4),
+  ggtheme = theme_pubr()
+) +
+  geom_hline(yintercept = 0.65, linetype = 2, color = "black") +
+  theme_pubr(x.text.angle = 45) + ylim(c(0, 1.1))
+```
+
+# Insert size metrics
+- frac_fragments_nfr => Fragments (< 147 bp) in nucleosome-free regions.
+- frac_fragments_nuc => Fragments (147 ~ 294 bp) flanking a single nucleosome.
+
+The fraction of fragments in nucleosome-free regions is expected to be the highest proportion (> 40% EV, red dashed line) as compared to mononucleosome and dinucleosome regions.
+
+```{r}
+data_insert_size <- qc_samples[, c("library_name", "frac_fragments_nfr", "frac_fragments_nuc")]
+data_insert_size.melt <- melt(data_insert_size)
+data_insert_size.melt$value <- round(data_insert_size.melt$value, 2)
+```
+
+```{r fig.wide = TRUE}
+ggbarplot(data_insert_size.melt,
+  x = "library_name", label = TRUE,
+  y = "value", fill = "variable", position = position_dodge(0.9)
+) +
+  theme_pubr(x.text.angle = 45) + geom_hline(yintercept = 0.40, linetype = 2, color = "red") + ylim(c(0, 1))
+```          
+          
+# Targeting Metrics
+
+## Overlapping of fragments
+Fraction of fragments that overlap with any targeted regions such as TSS, DNase HS, enhancer or promoter regions ( > 55% EV, red dashed line), and the fraction of transposition events in peaks in cell barcodes ( > 25% EV, blue dashed line). 
+
+```{r}
+data_overlap <- qc_samples[, c("library_name", "frac_fragments_overlapping_targets", "frac_fragments_overlapping_peaks")]
+data_overlap.melt <- melt(data_overlap)
+data_overlap.melt$value <- round(data_overlap.melt$value, 2)
+```
+
+```{r fig.wide = TRUE}
+ggbarplot(data_overlap.melt,
+  x = "library_name", label = TRUE,
+  y = "value", fill = "variable", position = position_dodge(0.9)
+) +
+  theme_pubr(x.text.angle = 45) +
+  geom_hline(yintercept = 0.55, linetype = 2, color = "red") +
+  geom_hline(yintercept = 0.25, linetype = 2, color = "blue") + ylim(c(0, 1))
+```
+
+
+## Transcription Start Site (TSS)
+It is expected to obtain a large enrichment around TSS (> 5% EV, red dashed line), as these regions are known to show a high degree of chromatin accessibility compared to the flanking regions.
+
+```{r}
+data_tss <- qc_samples[, c("library_name", "tss_enrichment_score")]
+data_tss.melt <- melt(data_tss)
+data_tss.melt$value <- round(data_tss.melt$value, 2)
+```
+
+```{r}
+ggbarplot(data_tss.melt,
+  x = "library_name", label = TRUE,
+  y = "value", fill = "variable", position = position_dodge(0.9)
+) +
+  theme_pubr(x.text.angle = 45) + geom_hline(yintercept = 5, linetype = 2, color = "red") + ylim(c(0, max(data_tss.melt$value) + 1))
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,416 @@
+---
+title: "Annotation (level 1)"
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we will annotate the cells in our tonsil atlas (level 1) using the markers we found for each cluster. Importantly, we will split or merge different clusters to group cells into biologically sound cell types and states.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_clustered_level_1.rds")
+path_to_markers <- here::here("scRNA-seq/3-clustering/1-level_1/tmp/markers_level_1")
+path_to_save <- here::here("scRNA-seq/results/R_objects/tonsil_rna_integrated_annotated_level_1.rds")
+path_to_save_df <- here::here("scRNA-seq/3-clustering/1-level_1/tmp/annotation_level_1_multiome.rds")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+tonsil <- readRDS(path_to_obj)
+tonsil
+
+
+# Markers
+markers_rds <- list.files(path_to_markers)
+markers_paths <- str_c(path_to_markers, markers_rds, sep = "/")
+markers_dfs <- purrr::map(markers_paths, readRDS)
+names(markers_dfs) <- markers_rds %>%
+  str_remove("^markers_cluster_") %>%
+  str_remove("_level_1.rds")
+```
+
+
+# Explore markers
+
+This is the current clustering:
+
+```{r}
+table(tonsil$seurat_clusters) / ncol(tonsil) * 100
+colors <- c("#5A5156", "#E4E1E3", "#F6222E", "#FE00FA", "#16FF32", "#3283FE",
+            "#FEAF16", "#B00068", "#1CFFCE", "#90AD1C", "#2ED9FF", "#DEA0FD",
+            "#AA0DFE")
+p <- DimPlot(
+  tonsil,
+  group.by = "seurat_clusters",
+  pt.size = 0.1,
+  cols = colors
+)
+p
+```
+```{r fig.wide=TRUE}
+# Stratified by age
+umap_age <- plot_split_umap(tonsil, "age_group")
+umap_age
+```
+
+
+## Table
+
+```{r}
+sorted_names <- names(markers_dfs) %>%
+  as.numeric() %>%
+  sort() %>%
+  as.character()
+markers_dfs <- markers_dfs[sorted_names]
+markers_dfs2 <- purrr::map(names(markers_dfs), function(cluster) {
+  df <- markers_dfs[[cluster]] %>%
+    rownames_to_column(var = "gene") %>%
+    filter(p_val_adj < 0.001 & avg_logFC > 0.75) %>% 
+    mutate(cluster = cluster) %>%
+    arrange(desc(avg_logFC))
+  df
+})
+names(markers_dfs2) <- names(markers_dfs)
+markers_df <- bind_rows(markers_dfs2)
+DT::datatable(markers_df)
+```
+
+
+Notably, cluster 8 and 10 do not seem to have any distinctive marker:
+
+```{r}
+DT::datatable(markers_dfs[["8"]])
+DT::datatable(markers_dfs[["10"]])
+```
+
+
+## UMAPs
+
+We begin by visualizing well-known lineage-specific markers:
+
+```{r}
+canonical_markers <- c("CD79A", "CD79B", "CD3D", "CD3E", "NKG7", "LYZ",
+                       "IGHD", "IGHM", "IGHA1", "IGHG1", "FDCSP", "PTCRA",
+                       "XBP1", "TOP2A", "KRT19", "SPRR3", "DNTT", "VPREB1")
+canonical_markers_gg <- purrr::map(canonical_markers, function(x) {
+  p <- feature_plot_doublets(seurat_obj = tonsil, feature = x)
+  p
+})
+names(canonical_markers_gg) <- canonical_markers
+canonical_markers_gg
+```
+
+
+Let us now visualize a subset of top markers for each cluster:
+
+```{r fig.height=16, fig.width=14}
+selected_markers <- list(
+  "0" = c("BANK1", "FCER2", "MARCH1", "CD83"),
+  "1" = c("CD3D", "IL7R", "CD2", "GIMAP7"),
+  "2" = c("TOP2A", "MKI67", "CENPF", "HMGB1"),
+  "3" = c("MARCKSL1", "RGS13", "CCDC88A", "LMO2"),
+  "4" = c("GNLY", "NKG7", "GZMK", "CD8A"),
+  "5" = c("FCRL4", "FCRL5", "PLAC8", "SOX5"),
+  "6" = c("IGHG1", "IGHA1", "JCHAIN", "XBP1"),
+  "7" = c("LYZ", "S100A8", "APOE", "AIF1"),
+  "8" = c("TXNIP", "RPS10", "TRBC2", "TCF7"),
+  "9" = c("FDCSP", "CLU", "CXCL13", "CR2"),
+  "10" = c("MT2A", "CD3D", "TRAC", "PCNA"),
+  "11" = c("PTPRCAP", "CD37", "HSPA1B", "CD74"),
+  "12" = c("PTCRA", "LILRA4", "CLECL4C", "IRF7")
+)
+purrr::map(selected_markers, function(l) {
+  FeaturePlot(tonsil, features = l, ncol = 2, pt.size = 0.1)
+})
+```
+
+
+Cell cycle scores:
+
+```{r}
+s_gg <- feature_plot_doublets(seurat_obj = tonsil, feature = "S.Score")
+g2m_gg <- feature_plot_doublets(seurat_obj = tonsil, feature = "G2M.Score")
+s_gg
+g2m_gg
+```
+
+
+# Preliminary annotation
+
+Cluster ID | Markers                        | Cell Type
+-----------|--------------------------------|-------------------
+0          | BANK1, FCER2                   | naive and memory B
+1          | CD3D, IL7R                     | CD4+ T
+2          | MKI67, TOP2A                   | DZ GC B
+3          | MARCKSL1, RGS13, LMO2, CCDC88A | LZ GC B
+4          | GNLY, NKG7, GZMK, CD8A         | Cytotoxic
+5          | FCRL4, FCRL5, PLAC8, SOX5      | FCRL4+ memory B
+6          | IGHG1, IGHA1, JCHAIN, XBP1     | PC
+7          | LYZ, S100A8                    | myeloid
+8          | Poorly defined                 | Poor-quality/doublets
+9          | FDCSP, CLU, CXCL13, CR2        | FDC
+10         | MT2A, CD3D, TRAC, PCNA         | doublets/proliferative T cells
+11         | PTPRCAP, CD37, HSPA1, CD74     | Unknown
+12         | PTCRA, LILRA4, CLECL4C, IRF7   | PDC
+
+
+Cluster 8 seems to be composed of poor-quality cells (lysed cells, empty droplets or doublets), because it does not possess any distinctive marker. On the other hand, cluster 10 might be composed of proliferative T cells, as it shows cell cycle and T-cell markers. However, this cluster appears at the zone of the germinal center, so it could also be a cluster of doublets. To shed light into these two points, let us plot the number of genes and the proportion of doublet nearest neighbors (pDNN) across clusters:
+
+```{r fig.wide=TRUE}
+VlnPlot(
+  tonsil,
+  features = c("nFeature_RNA", "pDNN_union"),
+  group.by = "seurat_clusters",
+  cols = colors,
+  pt.size = 0
+)
+```
+
+Interestingly, both cluster 8 and 10 have a high pDNN score. All in all, we will remove cluster 8 (clearly technical) and keep cluster 10. We will include it together with the T-cells and decide at the level 2 whether it is technical or biological.
+
+```{r}
+tonsil
+tonsil <- subset(tonsil, subset = seurat_clusters != "8")
+tonsil
+```
+
+
+In addition, we know from previous analysis cluster 11 is composed of cells from the dataset of [King et al.](https://immunology.sciencemag.org/content/6/56/eabe6291). Let us plot their annotation:
+
+```{r}
+umap_df <- tonsil@reductions$umap@cell.embeddings %>%
+  as.data.frame() %>%
+  mutate(
+    cell_type = tonsil$cell_type,
+    assay = tonsil$assay,
+    seurat_clusters = tonsil$seurat_clusters
+  ) %>%
+  filter(seurat_clusters == "11", assay == "5P")
+umap_cluster_11 <- umap_df %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = cell_type)) +
+    geom_point() +
+    theme_classic()
+umap_cluster_11
+```
+
+
+As we can see, this cluster contains both naive and memory B cells. Importantly, its top marker gene is PTPRCAP, which is a marker of B-cell activation. Following the same strategy as for cluster 10, we will keep them and decide their annotation in level 2, as we will have better resolution.
+
+
+# Subset and recluster
+
+We know from exploratory analysis that a subset of cells within the cluster "myeloid" (7) are actually epithelial cells (they express keratins). Since they are conceptually very different, let us annotate them in a separate cluster:
+
+```{r}
+myeloid <- subset(tonsil, idents = "7")
+myeloid <- myeloid %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "gem_id", dims = 1:30) %>%
+  RunUMAP(dims = 1:30, reduction = "harmony")
+FeaturePlot(
+  myeloid,
+  features = c("KRT19", "KRT78", "KRT13", "PERP"),
+  reduction = "umap",
+  ncol = 2
+)
+```
+```{r fig.height=12, fig.width=14}
+myeloid <- FindNeighbors(myeloid, dims = 1:30, reduction = "harmony")
+myeloid <- FindClusters(myeloid, resolution = 0.1)
+DimPlot(myeloid, reduction = "umap")
+```
+```{r}
+clusters_of_interest <- c("4", "10")
+markers_epithelial <- purrr::map(clusters_of_interest, function(x) {
+  df <- FindMarkers(
+    myeloid,
+    ident.1 = x,
+    only.pos = TRUE,
+    test.use = "wilcox",
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    filter(p_val_adj < 0.001 & avg_logFC > 1) %>%
+    arrange(desc(avg_logFC))
+  df
+})
+epithelial_markers_4 <- markers_epithelial[[1]]
+epithelial_markers_10 <- markers_epithelial[[2]]
+DT::datatable(epithelial_markers_4)
+DT::datatable(epithelial_markers_10)
+```
+
+We can clearly see that subclusters 4 and 10 are epithelial. Thus, we will separate them from the myeloid.
+
+
+Now, let us follow a similar strategy to "fetch" pre-B cells in cluster 12:
+
+```{r}
+pDC <- subset(tonsil, idents = "12")
+pDC <- pDC %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "gem_id", dims = 1:30) %>%
+  RunUMAP(dims = 1:30, reduction = "harmony")
+FeaturePlot(
+  pDC,
+  features = c("VPREB1", "DNTT", "CD3D", "LILRA4"),
+  reduction = "umap",
+  ncol = 2
+)
+```
+
+Interestingly enough, we see a small cluster of what could be [precursor T-cells](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3314444/), since they express CD3D and DNTT. Let us cluster them and find their markers:
+
+```{r fig.height=12, fig.width=14}
+pDC <- FindNeighbors(pDC, k.param = 6)
+pDC <- FindClusters(pDC, resolution = 0.5)
+DimPlot(pDC, reduction = "umap")
+```
+```{r}
+clusters_of_interest2 <- c("5", "11")
+markers_preB_preT <- purrr::map(clusters_of_interest2, function(x) {
+  df <- FindMarkers(
+    pDC,
+    ident.1 = x,
+    only.pos = TRUE,
+    test.use = "wilcox",
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    filter(p_val_adj < 0.001)
+  df
+})
+preB_markers <- markers_preB_preT[[1]]
+preT_markers <- markers_preB_preT[[2]]
+DT::datatable(preB_markers)
+DT::datatable(preT_markers)
+```
+
+We can clearly see that subcluster 5 and 11 correspond to pre-B and pre-T cells, respectively. One explanation for this finding might be that [pDCs develop from lymphoid progenitors](https://www.nature.com/articles/s41590-019-0420-3).
+
+
+# Final annotation
+
+As we commented in the introduction, we will group similar clusters together. For instance, we will merge FCRL4+ memory, naive and memory B cells in a single cluster. As we follow a top-down approach, at level 2 we will have excluded all the variability related with other lineages, so we will gain much more resolution. 
+
+We will try to keep the same nomenclature the group used in previous publications, like [this one](https://www.nature.com/articles/s41591-018-0028-4):
+
+Cluster ID | Markers                        | Cell Type
+-----------|--------------------------------|-------------------
+0          | BANK1, FCER2                   | NBC and MBC
+1          | CD3D, IL7R                     | CD4 T
+2          | MKI67, TOP2A                   | GCBC
+3          | MARCKSL1, RGS13, LMO2, CCDC88A | GCBC
+4          | GNLY, NKG7, GZMK, CD8A         | Cytotoxic
+5          | FCRL4, FCRL5, PLAC8, SOX5      | NBC and MBC
+6          | IGHG1, IGHA1, JCHAIN, XBP1     | PC
+7          | LYZ, S100A8                    | myeloid
+8          | Poorly defined                 | excluded
+9          | FDCSP, CLU, CXCL13, CR2        | FDC
+10         | MT2A, CD3D, TRAC, PCNA         | CD4 T
+11         | PTPRCAP, CD37, HSPA1, CD74     | NBC and MBC
+12         | PTCRA, LILRA4, CLECL4C, IRF7   | PDC
+
+
+
+```{r}
+# Include the annotation in the metadata
+tonsil$annotation_level_1 <- tonsil$seurat_clusters
+annotation <- c("NBC_MBC", "CD4_T", "GCBC", "GCBC", "Cytotoxic", "NBC_MBC", "PC",
+                "myeloid", "excluded", "FDC", "CD4_T", "NBC_MBC", "PDC")
+levels(tonsil$annotation_level_1) <- annotation
+tonsil$annotation_level_1 <- as.character(tonsil$annotation_level_1)
+
+
+# Assign epithelial and pre-B-cell annotation
+epithelial_cells <- colnames(myeloid)[myeloid$seurat_clusters %in% c("4", "10")]
+preB_cells <- colnames(pDC)[pDC$seurat_clusters == "5"]
+preT_cells <- colnames(pDC)[pDC$seurat_clusters == "11"]
+tonsil$annotation_level_1[colnames(tonsil) %in% epithelial_cells] <- "epithelial"
+tonsil$annotation_level_1[colnames(tonsil) %in% preB_cells] <- "preBC"
+tonsil$annotation_level_1[colnames(tonsil) %in% preT_cells] <- "preTC"
+```
+
+
+Let us plot the annotation:
+
+```{r}
+colors <- c("#5A5156", "#E4E1E3", "#F6222E", "#FE00FA", "#16FF32", "#3283FE",
+            "#FEAF16", "#B00068", "#1CFFCE", "#90AD1C", "pink")
+sorted_levels <- c("NBC_MBC", "GCBC", "PC", "preBC", "CD4_T", "preTC",
+                   "Cytotoxic", "myeloid", "FDC", "PDC", "epithelial")
+tonsil$annotation_level_1 <- factor(tonsil$annotation_level_1, sorted_levels)
+p_final <- DimPlot(
+  tonsil,
+  group.by = "annotation_level_1",
+  pt.size = 0.1,
+  cols = colors
+)
+p_final
+```
+
+
+
+# Save
+
+```{r}
+saveRDS(tonsil, path_to_save)
+
+
+# Save annotation for multiome cells, which we will later transfer to ATAC-seq
+# cells
+annotation_multiome_df <- tonsil@meta.data %>%
+  rownames_to_column(var = "cell_barcode") %>%
+  dplyr::filter(assay == "multiome") %>%
+  dplyr::select("cell_barcode", "annotation_level_1")
+saveRDS(annotation_multiome_df, path_to_save_df)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

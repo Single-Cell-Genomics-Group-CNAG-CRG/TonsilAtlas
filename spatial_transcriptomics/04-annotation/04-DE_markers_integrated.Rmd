@@ -1,0 +1,515 @@
+---
+author: "Marc Elosua-Bayes"
+title: "04-DE analysis integrated dataset"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE, cache = TRUE)
+options(width = 1200)
+```
+
+## Introduction
+In this script we are going to compute marker genes for the samples at varying resolutions.
+
+## Libraries
+```{r}
+library(Seurat)
+library(ggpubr)
+library(cowplot)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+```
+
+## Setting parameters
+Loading necessary paths and parameters
+```{r}
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{anot}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{anot}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{clust}/{robj_dir}/integrated_spatial.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+## Analysis
+
+First we are going to look at the cluster resolution we are going to check
+```{r fig.width=5, fig.height=4}
+Seurat::DimPlot(merged_se, group.by = "Spatial_snn_res.0.3")
+```
+
+```{r fig.width=18, fig.height=8}
+res_vec <- c("Spatial_snn_res.0.01", "Spatial_snn_res.0.05", 
+             "Spatial_snn_res.0.1", "Spatial_snn_res.0.3",
+             "Spatial_snn_res.0.8", "Spatial_snn_res.1",
+             "Spatial_snn_res.1.25", "Spatial_snn_res.1.5")
+# Iterate over resolutions
+lapply(res_vec, function(i) {
+  # Iterate over slices
+  lapply(id_sp_df$gem_id, function(id) {
+    Seurat::SpatialPlot(
+      merged_se,
+      group.by = i,
+      images = id,
+      image.alpha = 0,
+      crop = FALSE,
+      pt.size.factor = 1.25)
+  }) %>% 
+    patchwork::wrap_plots(., nrow = 2, guides = "collect")
+})
+```
+
+We are going to use the function `FindAllMarkers` to get the marker genes for all the clusters at the varying resolutions:
+```{r eval=FALSE}
+# Assign Identities
+Seurat::Idents(merged_se) <- merged_se@meta.data[, "Spatial_snn_res.0.3"]
+
+# Compute markers
+markers03 <- Seurat::FindAllMarkers(
+  object = merged_se,
+  assay = "Spatial",
+  slot = "data",
+  only.pos = TRUE)
+
+DT::datatable(
+  data = markers03,
+  filter = "top")
+```
+
+### Save markers for resolution 0.3
+```{r eval=FALSE}
+# Assign Identities
+Seurat::Idents(merged_se) <- merged_se@meta.data[, "Spatial_snn_res.0.3"]
+
+# Compute markers
+markers03 <- Seurat::FindAllMarkers(
+  object = merged_se,
+  assay = "Spatial",
+  slot = "data",
+  only.pos = TRUE)
+
+DT::datatable(
+  data = markers03,
+  filter = "top")
+```
+
+```{r eval=FALSE}
+out_file03 <- "{anot}/{robj_dir}/markers_Spatial_snn_res.0.3.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file to write it from scratch
+file.remove(out_file03)
+
+lapply(unique(as.character(markers03$cluster)), function(clust) {
+  
+  markers03 %>%
+    dplyr::filter(cluster == clust) %>%
+    dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+    xlsx::write.xlsx(
+    .,
+    file = out_file03,
+    row.names = FALSE,
+    sheetName = glue::glue("Cluster-{clust}"),
+    append = file.exists(out_file03))
+  })
+```
+
+### Save markers for resolution 0.8
+```{r eval=TRUE}
+# Assign Identities
+Seurat::Idents(merged_se) <- merged_se@meta.data[, "Spatial_snn_res.0.8"]
+
+# Compute markers
+markers08 <- Seurat::FindAllMarkers(
+  object = merged_se,
+  assay = "Spatial",
+  slot = "data",
+  only.pos = TRUE)
+
+DT::datatable(
+  data = markers08,
+  filter = "top")
+```
+
+```{r eval=TRUE}
+out_file08 <- "{anot}/{robj_dir}/markers_Spatial_snn_res.0.8.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file to write it from scratch
+file.remove(out_file08)
+
+lapply(unique(as.character(markers08$cluster)), function(clust) {
+  
+  markers08 %>%
+    dplyr::filter(cluster == clust) %>%
+    dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+    xlsx::write.xlsx(
+    .,
+    file = out_file08,
+    row.names = FALSE,
+    sheetName = glue::glue("Cluster-{clust}"),
+    append = file.exists(out_file08))
+  })
+```
+
+## Compute markers Resolution 1.5
+We are going to use the function `FindAllMarkers` to get the marker genes for all the clusters at the varying resolutions:
+```{r eval=FALSE}
+# Assign Identities
+Seurat::Idents(merged_se) <- merged_se@meta.data[, "Spatial_snn_res.1.5"]
+
+# Compute markers
+markers_15 <- Seurat::FindAllMarkers(
+  object = merged_se,
+  assay = "Spatial",
+  slot = "data",
+  only.pos = TRUE)
+
+DT::datatable(
+  data = markers_15,
+  filter = "top")
+```
+
+### Save markers for resolution 1.5
+```{r eval=FALSE}
+out_file_15 <- "{anot}/{robj_dir}/markers_Spatial_snn_res.1.5.xlsx" %>%
+  glue::glue() %>%
+  here::here()
+
+# Remove file to write it from scratch
+file.remove(out_file_15)
+
+lapply(unique(as.character(markers_15$cluster)), function(clust) {
+  markers_15 %>%
+    dplyr::filter(cluster == clust) %>%
+    dplyr::arrange(dplyr::desc(avg_log2FC)) %>%
+    xlsx::write.xlsx(
+    .,
+    file = out_file_15,
+    row.names = FALSE,
+    sheetName = glue::glue("Cluster-{clust}"),
+    append = file.exists(out_file_15))
+  })
+```
+
+### Clsutering Annotation
+```{r}
+merged_se[["annotation-general"]] <- dplyr::case_when(
+  merged_se@meta.data$Spatial_snn_res.0.3 == 0 ~ "T cell zone",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 1 ~ "T:B Border",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 2 ~ "Epithelial-1",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 3 ~ "Inter-Follicular Zone",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 4 ~ "Proliferating Follicle",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 5 ~ "Germinal Center",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 6 ~ "Subepithelial",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 7 ~ "Epithelial-2",
+  merged_se@meta.data$Spatial_snn_res.0.3 == 8 ~ "Muscle"
+)
+```
+
+### Histological Annotation
+
+Furthermore, we annotate these slides following a pathologists histological annotation.
+
+#### HA Marco
+```{r}
+# load annotations
+ann_dir <- "{anot}/{robj_dir}/annotations-histological" %>%
+  glue::glue() %>%
+  here::here()
+
+fn_ls <- list.files(ann_dir, recursive = TRUE, full.names = TRUE)
+# Remove Gerard's annotation file
+fn_ls <- fn_ls[str_detect(fn_ls, "gerard", negate = TRUE)]
+
+# Read in data
+hist_df_marco <- lapply(fn_ls, function(n) {
+  n_mt <- str_split(n, "/", simplify = TRUE)
+  slide_dir <- n_mt[1, ncol(n_mt) - 2]
+  id <- substr(slide_dir, 1, 13)  # Extract first 13 characters
+  region <- n_mt[1, ncol(n_mt) - 1]
+  
+  
+  bc <- readr::read_csv(file = n) %>% dplyr::pull("barcode")
+    
+  data.frame(
+    "barcodes" = bc,
+    "histological_annotation_marco" = region,
+    "gem_id" = id)
+  }) %>% dplyr::bind_rows()
+
+# Make sure there are no duplicate rows
+hist_df_marco <- dplyr::distinct(hist_df_marco)
+
+# Make sure one spot is not assigned to 2 regions
+hist_df_marco %>%
+  dplyr::count(barcodes) %>%
+  dplyr::filter(n > 1)
+```
+
+Quick reprocessing of the names
+```{r}
+hist_df_marco <- hist_df_marco %>%
+    mutate(
+        histological_annotation_marco = case_when(
+            histological_annotation_marco == "mesenchymal areas" ~ "Mesenchymal Areas",
+            histological_annotation_marco == "mantle zones" ~ "Mantle Zone",
+            histological_annotation_marco == "vascular spaces" ~ "Vascular Spaces",
+            TRUE ~ histological_annotation_marco
+        )
+    )
+
+unique(hist_df_marco$histological_annotation_marco)
+```
+
+#### HA Gerard
+```{r}
+library(openxlsx)
+an_g <- "{anot}/{robj_dir}/annotations-histological/Tonsil_Annotation_gerard.xlsx" %>%
+    glue::glue() %>%
+    here::here() %>%
+    openxlsx::read.xlsx(xlsxFile = ., sheet = 1)
+
+cnames <- colnames(an_g)
+rr <- which(cnames %in% c("LIGHT.ZONE", "DARK.ZONE", "INTERFOLLICULAR.T-CELL.ZONE"))
+hist_df_gerard <- lapply(cnames[-rr], function(i) {
+    print(i)
+    bc_g <- an_g[, i, drop = FALSE] %>%
+        tidyr::drop_na() %>%
+        pull(1) %>%
+        gsub(pattern = '"', replacement = '', x = .) %>%
+        str_split(., ",") %>%
+        purrr::map(~ .[5]) %>%
+        unlist()
+    
+    data.frame(
+    "barcodes" = bc_g[-1],
+    "histological_annotation_gerard" = i,
+    "gem_id" = str_sub(bc_g[-1], 1, 13))
+    }) %>%
+    bind_rows()
+
+# Make sure there are no duplicate rows
+hist_df_gerard <- dplyr::distinct(hist_df_gerard)
+
+# Make sure one spot is not assigned to 2 regions
+hist_df_gerard %>%
+  dplyr::count(barcodes) %>%
+  dplyr::filter(n > 1)
+
+# There are some duplicated spots
+bc_dup <- hist_df_gerard %>%
+    dplyr::count(barcodes) %>%
+    dplyr::filter(n > 1) %>%
+    dplyr::pull(barcodes)
+
+# We are going to manually annotate them
+dup_ls <- hist_df_gerard[hist_df_gerard$barcodes %in% bc_dup, ] %>%
+    arrange(barcodes) %>%
+    group_split(barcodes)
+
+lapply(seq_len(length(dup_ls)), function(i) {
+    tmp <- dup_ls[[i]]
+    if ("MANTLE.ZONE" %in% tmp$histological_annotation_gerard) {
+        tmp %>%
+            filter(histological_annotation_gerard == "MANTLE.ZONE")
+    } else if ("FOLDED.AREA.(NOT.EVALUABLE" %in% tmp$histological_annotation_gerard) {
+        tmp %>%
+            filter(histological_annotation_gerard == "FOLDED.AREA.(NOT.EVALUABLE")
+    }
+})
+
+dup_bc_vec <- dup_ls %>% bind_rows() %>% pull(barcodes) %>% unique()
+hist_df_gerard <- hist_df_gerard %>%
+    mutate(
+        keep = case_when(
+            # Unice case for barcode esvq52_nluss5_ATGGAACCTTTGCACA-1
+            barcodes == "esvq52_nluss5_ATGGAACCTTTGCACA-1" & histological_annotation_gerard == "FOLDED.AREA.(NOT.EVALUABLE" ~ TRUE,
+            barcodes == "esvq52_nluss5_ATGGAACCTTTGCACA-1" & histological_annotation_gerard == "GERMINAL.CENTER" ~ FALSE,
+            ! barcodes %in% dup_bc_vec ~ TRUE,
+            barcodes %in% dup_bc_vec & histological_annotation_gerard == "FOLDED.AREA.(NOT.EVALUABLE" ~ TRUE,
+            barcodes %in% dup_bc_vec & histological_annotation_gerard == "GERMINAL.CENTER" ~ TRUE,
+            TRUE ~ FALSE)
+    ) %>%
+    dplyr::filter(keep)
+
+# Make sure one spot is not assigned to 2 regions
+hist_df_gerard %>%
+  dplyr::count(barcodes) %>%
+  dplyr::filter(n > 1)
+
+# Check unique  case
+hist_df_gerard %>% filter(barcodes == "esvq52_nluss5_ATGGAACCTTTGCACA-1")
+```
+
+Quick reprocessing of the names
+```{r}
+hist_df_gerard <- hist_df_gerard %>%
+    mutate(
+        histological_annotation_gerard = case_when(
+            histological_annotation_gerard == "SURFACE.EPITHELIUM" ~ "Surface Epithelium",
+            histological_annotation_gerard == "CRYPT.EPITHELIUM" ~ "Crypt Epithelium",
+            histological_annotation_gerard == "FOLDED.AREA.(NOT.EVALUABLE" ~ "Folded",
+            histological_annotation_gerard == "GERMINAL.CENTER" ~ "Germinal Center",
+            histological_annotation_gerard == "MANTLE.ZONE" ~ "Mantle Zone",
+            histological_annotation_gerard == "MESENCHIMA./.STROMA" ~ "Mesenchymal/Stromal",
+            histological_annotation_gerard == "VASCULAR" ~ "Vascular",
+            TRUE ~ "other"
+        )
+    )
+```
+
+#### Add histological annotation
+Add histological annotation to seurat object
+```{r}
+merged_se@meta.data <- merged_se@meta.data %>%
+    tibble::rownames_to_column("barcodes") %>%
+    dplyr::left_join(hist_df_marco, by = c("barcodes", "gem_id")) %>%
+    dplyr::left_join(hist_df_gerard, by = c("barcodes", "gem_id")) %>%
+    dplyr::mutate(
+    histological_annotation_marco = dplyr::case_when(
+      !is.na(histological_annotation_marco) ~ histological_annotation_marco,
+      Spatial_snn_res.0.1 == 0 ~ "Inter-Follicular Zone",
+      Spatial_snn_res.0.1 == 1 ~ "Germinal Center",
+      Spatial_snn_res.0.1 == 2 ~ "Epithelium",
+      TRUE ~ "unannotated"),
+    histological_annotation_gerard = dplyr::case_when(
+      str_detect(histological_annotation_gerard, "Epithelium") ~ "Epithelium",
+      !is.na(histological_annotation_gerard) ~ histological_annotation_gerard,
+      Spatial_snn_res.0.1 == 0 ~ "Inter-Follicular Zone",
+      TRUE ~ "unannotated")
+        ) %>%
+    tibble::column_to_rownames("barcodes") %>%
+    dplyr::select(-keep)
+
+
+table(merged_se@meta.data$histological_annotation_gerard)
+table(merged_se@meta.data$histological_annotation_marco)
+```
+
+Visualize the annotation
+```{r fig.width=15, fig.height=7}
+library(colorBlindness)
+
+palette_marco<- palette <- c(
+  "Inter-Follicular Zone" = "#ff6db6",
+  "Epithelium" = "#924900",
+  "Mesenchymal Areas" = "#db6d00",
+  "Germinal Center" = "#004949",
+  "Mantle Zone" = "#00e8e8",
+  "Vascular Spaces" = "#490092",
+  "unannotated" = "lightgrey"
+  )
+
+palette_gerard <- c(
+  "Inter-Follicular Zone" = "#ff6db6",
+  "Epithelium" = "#924900",
+  "Mesenchymal/Stromal" = "#db6d00",
+  "Germinal Center" = "#004949",
+  "Mantle Zone" = "#00e8e8",
+  "Vascular" = "#490092",
+  "unannotated" = "lightgrey",
+  "Folded" = "#1a1a1a"
+  )
+
+pn <- SpatialPlot(
+    object = merged_se,
+    group.by = "histological_annotation_marco",
+    images = "esvq52_nluss5",
+    crop = FALSE,
+    pt.size.factor = 1.25) &
+    scale_fill_manual(values = palette_marco) &
+    theme(legend.position = "top") &
+    guides(fill= guide_legend(override.aes = list(size = 5)))
+
+pg <- SpatialPlot(
+    object = merged_se,
+    group.by = "histological_annotation_gerard",
+    images = "esvq52_nluss5",
+    crop = FALSE,
+    pt.size.factor = 1.25) &
+    scale_fill_manual(values = palette_gerard) &
+    theme(legend.position = "top") &
+    guides(fill = guide_legend(override.aes = list(size = 5)))
+
+pn | pg
+
+SpatialPlot(
+    object = merged_se,
+    group.by = "Spatial_snn_res.1.5",
+    images = c("esvq52_nluss5"),
+    crop = FALSE,
+    pt.size.factor = 1.25)
+```
+
+### Check how Marco & Gerard correspond
+```{r fig.width=6, fig.height=6}
+merged_se@meta.data %>%
+    dplyr::filter(gem_id == "esvq52_nluss5") %>% 
+    data.frame() %>%
+    dplyr::count(histological_annotation_marco, histological_annotation_gerard) %>%
+    group_by(histological_annotation_marco) %>%
+    mutate(freq = n / sum(n)) %>%
+    ungroup() %>%
+    # Only show those populations that have more than 5 cells
+    filter(n >= 5) %>%
+    ggplot() +
+        geom_point(aes(
+            x = histological_annotation_marco,
+            y = histological_annotation_gerard,
+            color = n,
+            size = freq)) +
+        scale_color_viridis_c() +
+        labs(
+            title = "Slide esvq52_nluss5 annotation overlap",
+            subtitle = "Proportion of Gerard's histological annotation by within Marco's annotation") +
+        theme_minimal() +
+        theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+## Save object
+```{r}
+"{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  saveRDS(object = merged_se, file = .)
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

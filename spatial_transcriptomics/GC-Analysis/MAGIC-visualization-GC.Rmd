@@ -1,0 +1,275 @@
+---
+author: "Marc Elosua-Bayes"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output: html_document
+params: 
+    sample_id: "Default!"
+    donor_id: "Default!"
+title: "GC MAGIC visualization"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# knitr::opts_knit$set(root.dir = "..")
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message = FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+## Introduction
+In this Rmarkdown document we are going to load the MAGIC-denoised data to better visualize genes and ease with the annotation when using specific marker genes.
+[MAGIC](https://magic.readthedocs.io/en/stable/) was developed by Smita Krishnaswamy's lab to try to fill in the drop out reads in the spots. `MAGIC` is a Markov Affinity-based Graph Imputation of Cells used for denoising high-dimensional data most commonly applied to single-cell RNA sequencing data. MAGIC learns the manifold data, using the resultant graph to smooth the features and restore the structure of the data based on their k-nearest neighbors. 
+
+## Libraries
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(SPATA2)
+library(UCell)
+library(stringr)
+library(readr)
+```
+
+## Parameters
+```{r}
+set.seed(123)
+source(here::here("misc/paths.R"))
+source(here::here("utils/bin.R"))
+
+"{gct}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{gct}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+## Load data
+The data used in this Rmarkdown document comes from **03-clustering_integration.Rmd** where the data was integrated.
+```{r}
+merged_se <- "{anot}/{robj_dir}/integrated_spatial_annot.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+```
+
+Load MAGIC data from the script *MAGIC_denoising-GC.Rmd*
+```{r}
+magic_df <- "{gct}/{robj_dir}/MAGIC-mtrx.rds" %>%
+  glue::glue() %>%
+  here::here() %>%
+  readRDS(file = .)
+
+# create a new assay to store MAGIC information
+magic_assay <- CreateAssayObject(counts = as.matrix(magic_df))
+
+# Subset merged_se to those barcodes used
+merged_se <- merged_se[, colnames(magic_df)]
+
+# add this assay to the previously created Seurat object
+merged_se[["MAGIC_Spatial"]] <- magic_assay
+```
+
+## Analysis
+
+Load gene list
+```{r}
+"{gct}/GC_dict.R" %>%
+  glue::glue() %>%
+  here::here() %>%
+  source(file = .)
+gene_vec <- rownames(magic_df)
+gc_vec <- unique(c(gc_dict[["HARD"]], gc_dict[["MID"]]))
+```
+
+### Marker gene location
+Look at the location where the genes of interest are expressed
+```{r fig.width=30, fig.height=30}
+Seurat::DefaultAssay(merged_se) <- "MAGIC_Spatial"
+
+# Iterate over each image
+lapply(id_sp_df$gem_id, function(i) {
+  print(i)
+
+  gene_plt <- Seurat::SpatialFeaturePlot(
+    object = merged_se,
+    features = gc_vec,
+    alpha = c(0, 1),
+    ncol = 6,
+    images = i)
+
+  # Save plot
+  "{gct}/{plt_dir}/magic_GC_markers_{i}.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = gene_plt,
+      base_height = 35,
+      base_width = 35)
+})
+```
+
+Now with the log-norm expression
+```{r fig.width=30, fig.height=30}
+Seurat::DefaultAssay(merged_se) <- "Spatial"
+
+lapply(id_sp_df$gem_id, function(i) {
+  # Iterate over each image
+  gene_plt <- Seurat::SpatialFeaturePlot(
+    object = merged_se,
+    features = gc_vec,
+    alpha = c(0, 1),
+    ncol = 6,
+    images = i)
+
+  "{gct}/{plt_dir}/lognorm_GC_markers_{i}.pdf" %>%
+    glue::glue() %>%
+    here::here() %>%
+    cowplot::save_plot(
+      filename = .,
+      plot = gene_plt,
+      base_height = 35,
+      base_width = 35)
+})
+```
+
+```{r}
+se_sub <- subset(merged_se, subset = gem_id == "esvq52_nluss5")
+se_sub
+se_sub@images <- se_sub@images[Seurat::Images(se_sub) == "esvq52_nluss5"]
+```
+
+### Correlation matrix
+Since we are working with sample esvq52_nluss5 in this example we will limit the correlation plot to this slide.
+```{r fig.height=15, fig.width=15}
+(cor_mtrx <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = gc_vec,
+  assay = "MAGIC_Spatial",
+  slot = "data"))
+
+"{gct}/{plt_dir}/magic_cor-mtrx_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_mtrx,
+    base_height = 15,
+    base_width = 15)
+
+  # Correlation with lognorm expression
+cor_log <- SCrafty::correlation_heatmap( 
+  se = se_sub,
+  genes = gc_vec,
+  assay = "Spatial",
+  slot = "data")
+
+"{gct}/{plt_dir}/lognorm_cor-mtrx_markers.pdf" %>%
+  glue::glue() %>%
+  here::here() %>%
+  cowplot::save_plot(
+    filename = .,
+    plot = cor_log,
+    base_height = 9,
+    base_width = 10)
+```
+
+Look at them side by side
+```{r fig.width=30, fig.height=15}
+cor_mtrx + cor_log
+```
+
+### Gene signatures
+```{r}
+se_sub <- AddModuleScore_UCell(
+    obj = se_sub,
+    features = gc_dict[c("HARD", "MID", "all-targets-intersect")],
+    name = '_UCell'
+  )
+```
+
+Look at signatures
+```{r fig.width=18, fig.height=5}
+sign <- colnames(se_sub@meta.data)[stringr::str_detect(
+    string = colnames(se_sub@meta.data),
+    pattern = '_UCell')]
+
+Seurat::SpatialPlot(
+  object = se_sub,
+  features = sign,
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  ncol = 3)
+```
+
+### Follicle focus
+
+```{r}
+follicle_bc <- "{gct}/{robj_dir}/follicle_coordinates.csv" %>%
+    glue::glue() %>%
+    here::here() %>%
+    read_csv()
+
+interzone_bc <- "{gct}/{robj_dir}/LZ_DZ_interzone.csv" %>%
+    glue::glue() %>%
+    here::here() %>%
+    read_csv()
+
+se_follicle <- se_sub[, follicle_bc$barcode]
+se_follicle$interzone <- colnames(se_follicle) %in% interzone_bc$barcode
+```
+
+Look at the signature witin the follicle
+```{r fig.width=12, fig.height=12}
+Seurat::SpatialPlot(
+  object = se_follicle,
+  features = sign,
+  alpha = c(0, 1),
+  images = "esvq52_nluss5",
+  ncol = 2,
+  pt.size.factor = 5) +
+  Seurat::SpatialPlot(
+    object = se_follicle,
+    group.by = "interzone",
+    images = "esvq52_nluss5",
+    pt.size.factor = 5)
+```
+
+### DE between Interzone & Follicle
+```{r}
+Seurat::Idents(object = se_follicle) <- se_follicle@meta.data[, "interzone"]
+markers_follicle <- Seurat::FindAllMarkers(
+  object = se_follicle,
+  assay = "Spatial",
+  slot = "data",
+  verbose = TRUE, 
+  only.pos = TRUE)
+
+# Look at cluster = TRUE
+DT::datatable(markers_follicle, filter = "top")
+```
+
+Intersection with lists of interest
+```{r}
+iz_mgs <- markers_follicle %>% filter(cluster == TRUE) %>% pull(gene)
+intersect(iz_mgs, gc_dict[["HARD"]])
+intersect(iz_mgs, gc_dict[["MID"]])
+intersect(iz_mgs, gc_dict[["all-targets-intersect"]])
+```
+
+
+## Session Info
+```{r}
+sessionInfo()
+```
+

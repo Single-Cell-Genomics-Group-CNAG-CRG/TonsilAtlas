@@ -1,0 +1,100 @@
+---
+title: "QC metrics Spreadsheet"
+author: "Marc Elosua Bayes"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      out.width = "100%",
+                      fig.align = "center", 
+                      message = FALSE,
+                      warning = FALSE,
+                      cache = TRUE)
+```
+
+## Introduction
+
+BCLLATLAS_32 is a project within the context of the BCLL\@las which aims to generate a B cell atlas, its lineages, trajectories and spatial localization on the tissue.
+The objective of this notebook is to perform a basic quality control (QC) analysis of the mapping performed with [spaceranger 1.1.0](https://support.10xgenomics.com/spatial-gene-expression/software/pipelines/latest/using/count).
+
+Reference script from Massonix: https://github.com/massonix/tonsil_atlas/blob/master/2-DOWNSTREAM_PROCESSING/2-QC/01-qc_cellranger_mapping.Rmd
+
+## Load packages
+
+```{r}
+library(ggpubr)
+library(ggrepel)
+library(DT)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(stringr)
+library(gt)
+```
+
+## Parameters
+Loading necessary paths and parameters
+```{r}
+source(here::here("misc/paths.R"))
+
+"{qc}/{plt_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+
+"{qc}/{robj_dir}" %>%
+  glue::glue() %>%
+  here::here() %>%
+  dir.create(path = .,
+             showWarnings = FALSE,
+             recursive = TRUE)
+```
+
+
+## Load data
+We have 8 different datasets, 1 for each capture area from 2 Visium slides.
+```{r}
+qcmetric_df <- lapply(id_sp_df$gem_id, function(id) {
+  tmp_df <- "{spaceranger}/{id}/outs/metrics_summary.csv" %>%
+    glue::glue() %>%
+    here::here() %>%
+    readr::read_csv(file = .) %>%
+    dplyr::mutate(
+        sample_id = id_sp_df[id_sp_df$gem_id == id, ] %>% dplyr::pull(donor_id),
+        subproject = id_sp_df[id_sp_df$gem_id == id, ] %>% dplyr::pull(subproject)
+        ) %>%
+    dplyr::rename(
+        gem_id = `Sample ID`,
+        donor_id = sample_id) %>%
+    dplyr::select(subproject, gem_id, donor_id, dplyr::everything())
+  
+  return(tmp_df)
+}) %>% dplyr::bind_rows()
+
+
+DT::datatable(qcmetric_df)
+```
+
+Save to CSV
+```{r}
+"{qc}/{robj_dir}/Supplementary_QC_table_spatial.csv" %>%
+    glue::glue() %>%
+    here::here() %>%
+    write_csv(x = qcmetric_df, file = .)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

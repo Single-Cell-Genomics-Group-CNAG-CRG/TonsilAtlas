@@ -1,0 +1,167 @@
+---
+title: 'CD4 T: scATAC annotation level 5'
+author: "Paula Soler-Vila & Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to refine the clustering annotation done at level 4. This refinement is the result of a manual curation carried out by specialists to remove poor quality cells, misclassified cells or clusters with very few cells and redefine possible new clusters.
+
+Taking into account the data from scRNAseq, we will proceed to:
+
+* Remove of 1 cluster: mitochondrial+ T cells.
+* Subcluster Follicular Th CXCL13+CBLB+ into 2 clusters
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(Signac)
+library(tidyverse)
+library(reshape2)
+library(ggpubr)
+library(harmony)
+```
+
+
+## Parameters
+```{r}
+cell_type = "CD4_T"
+
+# Paths
+path_to_obj <- str_c(
+  here::here("scATAC-seq/results/R_objects/level_4/"),
+  cell_type,
+  "/04.",
+  cell_type,
+  "_integration_peak_calling_level_4.rds",
+  sep = ""
+)
+
+path_to_obj_RNA <- str_c(
+  here::here("scRNA-seq/3-clustering/5-level_5/"),
+  cell_type,
+    "/",
+  cell_type,
+  "_subseted_integrated_level_5.rds",
+  sep = ""
+)
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", 
+                    "#5A5156", "#AA0DFE", "#F8A19F", "#F7E1A0", 
+                    "#1C8356", "#FEAF16", "#822E1C", "#C4451C", 
+                    "#1CBE4F", "#325A9B", "#F6222E")
+
+
+path_to_level_5 <- here::here("scATAC-seq/results/R_objects/level_5/CD4_T/")
+path_to_save <- str_c(path_to_level_5, "01.CD4_T_integrated_level_5.rds")
+```
+
+## Load data
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+
+seurat_RNA <- readRDS(path_to_obj_RNA)
+seurat_RNA
+```
+
+## Visualization of the data
+```{r fig.wide=TRUE}
+p1 <- DimPlot(seurat,
+      group.by = "annotation_level_3",
+      cols = color_palette,
+      pt.size = 0.2)
+
+p2 <- DimPlot(seurat_RNA,
+  group.by = "annotation_level_5",
+  pt.size = 0.1,cols = color_palette)
+
+p1
+p2
+```
+
+# Removing mitochondrial+ T cells.
+
+```{r}
+selected_cells_clusters <- colnames(seurat)[!(seurat$annotation_level_3 == "Mitochondrial+ T cells")]
+seurat <- subset(seurat, cells = selected_cells_clusters)
+seurat$annotation_level_3 <- droplevels(seurat$annotation_level_3)
+
+table(seurat$annotation_level_3)
+```
+
+## Visualization after removing problematic cells
+
+```{r fig.wide=TRUE}
+DimPlot(seurat,
+      group.by = "annotation_level_3",
+      cols = color_palette,
+      pt.size = 0.1)
+```
+
+# Integration
+
+```{r fig.wide=TRUE}
+seurat <- seurat %>%
+  RunTFIDF() %>%
+  FindTopFeatures(min.cutoff = 10) %>%
+  RunSVD()
+
+DepthCor(seurat)
+seurat <- RunUMAP(object = seurat, reduction = 'lsi', dims = 2:40)
+
+DimPlot(seurat,
+      group.by = "annotation_level_3",
+      cols = color_palette,
+      pt.size = 0.2)
+
+seurat <- RunHarmony(
+  object = seurat,
+  dims = 2:40,
+  group.by.vars = 'assay',
+  reduction = 'lsi',
+  assay.use = 'peaks_redefined',
+  project.dim = FALSE,
+  max.iter.harmony = 20
+)
+
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 2:40)
+seurat <- FindNeighbors(seurat, reduction = "harmony", dims = 2:40)
+
+DimPlot(seurat,
+      group.by = "annotation_level_3",
+      cols = color_palette,
+      pt.size = 0.2)
+```
+
+# Save
+```{r}
+saveRDS(seurat, path_to_save)
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

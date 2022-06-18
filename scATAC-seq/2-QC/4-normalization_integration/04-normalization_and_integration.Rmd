@@ -1,0 +1,170 @@
+---
+title: "Normalization and Batch Effect Correction"
+author: "Paula Soler-Vila"
+output: 
+    BiocStyle::html_document:
+      toc: true
+      toc_float: true
+      number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, out.width = "100%", fig.align = "center",
+  message = FALSE, warning = FALSE
+)
+options(width = 1200)
+```
+
+# Objective
+
+The objective of this notebook is to apply the downstream analysis on the filtered scATAC-seq aggregated data:
+
+1. Normalization across cells and across peaks (TF-IDF) following the method proposed by Stuart & Butler et al. 2019
+2. Dimensionality reduction using singular value decomposition (SVD).
+3. Bacht correction to reduce the dependence between the different confounders using Harmony.
+4. Non-dimensionality reduction (UMAP)
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Signac)
+library(Seurat)
+library(GenomicRanges)
+library(future)
+library(harmony)
+library(EnsDb.Hsapiens.v86)
+library(stringr)
+library(ggpubr)
+
+set.seed(173)
+```
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scATAC-seq/results/R_objects/2.tonsil_aggregated_filtered.rds")
+path_to_save_obj_norm <- here::here("scATAC-seq/results/R_objects/3.tonsil_aggregated_norm.rds")
+path_to_save_obj_integrated <- here::here("scATAC-seq/results/R_objects/4.tonsil_aggregated_harmony.rds")
+path_tmp_dir <- here::here("scATAC-seq/2-QC/5-batch_effect_correction/1-data_asses_scATAC/tmp/")
+
+path_to_save_dimred_uncorrect <- str_c(path_tmp_dir, "batch_uncorrected_lsi.rds", sep = "")
+path_to_save_dimred_correct <- str_c(path_tmp_dir, "batch_corrected_lsi.rds", sep = "")
+path_to_save_confounders_df <- str_c(path_tmp_dir, "confounders_df.rds", sep = "") 
+```
+
+## Load filtered data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+# Visualize UMAP without batch effect correction
+
+```{r fig.wide=TRUE}
+# Process Seurat object
+seurat <- seurat %>%
+  RunTFIDF() %>% 
+  FindTopFeatures(min.cutoff = "q0") %>%
+  RunSVD() %>%
+  RunUMAP(reduction = "lsi", dims = 2:40)
+
+DepthCor(seurat)
+
+# Visualize UMAP
+confounders <- c("library_name", "sex", "age_group", "technique", "hospital")
+umaps_before_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_before_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_before_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, technique and hospital:")
+umaps_before_integration[2:length(umaps_before_integration)]
+
+saveRDS(seurat, path_to_save_obj_norm)
+```
+
+# Run and visualize Harmony's integration
+We used Harmony integration to reduce the dependence between the main categorical batches (such as technique, sex, age group and library) of the dataset.
+
+```{r fig.wide=TRUE}
+seurat <- RunHarmony(
+  object = seurat, 
+  group.by.vars = "gem_id", 
+  reduction = "lsi",
+  dims = 2:40,
+  assay.use = "ATAC",
+  project.dim = FALSE
+)
+
+seurat <- RunUMAP(seurat, dims = 2:40, reduction = "harmony")
+
+umaps_after_integration <- purrr::map(confounders, function(x) {
+  p <- DimPlot(seurat, group.by = x, pt.size = 0.1)
+  p
+})
+names(umaps_after_integration) <- confounders
+print("UMAP colored by GEM:")
+umaps_after_integration$library_name + NoLegend()
+print("UMAP colored by sex, age group, technique and hospital:")
+umaps_after_integration[2:length(umaps_before_integration)]
+```
+
+# Spot potential doublets
+
+## Scrublet prediction
+
+```{r}
+# Scrublet
+DimPlot(seurat, group.by = "scrublet_predicted_doublet")
+table(seurat$scrublet_predicted_doublet)
+```
+
+## QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_ATAC",
+  "nFeature_ATAC"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x)
+  p
+})
+qc_gg
+```
+
+# Save
+
+```{r}
+# If it doesn't exist create temporal directory
+#dir.create(path_tmp_dir, showWarnings = FALSE) 
+
+# Save integrated Seurat object
+saveRDS(seurat, path_to_save_obj_integrated)
+
+# Save PCA matrices to compute the Local Inverse Simpson Index (LISI)
+confounders_df <- seurat@meta.data[, confounders]
+saveRDS(confounders_df, path_to_save_confounders_df)
+saveRDS(
+  seurat@reductions$lsi@cell.embeddings[, 2:40],
+  path_to_save_dimred_uncorrect
+)
+saveRDS(
+  seurat@reductions$harmony@cell.embeddings[, 2:40],
+  path_to_save_dimred_correct
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

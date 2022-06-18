@@ -1,0 +1,315 @@
+---
+title: "T cell clusters"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+author: Sonal 
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    number_sections: yes
+    df_print: paged
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+setwd("/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/")
+```
+
+# Define Parameters
+
+## Load packages
+
+```{r } 
+library(Seurat)
+library(flexclust)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(harmony)
+```
+
+
+## Define variables and functions
+
+```{r}
+path_to_save_obj <- "/home/srashmi/Documents/tonsil_atlas_citeseq_vdj_20210505/results"
+path_to_save_citeseq_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_annotated.rds",
+  sep = "/"
+)
+path_to_save_seurat_obj <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_tcell_object.rds",
+  sep = "/"
+)
+citeseq_marker <- str_c(
+  path_to_save_obj,
+  "tonsil_cite_seq_tcell_marker.xlsx",
+  sep = "/"
+)
+saved_cell_cycle_obj <- str_c(
+  path_to_save_obj,
+  "../data/cycle.rda",
+  sep = "/"
+)
+# Color
+color <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "mediumorchid2", "coral2", "blueviolet",
+                   "indianred4", "deepskyblue1", "dimgray", "deeppink1",
+                   "green", "lightgray", "hotpink1", "chocolate", "aquamarine", "aliceblue", "burlywood", "blueviolet")
+```
+
+## Load data
+
+```{r data}
+seurat_obj <- readRDS(path_to_save_citeseq_seurat_obj)
+```
+
+## get metadata
+
+```{r get metadata}
+metadata <- seurat_obj@meta.data 
+```
+
+# extract T cells
+
+```{r}
+b_cells <- rownames(subset(metadata, metadata$annotation %in% c("CD4_T","Cytotoxic")))
+t_clusters_obj = subset(seurat_obj,cells=b_cells)
+```
+
+
+# Sub-clustering of T cell clusters
+
+```{r}
+t_clusters_obj@meta.data %>%
+  ggplot(aes(UMAP1, UMAP2, color = annotation)) +
+    geom_point(size = 0.75) +
+    scale_color_manual(values = color) +
+    labs(x = "UMAP1", y = "UMAP2", color = "") +
+    theme_classic()
+```
+
+
+```{r}
+metadata <- t_clusters_obj@meta.data
+df = count(metadata,metadata$annotation)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+
+## ADT and RNA multimodal analysis
+
+```{r}
+DefaultAssay(t_clusters_obj) <- 'RNA'
+t_clusters_obj <- NormalizeData(t_clusters_obj) %>% FindVariableFeatures() %>% ScaleData() %>% RunPCA()  %>%
+  RunHarmony(reduction = "pca",dims = 1:30,group.by.vars = "gemid",assay.use = "RNA",reduction.save = "harmony_RNA")
+```
+
+## Check for Cell cycle stages variability between clusters
+
+```{r}
+load(saved_cell_cycle_obj)
+t_clusters_obj <- CellCycleScoring(t_clusters_obj, 
+                                 g2m.features = g2m_genes, 
+                                 s.features = s_genes)
+```
+
+
+```{r}
+DefaultAssay(t_clusters_obj) <- 'ADT'
+# we will use all ADT features for dimensional reduction
+# we set a dimensional reduction name to avoid overwriting the 
+VariableFeatures(t_clusters_obj) <- rownames(t_clusters_obj[["ADT"]])
+t_clusters_obj <- NormalizeData(t_clusters_obj, normalization.method = 'CLR', margin = 2) %>% 
+  ScaleData() %>% RunPCA(reduction.name = 'apca') %>%
+  RunHarmony(reduction = "apca",dims = 1:20, group.by.vars = "gemid", assay.use = "ADT", reduction.save = "harmony_protein")
+```
+
+## Multimodal Neighbor Identification
+
+```{r}
+# Identify multimodal neighbors. These will be stored in the neighbors slot, 
+# and can be accessed using filtered_bcll.combined[['weighted.nn']]
+# The WNN graph can be accessed at filtered_bcll.combined[["wknn"]], 
+# and the SNN graph used for clustering at filtered_bcll.combined[["wsnn"]]
+# Cell-specific modality weights can be accessed at filtered_bcll.combined$RNA.weight
+t_clusters_obj <- FindMultiModalNeighbors(
+  t_clusters_obj, reduction.list = list("harmony_RNA", "harmony_protein"),
+  dims.list = list(1:30, 1:20), modality.weight.name = "RNA.weight"
+)
+```
+
+
+## UMAP visualisation
+
+```{r}
+feat_clust <- c(0.1,0.5,1,1.5,2)
+t_clusters_obj <- RunUMAP(t_clusters_obj, nn.name = "weighted.nn", reduction.name = "wnn.umap", reduction.key = "wnn_UMAP_")
+t_clusters_obj <- FindClusters(t_clusters_obj, graph.name = "wsnn", algorithm = 3, resolution = feat_clust, verbose = FALSE)
+```
+
+```{r}
+Seurat::DimPlot(t_clusters_obj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = c("wsnn_res.0.1","wsnn_res.0.5","wsnn_res.1","wsnn_res.1.5","wsnn_res.2")) + NoLegend()  & Seurat::NoLegend()
+```
+
+```{r}
+t_clusters_obj <- FindClusters(t_clusters_obj, graph.name = "wsnn", algorithm = 3, resolution = 0.5, verbose = FALSE)
+t_clusters_obj <- RunUMAP(t_clusters_obj, reduction = 'pca', dims = 1:30, assay = 'RNA', 
+              reduction.name = 'rna.umap', reduction.key = 'rnaUMAP_')
+t_clusters_obj <- RunUMAP(t_clusters_obj, reduction = 'apca', dims = 1:18, assay = 'ADT', 
+              reduction.name = 'adt.umap', reduction.key = 'adtUMAP_')
+
+```
+
+
+```{r}
+p1 <- DimPlot(t_clusters_obj, reduction = 'rna.umap', label = TRUE, 
+              repel = TRUE, label.size = 2.5) + NoLegend()
+p2 <- DimPlot(t_clusters_obj, reduction = 'adt.umap', label = TRUE, 
+              repel = TRUE, label.size = 2.5) + NoLegend()
+```
+
+```{r}
+p1
+```
+
+
+```{r}
+p2
+```
+
+```{r}
+Seurat::DimPlot(t_clusters_obj, reduction = 'wnn.umap', label = TRUE, repel = TRUE, label.size = 2.5, group.by = "wsnn_res.0.5")
+```
+
+```{r}
+metadata <- t_clusters_obj@meta.data
+df = count(metadata,metadata$wsnn_res.0.5)
+colnames(df) = c("Cluster","Number_of_cells")
+library(knitr)
+library(kableExtra)
+kable(df) %>%
+  kable_styling("striped", full_width = T)
+
+```
+
+# QC
+
+## BCR - TCR
+
+```{r}
+df <- t_clusters_obj@meta.data
+with(df, table(wsnn_res.0.5, repertoire_flag, useNA = "ifany"))
+```
+
+
+## Check for subproject variability
+
+```{r}
+DimPlot(t_clusters_obj, reduction = "wnn.umap", group.by = 'subproject')
+```
+
+## Cell Cycle 
+
+```{r}
+# Plot the PCA colored by cell cycle phase
+DimPlot(t_clusters_obj,
+        reduction = "pca",
+        group.by= "Phase",
+        split.by = "Phase")
+```
+
+```{r}
+DimPlot(t_clusters_obj, reduction = "wnn.umap", group.by = 'Phase')
+```
+
+```{r}
+p1 <- FeatureScatter(t_clusters_obj, feature1 = "CD4", feature2 = "CD8", group.by
+ = "wsnn_res.0.5")
+p2 <- FeatureScatter(t_clusters_obj, feature1 = "CD19", feature2 = "CD3E", group.by
+ = "wsnn_res.0.5")
+p3 <- FeatureScatter(t_clusters_obj, feature1 = "CD79B", feature2 = "CD3E", group.by
+ = "wsnn_res.0.5")
+p1
+p2
+p3
+```
+
+## Plot mitochondrial, nGene_count, nFeature_count content across cluster
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "nCount_RNA", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "nFeature_RNA", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "nCount_ADT", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "nFeature_ADT", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "percent.mt", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "log10GenesPerUMI", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "scrublet_doublet_scores", group.by="wsnn_res.0.5")
+```
+
+```{r}
+VlnPlot(object = t_clusters_obj, features = "annotation_prob", group.by="wsnn_res.0.5")
+```
+
+# Find All CITEseq Markers
+
+```{r}
+DefaultAssay(t_clusters_obj) <- "ADT"
+Idents(t_clusters_obj) <- t_clusters_obj@meta.data$wsnn_res.0.5
+markers <- FindAllMarkers(t_clusters_obj, assay = "ADT")
+```
+
+## Save All Markers in Excel
+
+```{r}
+markers <- markers %>%
+  dplyr::arrange(cluster, desc(abs(avg_log2FC))) 
+#%>% dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.9)
+markers_list <- purrr::map(levels(markers$cluster), ~ markers[markers$cluster == .x, ])
+names(markers_list) <- levels(markers$cluster)
+openxlsx::write.xlsx(markers_list, citeseq_marker)
+DT::datatable(markers, filter ="top")
+```
+
+
+# Save the seurat object 
+
+```{r}
+saveRDS(t_clusters_obj, file = path_to_save_seurat_obj)
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+

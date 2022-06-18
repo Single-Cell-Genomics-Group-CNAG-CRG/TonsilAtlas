@@ -1,0 +1,343 @@
+---
+title: "Myeloid: Level 4"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+NOTE: from level 4/5 onwards I will execute most steps locally, as the datasets are not as large anymore.
+
+
+# Introduction
+
+Here, we will include the annotation of the myeloid cells (level 4).
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(SeuratWrappers)
+library(harmony)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_3/myeloid/myeloid_clustered_level_3_with_pre_freeze.rds"
+path_to_save <- "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/myeloid_annotated_level_4.rds"
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source("~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/bin/utils.R")
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette)
+```
+
+# Subcluster
+
+
+* Subcluster cluster 4 to distinguish between DC2 and DC4.
+* Subcluster cluster 8 to distinguish proliferative myeloid from doublets.
+
+
+```{r}
+# Subcluster 4 (DC2 and DC4)
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "4",
+  graph.name = "RNA_snn",
+  subcluster.name = "DC2_DC4",
+  resolution = 0.4
+)
+Idents(seurat) <- "DC2_DC4"
+clusters_4 <- seurat$DC2_DC4 %>%
+  unique() %>%
+  str_subset("^4_") %>%
+  sort()
+markers_4 <- purrr::map(clusters_4, function(x) {
+  group_1 <- clusters_4[which(clusters_4 == x)]
+  group_2 <- clusters_4[which(clusters_4 != x)]
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_4) <- clusters_4
+DT::datatable(markers_4$`4_0`)
+DT::datatable(markers_4$`4_1`)
+DT::datatable(markers_4$`4_2`)
+DT::datatable(markers_4$`4_3`)
+DimPlot(seurat, group.by = "DC2_DC4", cols = color_palette)
+```
+
+
+* 4_0: DC2
+* 4_1: doublets
+* 4_2: DC4 
+* 4_3: DC3
+
+
+Cycling cells:
+
+```{r}
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "8",
+  graph.name = "RNA_snn",
+  subcluster.name = "cycling",
+  resolution = 0.1
+)
+DimPlot(seurat, group.by = "cycling", cols = color_palette)
+FeaturePlot(seurat, "MS4A1")
+Idents(seurat) <- "cycling"
+```
+
+* 8_0: doublets
+* 8_1: Cycling
+
+
+# Annotation
+
+```{r}
+seurat$annotation_level_3 <- case_when(
+  seurat$cycling == "0" ~ "poor-quality",
+  seurat$cycling == "1" ~ "SELENOP/APOC Macrophages",
+  seurat$cycling == "2" ~ "poor-quality",
+  seurat$cycling == "3" ~ "TBD_3_level_3",
+  seurat$cycling == "4_0" ~ "DC2",
+  seurat$cycling == "4_1" ~ "poor-quality",
+  seurat$cycling == "4_2" ~ "DC4",
+  seurat$cycling == "4_3" ~ "DC3",
+  seurat$cycling == "5" ~ "TBD_5_level_3",
+  seurat$cycling == "6" ~ "aDC",
+  seurat$cycling == "7" ~ "TBD_7_level_3",
+  seurat$cycling == "8_0" ~ "poor-quality",
+  seurat$cycling == "8_1" ~ "Cycling",
+  seurat$cycling == "9" ~ "Neutrophil Granulocytes",
+  seurat$cycling == "10" ~ "TBD_10_level_3",
+  seurat$cycling == "11" ~ "DC1 precursor",
+  seurat$cycling == "12" ~ "DC5",
+  seurat$cycling == "13" ~ "Monocytes",
+  seurat$cycling == "14" ~ "DC1 mature",
+  seurat$cycling == "15" ~ "M1 Macrophages",
+  seurat$cycling == "16" ~ "poor-quality",
+  seurat$cycling == "17" ~ "Mast cells",
+  seurat$cycling == "18" ~ "TBD_18_level_3",
+  seurat$cycling == "19" ~ "IL7R DC",
+  seurat$cycling == "20" ~ "poor-quality",
+  seurat$cycling == "21" ~ "poor-quality"
+)
+DimPlot(seurat, cols = color_palette, group.by = "annotation_level_3")
+seurat <- subset(seurat, annotation_level_3 != "poor-quality")
+seurat <- subset(seurat, donor_id != "BCP2")
+DimPlot(seurat, cols = color_palette, group.by = "annotation_level_3")
+Idents(seurat) <- "annotation_level_3"
+```
+
+
+# Dimensionality reduction
+
+```{r}
+seurat <- seurat %>%
+  FindVariableFeatures(nfeatures = 3000) %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "donor_id", reduction = "pca", dims = 1:30)
+seurat <- RunUMAP(seurat, reduction = "harmony", dims = 1:30)
+seurat <- FindNeighbors(seurat, reduction = "harmony", dims = 1:30)
+DimPlot(seurat, cols = color_palette, group.by = "annotation_level_3")
+```
+
+
+# Recluster aDC
+
+```{r}
+Idents(seurat) <- "annotation_level_3"
+seurat <- FindSubCluster(
+  seurat,
+  cluster = "aDC",
+  graph.name = "RNA_snn",
+  subcluster.name = "aDC",
+  resolution = 0.3
+)
+DimPlot(seurat, group.by = "aDC", cols = color_palette)
+
+Idents(seurat) <- "aDC"
+clusters_aDC <- seurat$aDC %>%
+  unique() %>%
+  str_subset("^aDC_") %>%
+  sort()
+markers_aDC <- purrr::map(clusters_aDC, function(x) {
+  group_1 <- clusters_aDC[which(clusters_aDC == x)]
+  group_2 <- clusters_aDC[which(clusters_aDC != x)]
+  df <- FindMarkers(
+    seurat,
+    ident.1 = group_1,
+    ident.2 = group_2,
+    only.pos = TRUE,
+    logfc.threshold = 0.5,
+    verbose = TRUE
+  )
+  df <- df %>%
+    rownames_to_column(var = "gene") %>%
+    arrange(desc(avg_log2FC))
+  df
+})
+names(markers_aDC) <- clusters_aDC
+DT::datatable(markers_aDC$aDC_0)
+DT::datatable(markers_aDC$aDC_1)
+DT::datatable(markers_aDC$aDC_2)
+seurat$aDC[seurat$aDC == "aDC_0"]  <- "aDC3" #MT2A, CCL19
+seurat$aDC[seurat$aDC == "aDC_1"]  <- "aDC1" #CD274 CD80 CD40
+seurat$aDC[seurat$aDC == "aDC_2"]  <- "aDC2" #AIRE CCL22
+```
+
+
+# Subset and recluster macrophages
+
+```{r}
+seurat$annotation_level_3 <- seurat$aDC
+Idents(seurat) <- "annotation_level_3"
+DimPlot(seurat, cols = color_palette)
+macrophages_levels <- c("TBD_3_level_3", "TBD_5_level_3", "TBD_7_level_3",
+                        "TBD_10_level_3", "TBD_10_level_3", "SELENOP/APOC Macrophages")
+macrophages <- subset(seurat, idents = macrophages_levels)
+macrophages <- macrophages %>%
+  FindVariableFeatures(nfeatures = 2500) %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "donor_id", reduction = "pca", dims = 1:25)
+macrophages <- RunUMAP(
+  macrophages,
+  reduction = "harmony",
+  dims = 1:25,
+  n.neighbors = 10
+)
+macrophages <- FindNeighbors(
+  macrophages,
+  reduction = "harmony",
+  dims = 1:25,
+  k.param = 20
+)
+DimPlot(macrophages, cols = color_palette)
+macrophages <- FindClusters(macrophages, resolution = 0.4)
+DimPlot(macrophages, cols = color_palette)
+FeaturePlot(macrophages, "MS4A1")
+
+
+# Markers
+markers_macrophages <- FindAllMarkers(
+  macrophages,
+  only.pos = TRUE,
+  logfc.threshold = 0.75
+)
+markers_macrophages <- markers_macrophages %>%
+  group_by(cluster) %>%
+  arrange(desc(avg_log2FC), .by_group = TRUE)
+DT::datatable(markers_macrophages)
+```
+
+
+# Save
+
+```{r}
+# Macrophages
+input_shiny_macrophages <- seurat2shiny(macrophages, slot = "data", reduction = "umap")
+saveRDS(
+  input_shiny_macrophages$expression,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/macrophages_expression_to_shiny_app_level_4.rds"
+)
+saveRDS(
+  input_shiny_macrophages$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/macrophages_metadata_to_shiny_app_level_4.rds"
+)
+umap_level_4 <- DimPlot(macrophages, cols = color_palette, pt.size = 1)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/myeloid/tmp/macrophages_umap_level_4.png",
+  plot = umap_level_4,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+saveRDS(macrophages, "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/macrophages_clustered_level_4.rds")
+markers_macrophages_list <- purrr::map(unique(markers_macrophages$cluster), function(x) {
+  df <- markers_macrophages[markers_macrophages$cluster == x, ]
+  df
+})
+names(markers_macrophages_list) <- unique(markers_macrophages$cluster)
+openxlsx::write.xlsx(
+  markers_macrophages_list,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/myeloid/tmp/macrophages_markers.xlsx"
+)
+
+
+# umap_level_3 <- DimPlot(seurat, cols = color_palette, pt.size = 1)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/3-clustering/4-level_4/myeloid/tmp/myeloid_umap_level_4.png",
+  plot = umap_level_4,
+  width = 14,
+  height = 12,
+  units = "cm"
+)
+saveRDS(seurat, path_to_save)
+
+
+# Shiny app
+input_shiny <- seurat2shiny(seurat, slot = "data", reduction = "umap")
+saveRDS(
+  input_shiny$expression,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/myeloid_expression_to_shiny_app_level_4.rds")
+saveRDS(
+  input_shiny$metadata,
+  "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/scRNA-seq/results/R_objects/level_4/myeloid/myeloid_metadata_to_shiny_app_level_4.rds")
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+

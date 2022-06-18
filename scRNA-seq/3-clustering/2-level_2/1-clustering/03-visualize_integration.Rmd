@@ -1,0 +1,184 @@
+---
+author: "Ramon Massoni-Badosa"
+date: "2021/03/15"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+title <- paste("Visualize integration (level 2):", cell_type, sep = " ")
+```
+
+---
+title: "`r title`"
+---
+
+TODO: function "feature_plot_doublets" discretizes any quantiative variable and changes the scale. Not a problem here, since it's purely exploratory. However, to prevent this, instead of passing a vector of viridis colors to FeaturePlot, run it normally and then + scale_color_viridis_c(option = "magma")
+
+
+# Introduction
+
+The objectives of this notebook are:
+
+- Visualize how well we could remove technical variability associated with the assay (3', 5' or multiome). We should see a high degree of intermixing between the 3 assays.
+- Visualize how well we could preserve the biological variability. We will use the annotation of King et al., as a positive control, so that the data integration should preserve the cell type annotations.
+- Plot several markers of doublets: lineage markers, pDNN, scrublet predictions, number of features, etc. The broader objective of level 2 is to eliminate most remaining doublets and poor-quality cells, as we will discuss in future notebooks. These visualizations will allow us to explore this. We will also plot their location in the UMAP obtained at level 1.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- str_c(
+  here::here("scRNA-seq/results/R_objects/level_2/"),
+  cell_type,
+  "/",
+  cell_type,
+  "_integrated_level_2.rds",
+  sep = ""
+)
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+
+
+# Colors
+color_palette <- c("black", "gray", "red", "yellow", "violet", "green4",
+                   "blue", "gold", "antiquewhite", "chocolate1", "coral2",
+                   "blueviolet", "brown1", "darkmagenta", "deepskyblue1",
+                   "dimgray", "deeppink1", "green", "lightgray", "hotpink1",
+                   "indianred4", "khaki", "mediumorchid2")
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+```
+
+
+# Assess integration
+
+## Removal of technical variability
+
+```{r}
+p_assay <- plot_split_umap(seurat, var = "assay")
+p_assay
+```
+
+
+## Preservation of biological variability
+
+```{r}
+p_king <- plot_annotation_king(seurat, color_palette = color_palette) +
+  guides(colour = guide_legend(override.aes = list(size = 2.5)))
+p_king
+```
+
+
+# Spot potential doublets
+
+## Lineage markers
+
+```{r}
+canonical_markers <- c("CD79A", "CD79B", "CD3D", "CD3E", "NKG7", "LYZ",
+                       "IGHD", "IGHM", "IGHA1", "IGHG1", "FDCSP", "PTCRA",
+                       "XBP1", "TOP2A", "KRT19", "SPRR3", "DNTT", "VPREB1")
+canonical_markers_gg <- purrr::map(canonical_markers, function(x) {
+  p <- feature_plot_doublets(seurat_obj = seurat, feature = x)
+  p
+})
+names(canonical_markers_gg) <- canonical_markers
+canonical_markers_gg
+```
+
+
+## pDNN and scrublet prediction
+
+```{r}
+# pDNN
+pDNN_vars <- c("pDNN_hashing", "pDNN_scrublet", "pDNN_union")
+pDNN_gg <- purrr::map(pDNN_vars, function(x) {
+  p <- plot_pDNN(seurat_obj = seurat, pDNN_var = x, pt_size = 0.2)
+  p
+})
+pDNN_gg
+
+
+# Scrublet
+seurat$scrublet_predicted_doublet[seurat$scrublet_predicted_doublet == "True"] <- "TRUE"
+seurat$scrublet_predicted_doublet[seurat$scrublet_predicted_doublet == "False"] <- "FALSE"
+DimPlot(seurat, group.by = "scrublet_predicted_doublet")
+```
+
+
+## QC metrics
+
+```{r}
+qc_vars <- c(
+  "nCount_RNA",
+  "nFeature_RNA",
+  "pct_mt",
+  "pct_ribosomal"
+)
+qc_gg <- purrr::map(qc_vars, function(x) {
+  p <- FeaturePlot(seurat, features = x, cols = viridis::viridis(10))
+  p
+})
+qc_gg
+```
+
+
+## UMAP level 1
+
+```{r}
+umap_level_1 <- FeatureScatter(
+  seurat,
+  "UMAP_1_level_1",
+  "UMAP_2_level_1",
+  group.by = "seurat_clusters"
+)
+umap_level_1 <- umap_level_1 +
+  theme(
+    legend.position = "none",
+    plot.title = element_blank()
+  )
+umap_level_1
+```
+
+
+## Cell cycle scoring
+
+```{r}
+s_gg <- feature_plot_doublets(seurat_obj = seurat, feature = "S.Score")
+g2m_gg <- feature_plot_doublets(seurat_obj = seurat, feature = "G2M.Score")
+s_gg
+g2m_gg
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,123 @@
+---
+title: "Doublet exclusion: Multiome"
+author: "Paula Soler-Vila and Ramon Massoni-Badosa"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook we will exclude the doublets in the multiome using two approaches:
+
+- Applying permissive thresholds to the scrublet doublet scores (ATAC and RNA).
+- Overcluster to find and remove the clusters of B-T doublets.
+
+
+# Pre-processing 
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("multiome/results/R_objects/5.tonsil_multiome_integrated_using_wnn.rds")
+path_to_save <- here::here("multiome/results/R_objects/6.tonsil_multiome_integrated_using_wnn_no_doublets.rds")
+
+
+# Thresholds
+max_doublet_score_rna <- 0.3
+max_doublet_score_atac <- 0.3
+```
+
+
+## Load data
+
+```{r}
+tonsil <- readRDS(path_to_obj)
+```
+
+
+# Cluster
+
+
+```{r}
+DefaultAssay(tonsil) <- "RNA"
+tonsil <- FindNeighbors(tonsil, reduction = "harmony_RNA", dims = 1:30)
+tonsil <- FindClusters(tonsil, resolution = c(1.25, 1.5, 1.75, 2))
+print(colnames(tonsil@meta.data))
+```
+
+
+## Visualize clusters
+
+```{r fig.wide=TRUE}
+vars <- str_subset(colnames(tonsil@meta.data), "^RNA_snn_res")
+clusters_gg <- purrr::map(vars, function(x) {
+  p <- DimPlot(
+    tonsil,
+    group.by = x,
+    reduction = "umap.rna",
+    pt.size = 0.1, label = T
+  )
+  p
+})
+clusters_gg
+```
+
+
+# Filter
+
+We will exclude cluster 8 (resolution = 1.25), as we saw in the previous notebook that corresponds to B-T doublets and has a high scrublet score. We will also filter cells with extreme doublet score:
+
+```{r}
+tonsil$is_doublet <- 
+  tonsil$RNA_snn_res.1.25 == "8" |
+  tonsil$scrublet_doublet_scores > max_doublet_score_rna |
+  tonsil$scrublet_doublet_scores_atac > max_doublet_score_atac
+tonsil <- subset(tonsil, subset = is_doublet == FALSE)
+```
+
+Plot:
+
+```{r fig.wide=TRUE}
+p <- DimPlot(
+  tonsil,
+  group.by = "library_name",
+  reduction = "umap.rna",
+  pt.size = 0.1
+)
+p
+```
+
+
+# Save
+
+```{r}
+saveRDS(tonsil, path_to_save)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

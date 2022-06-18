@@ -1,0 +1,7 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/cDNA/lane2,md651vbh_eymr91s7,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/cDNA/lane4,md651vbh_eymr91s7,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/cDNA/lane1,md651vbh_eymr91s7,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/cDNA/lane3,md651vbh_eymr91s7,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/HTO/lane2,md651vbh_eymr91s7_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_21/jobs/md651vbh_eymr91s7/fastq/HTO/lane1,md651vbh_eymr91s7_HTO,Antibody Capture

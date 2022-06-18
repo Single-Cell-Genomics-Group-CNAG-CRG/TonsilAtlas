@@ -1,0 +1,9 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/cDNA/lane2,z3of7uaq_mzbhy4tt,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/cDNA/lane4,z3of7uaq_mzbhy4tt,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/cDNA/lane1,z3of7uaq_mzbhy4tt,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/cDNA/lane3,z3of7uaq_mzbhy4tt,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/HTO/lane2,z3of7uaq_mzbhy4tt_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/HTO/lane4,z3of7uaq_mzbhy4tt_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/HTO/lane1,z3of7uaq_mzbhy4tt_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_41/jobs/z3of7uaq_mzbhy4tt/fastq/HTO/lane3,z3of7uaq_mzbhy4tt_HTO,Antibody Capture

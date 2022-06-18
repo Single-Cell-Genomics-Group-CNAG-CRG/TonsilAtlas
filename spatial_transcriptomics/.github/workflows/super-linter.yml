@@ -1,0 +1,50 @@
+## Super-linter GitHub actions ##
+name: super-linter GitHub action
+
+## Documentation: ##
+# https://github.com/github/super-linter
+# https://help.github.com/en/articles/workflow-syntax-for-github-actions
+
+## Starting a new job when... ##
+on:
+  # A pull request happens...
+  pull_request:
+    # Which has one the following branches as the base ...
+    branches: [main, dev]
+   
+    ## Ignore these paths (uncomment to activate)
+    #paths-ignore: 
+    #  - 'path-one-to-ignore/**'
+    
+    #  - 'other-path/to-ignore**'
+
+# Set the job
+jobs:
+
+  build:
+    # Name the job
+    name: super-linter
+    # Set the agent to run on
+    runs-on: ubuntu-latest
+
+
+    # Load all steps
+    steps:
+
+      # Checkout the code base
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      # Run Linter against code base 
+      - name: Run super-linter
+        uses: github/super-linter@v3
+        env:
+          VALIDATE_ALL_CODEBASE: false
+          DEFAULT_BRANCH: main
+          VALIDATE_BASH: true
+          VAILIDATE_BASH_EXEC: true
+          VALIDATE_PYTHON: true
+          VALIDATE_R: true
+          VALIDATE_MD: true
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISABLE_ERRORS: true
