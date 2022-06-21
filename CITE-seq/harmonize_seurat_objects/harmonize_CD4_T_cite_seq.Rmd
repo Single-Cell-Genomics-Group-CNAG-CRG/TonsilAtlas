@@ -1,0 +1,105 @@
+---
+title: "Harmonize CITE-seq object CD4 T"
+author: "Ramon Massoni-Badosa"
+date: "`r format(Sys.time(), '%B %Y')`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+To be consistent with the other data modalities, we will harmonize the CITE-seq dataset for the CD4 T cells, including the variable names in the metadata, and the names of the ADT.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(here)
+```
+
+
+## Parameters
+
+```{r}
+# Source functions
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+
+
+# Paths
+path_to_donor_metadata <- here("data/tonsil_atlas_donor_metadata.csv")
+path_to_sequencing_cite_metadata <- here("CITE-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv")
+```
+
+
+## Read data
+
+```{r}
+seurat <- readRDS(path_to_cite_cd4_not_harmonized)
+donor_metadata <- read_csv(path_to_donor_metadata)
+sequencing_cite_metadata <- read_csv(path_to_sequencing_cite_metadata)
+```
+
+
+# Harmonize CITE-seq dataset
+
+```{r}
+# Harmonize columns metadata to match the ones we have in RNA-seq
+selected_cols_cite <- c(selected_cols_cite, "annotation_figure_2",
+                        "annotation_figure_2_prob", "clonal_expansion",
+                        "clonotype_size", "clonal_expansion_flag",
+                        "clonotype")
+DefaultAssay(seurat) <- "RNA"
+seurat$barcode <- colnames(seurat)
+colnames(seurat@meta.data)[colnames(seurat@meta.data) == "gemid"] <- "gem_id"
+seurat$pct_mt <- seurat$percent.mt
+seurat$pct_ribosomal <- PercentageFeatureSet(seurat, pattern = "^RPS")
+new_metadata <- left_join(seurat@meta.data, donor_metadata, by = "donor_id")
+rownames(new_metadata) <- new_metadata$barcode
+seurat@meta.data <- new_metadata
+seurat$assay <- "CITE-seq"
+seurat$UMAP_1_20220215 <- seurat$CD4_UMAP1
+seurat$UMAP_2_20220215 <- seurat$CD4_UMAP2
+seurat$annotation_figure_2 <- seurat$CD4_annotation_level_5
+seurat$annotation_figure_2_prob <- seurat$CD4_annotation_probability
+seurat@meta.data <- seurat@meta.data[, selected_cols_cite]
+
+
+# Clean feature names
+rownames_counts <- str_remove(rownames(seurat[["ADT"]]@counts), "\\.1$")
+rownames_data <- str_remove(rownames(seurat[["ADT"]]@data), "\\.1$")
+rownames_scale_data <- str_remove(rownames(seurat[["ADT"]]@scale.data), "\\.1$")
+seurat[["ADT"]]@counts@Dimnames[[1]] <- rownames_counts
+rownames(seurat[["ADT"]]@data) <- rownames_data
+rownames(seurat[["ADT"]]@scale.data) <- rownames_scale_data
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save_cite_cd4)
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
