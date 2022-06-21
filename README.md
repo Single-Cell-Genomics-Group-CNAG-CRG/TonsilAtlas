@@ -67,6 +67,8 @@ Other more focused analysis include:
 * [Spot deconvolution with SPOTlight](https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/TonsilAtlas/tree/main/spatial_transcriptomics/05-sc_map)
 
 
+In addition, the ["figures_and_scripts"](https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/TonsilAtlas/tree/main/scRNA-seq/figures_and_tables) folder contains the scripts used to generate most of the figures in the manuscript. Finally, the ["bin"](https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/TonsilAtlas/tree/main/scRNA-seq/bin) folder contains functions and utilities used throughout many scripts.
+
 # Getting the code
 
 You can download a copy of all the files in this repository by cloning the git repository:
