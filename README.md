@@ -5,7 +5,7 @@ Palatine tonsils are secondary lymphoid organs representing the first line of im
 
 This repository contains all the scripts, notebooks and reports to reproduce all analysis from our recent preprint titled "A periodic table of tonsillar cells" (TODO: update title). Here, we describe how to access the data, document the most important packages and versions used, and explain how to navigate the directories and files in this repository.
 
-![](data/TonsilAtlasPic.png.png)
+![](data/TonsilAtlasPic.png)
 
 
 ## Data
