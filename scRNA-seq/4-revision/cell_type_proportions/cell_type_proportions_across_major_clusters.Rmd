@@ -1,0 +1,548 @@
+---
+title: 'Proportions of major cell types across clusters'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we will answer the following comment from reviewer 1:
+
+*"The authors should provide the data that shows heterogeneity across samples. Is cell proportion of the main 23 populations consistent across samples? Is it consistent within age or sex? (Fig 7G and Fig 7I is only a certain cell type and it should be done across all cell types). Related to this, the author mentioned that "The high number of profiled cells allowed the detection of extremely rare cell subtypes, such as precursor B and T cells, the latter representing <0.01% of cells". Do these cell types exist in all donors or is it donor specific? Similar comments are for the calculation of the LISI index. Why is it only decreased in female samples?"*.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(pheatmap)
+library(ComplexHeatmap)
+library(tidyverse)
+library(patchwork)
+library(here)
+library(glue)
+library(ggrepel)
+library(scCustomize)
+library(circlize)
+```
+
+
+## Define parameters
+
+```{r}
+# Source paths and functions
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/utils_figure1.R"))
+path_to_obj <- here("data/raw_data_figures/seurat_obj_pdc_preB_preT_fig1.rds")
+cols <- c(
+  "PDC" = "#f032e6",
+  "IFN1+ PDC" = "#510791",
+  "preB" = "#4363d8",
+  "preT" = "#43d8c9"
+)
+```
+
+
+## Load data
+
+```{r}
+all_cells_df <- read_delim(path_to_df_umap_fig1, delim = ";", col_names = TRUE)
+all_cells_df <- all_cells_df[all_cells_df$assay == "scRNA-seq", ]
+sequencing_metadata <- read_csv(here("scRNA-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv"))
+seurat <- readRDS(path_to_obj)
+donor_metadata <- read_csv(here("data/tonsil_atlas_donor_metadata.csv"))
+```
+
+
+# Proportion of preT and preB cells across donors
+
+```{r}
+# Wrangle donor metadata
+donor_metadata <- as.data.frame(donor_metadata)
+rownames(donor_metadata) <- donor_metadata$donor_id
+donor_metadata <- donor_metadata[donor_metadata$donor_id %in% seurat$donor_id, ]
+donor_metadata$sex2 <- ifelse(donor_metadata$sex == "male", "M", "F")
+donor_metadata$donor_label <- donor_metadata$donor_id %>%
+  str_c(donor_metadata$sex2, sep = " (") %>%
+  str_c(donor_metadata$age_group, sep = ", ") %>%
+  str_c(")", sep = "") %>%
+  str_replace("_", " ")
+donor_metadata$donor_label <- factor(
+  donor_metadata$donor_label,
+  levels = donor_metadata$donor_label
+)
+
+# Set colors
+colors_donors <- scCustomize_Palette(
+  num_groups = 10,
+  ggplot_default_colors = FALSE
+)
+colors_donors <- colors_donors[1:10]
+names(colors_donors) <- donor_metadata$donor_label
+
+# Pie charts
+pre_lymphos <- c("preB", "preT")
+pie_charts <- map(pre_lymphos, \(x) {
+  df <- seurat@meta.data %>%
+    filter(annotation_20220215 == x) %>%
+    group_by(donor_id) %>%
+    summarize(total_cells = n()) %>%
+    mutate(
+      pct_cells = total_cells / sum(total_cells) * 100,
+      pct_cells = round(pct_cells, 1),
+      label_piechart = glue("{total_cells} ({pct_cells} %)")
+    ) %>%
+    as.data.frame()
+  df <- left_join(df, donor_metadata, by = "donor_id")
+  p <- df %>%
+    ggplot(aes(x = "", y = pct_cells, fill = fct_reorder(donor_label, pct_cells))) +
+    geom_bar(stat = "identity", width = 1, color = "white") +
+    geom_text(
+      aes(label = label_piechart),
+      position = position_stack(vjust = 0.5),
+      color = "black",
+      size = 2
+    ) +
+    coord_polar(theta = "y", direction = +1) +
+    ggtitle(x) +
+    scale_fill_manual(
+      values = colors_donors,
+      labels = names(colors_donors),
+      breaks = names(colors_donors)
+    ) +
+    theme_void() +
+    theme(
+      legend.title = element_blank(),
+      plot.title = element_text(hjust = 0.5, size = 9),
+      legend.text = element_text(size = 6))
+  p
+})
+pie_charts_combined <- wrap_plots(pie_charts, nrow = 2, ncol = 1)
+pie_charts_combined[[1]] <- pie_charts_combined[[1]] + theme(legend.position = "right")
+pie_charts_combined[[2]] <- pie_charts_combined[[2]] + theme(legend.position = "none")
+pie_charts_combined
+```
+
+
+# All cells across age and sex groups
+
+```{r}
+all_cells_df$gem_id <- str_sub(all_cells_df$barcode, 1, 17)
+sequencing_metadata <- sequencing_metadata[sequencing_metadata$gem_id %in% all_cells_df$gem_id, c("gem_id", "donor_id")]
+sequencing_metadata <- as.data.frame(sequencing_metadata[!(duplicated(sequencing_metadata)), ])
+all_cells_df <- left_join(all_cells_df, sequencing_metadata, by = "gem_id")
+all_cells_df <- left_join(all_cells_df, donor_metadata, by = "donor_id")
+prop_df <- all_cells_df %>%
+  group_by(annotation_figure_1, donor_id) %>%
+  summarize(n_cells = n()) %>%
+  group_by(donor_id) %>%
+  mutate(pct_cells = n_cells / sum(n_cells) * 100) %>%
+  left_join(donor_metadata, by = "donor_id") %>%
+  mutate(
+    age_group = factor(age_group, c("kid", "young_adult", "old_adult")),
+    donor_label = glue("{donor_id} ({sex2})"),
+    annotation_figure_1 = factor(annotation_figure_1, rev(names(cols_fig1)))
+  )
+levels(prop_df$age_group) <- c("kid", "young adult", "old\nadult")
+prop_gg <- prop_df %>%
+  ggplot(aes(donor_label, pct_cells, fill = annotation_figure_1)) +
+    geom_col() +
+    facet_grid(age_group~., scale = "free", space = "free") +
+    coord_flip() +
+    scale_fill_manual(values = cols_fig1, breaks = names(cols_fig1)) +
+    ylab("Percentage of Cells (%)") +
+    scale_y_continuous(expand = c(0.01, 0.01)) +
+    theme_classic() +
+    theme(
+      axis.title.y = element_blank(),
+      axis.title.x = element_text(size = 8),
+      legend.title = element_blank(),
+      axis.text = element_text(size = 7),
+      strip.text = element_text(size = 7),
+      legend.text = element_text(size = 7))
+prop_gg
+```
+
+
+Displayed as heatmap:
+
+```{r}
+confusion_matrix <- as.matrix(
+  table(
+    all_cells_df$donor_id,
+    all_cells_df$annotation_figure_1
+  )
+)
+confusion_matrix <- t(confusion_matrix / rowSums(confusion_matrix) * 100)
+confusion_matrix <- round(confusion_matrix, 2)
+levels_donors <- c("BCLL-11-T", "BCLL-12-T", "BCLL-13-T", "BCLL-8-T", "BCLL-9-T", "BCLL-10-T", "BCLL-6-T",
+                   "BCLL-14-T", "BCLL-15-T", "BCLL-2-T")
+confusion_matrix <- confusion_matrix[names(cols_fig1), levels_donors]
+colors_function <- colorRampPalette(colors = c("white", "red"))
+colors <- colors_function(100)
+total_cells_donor <- table(all_cells_df$donor_id)[levels_donors]
+age_groups <- donor_metadata$age_group
+names(age_groups) <- donor_metadata$donor_id
+age_groups <- age_groups[levels_donors]
+age_groups <- factor(age_groups, levels = c("kid", "young_adult", "old_adult"))
+levels(age_groups) <- c("Child", "Young adult", "Old adult")
+sex <- donor_metadata$sex
+names(sex) <- donor_metadata$donor_id
+sex <- sex[levels_donors]
+sex <- str_to_title(sex)
+kids <- names(age_groups)[age_groups == "Child"]
+adults <- names(age_groups)[age_groups != "Child"]
+logFC <- apply(confusion_matrix, 1, \(x) {
+  out <- log2(mean(x[kids]) / mean(x[adults]))
+  out
+})
+col_fun_fc <- circlize::colorRamp2(c(min(logFC), 0, max(logFC)), c("purple", "white", "darkgreen"))
+anno_top <- HeatmapAnnotation(
+  number_of_cells1 = anno_barplot(
+    as.matrix(total_cells_donor),
+    add_numbers = TRUE,
+    ylim = c(0, 35000),
+    numbers_gp = gpar(fontsize = 6),
+    height = unit(2.5, "cm"),
+    border = FALSE
+  ),
+  "age group" = age_groups,
+  sex = sex,
+  col = list(
+    "age group" = c("Child" = "#d7e4f3", "Young adult" = "#8fa6da", "Old adult" = "#2e5398"),
+    sex = c("Female" = "#f2c096", "Male" = "#c38b68")
+  ),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "age group" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8)),
+    "sex" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+total_cells_cell_type <- table(all_cells_df$annotation_figure_1)[names(cols_fig1)]
+anno_row <- rowAnnotation(
+  "log2 FC (Children / Adults)" = logFC,
+  number_of_cells2 = anno_barplot(
+    as.matrix(total_cells_cell_type),
+    add_numbers = TRUE,
+    ylim = c(0, 75000),
+    border = FALSE,
+    width = unit(2.5, "cm"),
+    numbers_gp = gpar(fontsize = 6),
+    annotation_name_gp = gpar(fontsize = 8)
+  ),
+  col = list("log2 FC (Children / Adults)" = col_fun_fc),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "log2 FC (Children / Adults)" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+heatmap_props <- Heatmap(
+  confusion_matrix,
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of cells\nby donor",
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 7),
+  column_names_gp = gpar(fontsize = 7),
+  column_names_rot = 45,
+  top_annotation = anno_top,
+  right_annotation = anno_row,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(sprintf("%.2f", confusion_matrix[i, j]), x, y, gp = gpar(fontsize = 5))
+  },
+  heatmap_legend_param = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+)
+heatmap_props
+```
+
+
+# Male vs Female
+
+We subset to kids only to tease out the effect of age:
+
+```{r}
+all_cells_df_kid <- all_cells_df[all_cells_df$age_group == "kid", ]
+two_way_table_sex1 <- as.matrix(
+  table(
+    all_cells_df_kid$sex,
+    all_cells_df_kid$annotation_figure_1
+  )
+)
+two_way_table_sex2 <- t(two_way_table_sex1 / rowSums(two_way_table_sex1) * 100)
+two_way_table_sex2 <- round(two_way_table_sex2, 2)
+two_way_table_sex2 <- two_way_table_sex2[names(cols_fig1), c("female", "male")]
+colnames(two_way_table_sex2) <- c("Female", "Male")
+two_way_table_sex1 <- t(two_way_table_sex1)
+two_way_table_sex1 <- two_way_table_sex1[names(cols_fig1), c("female", "male")]
+colnames(two_way_table_sex1) <- c("Female", "Male")
+tmp <- paste(two_way_table_sex1, " (", two_way_table_sex2, "%)", sep = "")
+two_way_table_sex3 <- matrix(
+  tmp,
+  nrow = nrow(two_way_table_sex2),
+  ncol = ncol(two_way_table_sex2),
+  byrow = FALSE
+)
+anno_top_sex <- HeatmapAnnotation(
+  "age group" = c("Child", "Child"),
+  col = list("age group" = c("Child" = "#d7e4f3")),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "age group" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+heatmap_sex <- Heatmap(
+  two_way_table_sex2,
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of cells\nby sex",
+  top_annotation = anno_top_sex,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 7),
+  column_names_side = "top",
+  column_names_gp = gpar(fontsize = 7),
+  column_names_rot = 0,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(print(two_way_table_sex3[i, j]), x, y, gp = gpar(fontsize = 6))
+  },
+  heatmap_legend_param = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+)
+heatmap_sex
+```
+
+
+
+# Heatmap: all donors who underwent tonsillitis + are fresh + scRNA-seq (annotation_level_1, discovery and validation cohorts integrated)
+
+```{r}
+# Load data and subset
+seurat <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/7-20230529_seurat_rna_discovery_validation_cohorts.rds"))
+keep <-
+  seurat$preservation == "fresh" &
+  seurat$cause_for_tonsillectomy == "tonsillitis" &
+  seurat$assay == "3P"
+seurat <- seurat[, keep]
+
+
+# Create confusion matrix and order rows
+confusion_matrix <- as.matrix(
+  table(
+    seurat$donor_id,
+    seurat$annotation_level_1
+  )
+)
+confusion_matrix <- t(confusion_matrix / rowSums(confusion_matrix) * 100)
+confusion_matrix <- round(confusion_matrix, 2)
+levels_donors <- c("BCLL-8-T", "BCLL-9-T", "BCLL-10-T", "BCLL-11-T", "BCLL-12-T",
+                   "BCLL-13-T", "BCLL-20-T", "BCLL-21-T", "BCLL-22-T", "BCLL-28-T")
+confusion_matrix <- confusion_matrix[names(colors_20230508$level_1), levels_donors]
+confusion_matrix <- confusion_matrix[!(rownames(confusion_matrix) %in% c("preTC", "preBC")),]
+
+
+# Create annotation donors
+colors_function <- colorRampPalette(colors = c("white", "red"))
+colors <- colors_function(100)
+total_cells_donor <- table(seurat$donor_id)[levels_donors]
+donor_metadata <- as.data.frame(donor_metadata)
+rownames(donor_metadata) <- donor_metadata$donor_id
+donor_metadata <- donor_metadata[levels_donors, ]
+age_groups <- donor_metadata$age_group
+names(age_groups) <- donor_metadata$donor_id
+age_groups <- age_groups[levels_donors]
+age_groups <- factor(age_groups, levels = c("kid", "young_adult"))
+levels(age_groups) <- c("Child", "Young adult")
+sex <- donor_metadata$sex
+names(sex) <- donor_metadata$donor_id
+sex <- sex[levels_donors]
+sex <- str_to_title(sex)
+anno_top <- HeatmapAnnotation(
+  number_of_cells1 = anno_barplot(
+    as.matrix(total_cells_donor),
+    add_numbers = TRUE,
+    ylim = c(0, 31000),
+    numbers_gp = gpar(fontsize = 6),
+    height = unit(2.5, "cm"),
+    border = FALSE
+  ),
+  "age group" = age_groups,
+  sex = sex,
+  col = list(
+    "age group" = c("Child" = "#d7e4f3", "Young adult" = "#8fa6da"),
+    sex = c("Female" = "#f2c096", "Male" = "#c38b68")
+  ),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "age group" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8)),
+    "sex" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+
+
+# Create annotation cell types
+kids <- names(age_groups)[age_groups == "Child"]
+adults <- names(age_groups)[age_groups != "Child"]
+logFC <- apply(confusion_matrix, 1, \(x) {
+  out <- log2(mean(x[kids]) / mean(x[adults]))
+  out
+})
+col_fun_fc <- circlize::colorRamp2(c(min(logFC), 0, max(logFC)), c("purple", "white", "darkgreen"))
+total_cells_cell_type <- table(seurat$annotation_level_1)[rownames(confusion_matrix)]
+anno_row <- rowAnnotation(
+  "log2 FC (Children / Adults)" = logFC,
+  number_of_cells2 = anno_barplot(
+    as.matrix(total_cells_cell_type),
+    add_numbers = TRUE,
+    ylim = c(0, 80000),
+    border = FALSE,
+    width = unit(2.5, "cm"),
+    numbers_gp = gpar(fontsize = 6),
+    annotation_name_gp = gpar(fontsize = 8)
+  ),
+  col = list("log2 FC (Children / Adults)" = col_fun_fc),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "log2 FC (Children / Adults)" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+
+
+# Plot heatmap
+heatmap_props <- Heatmap(
+  t(scale(t(confusion_matrix))),
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of cells\nby donor",
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 7),
+  column_names_gp = gpar(fontsize = 7),
+  column_names_rot = 45,
+  top_annotation = anno_top,
+  right_annotation = anno_row,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(sprintf("%.2f", confusion_matrix[i, j]), x, y, gp = gpar(fontsize = 5))
+  },
+  heatmap_legend_param = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+)
+
+
+# Save
+in2mm <- 25.4
+path_save_heatmap_props <- here("results/paper/figures/revision_cell_type_heatmap_props_tonsillitis_discovery_validation_cohort.pdf")
+pdf(path_save_heatmap_props, width = (190 / in2mm), height = (140 / in2mm), paper = "special")
+draw(heatmap_props)
+dev.off()
+```
+
+
+Repeat the same but for sex:
+
+
+```{r}
+# Subset to kids to rule out effect of age
+seurat <- seurat[, seurat$age_group == "kid"]
+two_way_table_sex1 <- as.matrix(
+  table(
+    seurat$sex,
+    seurat$annotation_level_1
+  )
+)
+two_way_table_sex2 <- t(two_way_table_sex1 / rowSums(two_way_table_sex1) * 100)
+two_way_table_sex2 <- round(two_way_table_sex2, 2)
+two_way_table_sex2 <- two_way_table_sex2[rownames(confusion_matrix), c("female", "male")]
+colnames(two_way_table_sex2) <- c("Female", "Male")
+two_way_table_sex1 <- t(two_way_table_sex1)
+two_way_table_sex1 <- two_way_table_sex1[rownames(confusion_matrix), c("female", "male")]
+colnames(two_way_table_sex1) <- c("Female", "Male")
+tmp <- paste(two_way_table_sex1, " (", two_way_table_sex2, "%)", sep = "")
+two_way_table_sex3 <- matrix(
+  tmp,
+  nrow = nrow(two_way_table_sex2),
+  ncol = ncol(two_way_table_sex2),
+  byrow = FALSE
+)
+anno_top_sex <- HeatmapAnnotation(
+  "age group" = c("Child", "Child"),
+  col = list("age group" = c("Child" = "#d7e4f3")),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "age group" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+heatmap_sex <- Heatmap(
+  two_way_table_sex2,
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of cells\nby sex",
+  top_annotation = anno_top_sex,
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 7),
+  column_names_side = "top",
+  column_names_gp = gpar(fontsize = 7),
+  column_names_rot = 0,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(print(two_way_table_sex3[i, j]), x, y, gp = gpar(fontsize = 6))
+  },
+  heatmap_legend_param = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+)
+path_save_heatmap_sex <- here("results/paper/figures/revision_cell_type_heatmap_sex_tonsillitis_discovery_validation_cohort.pdf")
+pdf(path_save_heatmap_sex, width = (80 / in2mm), height = (100 / in2mm), paper = "special")
+draw(heatmap_sex)
+dev.off()
+```
+
+# Save
+
+```{r}
+ggsave(
+  plot = pie_charts_combined,
+  filename = here("results/paper/figures/revision_cell_type_proportions_preB_preT.pdf"),
+  width = 12,
+  height = 12,
+  units = "cm"
+)
+ggsave(
+  plot = prop_gg,
+  filename = here("results/paper/figures/revision_cell_type_proportions_all_cells.pdf"),
+  width = 17,
+  height = 9,
+  units = "cm"
+)
+in2mm <- 25.4
+path_save_heatmap_props <- here("results/paper/figures/revision_cell_type_heatmap_props_all_cells.pdf")
+pdf(path_save_heatmap_props, width = (240 / in2mm), height = (140 / in2mm), paper = "special")
+draw(heatmap_props)
+dev.off()
+
+path_save_heatmap_sex <- here("results/paper/figures/revision_cell_type_heatmap_sex_all_cells.pdf")
+pdf(path_save_heatmap_sex, width = (130 / in2mm), height = (115 / in2mm), paper = "special")
+draw(heatmap_sex)
+dev.off()
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
