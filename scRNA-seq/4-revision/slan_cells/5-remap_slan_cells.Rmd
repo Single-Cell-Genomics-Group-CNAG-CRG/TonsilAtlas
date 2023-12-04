@@ -1,0 +1,215 @@
+---
+title: 'Remap slan+ myeloid cells'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to classify each of the slan+ myeloid cells saved in the previous notebook into one of the 19 myeloid cell types and states identified in our tonsil atlas.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+```
+
+
+## Define parameters
+
+```{r}
+path_to_slan <- here("scRNA-seq/results/R_objects/slancytes_revision/4.1.seurat_slan_cells_tonsil_dimensionality_reduction_experiments_2_and_3.rds")
+path_to_myeloid <- here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_myeloid_seurat_obj.rds")
+
+
+# Misc
+label_var <- "annotation_general"
+batch_var <- "type"
+
+
+# Source key functions and variables
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+
+
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+```
+
+
+## Read data
+
+```{r}
+query <- readRDS(path_to_slan)
+reference <- readRDS(path_to_myeloid)
+reference <- updateAnnotation(reference)
+reference$annotation_general <- case_when(
+  reference$annotation_20220619 %in% c("DC1 precursor", "DC1 mature", "DC2", "DC3", "DC4", "DC5", "IL7R DC") ~ "DC",
+  reference$annotation_20220619 %in% c("aDC1", "aDC2", "aDC3") ~ "aDC",
+  reference$annotation_20220619 %in% c("M1 Macrophages", "Monocytes") ~ "Mono/Macro",
+  reference$annotation_20220619 %in% c("SELENOP Slancytes", "MMP Slancytes", "C1Q Slancytes", "ITGAX Slancytes") ~ "Slan-like",
+  reference$annotation_20220619 %in% "Neutrophils" ~ "Neutrophils",
+  reference$annotation_20220619 %in% "Cycling" ~ "Cycling",
+  reference$annotation_20220619 %in% "Mast" ~ "Mast",
+)
+```
+
+
+We select gem_ids "q0qp6qyu_nkrug5p0" and "rssxkrxg_edqhwe1o" because they are the ones which have sufficient cells:
+
+```{r}
+table(query$gem_id)
+selected_gem_ids <- c("q0qp6qyu_nkrug5p0", "rssxkrxg_edqhwe1o")
+query <- query[, query$gem_id %in% selected_gem_ids]
+```
+
+
+
+# Merge
+
+```{r}
+# Define new variables for label transfer
+reference$type <- "reference"
+query$type <- "query"
+reference$batch <- reference@meta.data[[batch_var]]
+reference$label <- reference@meta.data[[label_var]]
+reference$annotation_probability <- NA
+reference$UMAP1 <- Embeddings(reference, "umap")[, "UMAP_1"]
+reference$UMAP2 <- Embeddings(reference, "umap")[, "UMAP_2"]
+query$label <- NA
+query$annotation_probability <- NA
+query$batch <- "query"
+query$UMAP1 <- NA
+query$UMAP2 <- NA
+
+
+# Find common columns and subset
+query2 <- query
+common_cols <- intersect(
+  colnames(reference@meta.data),
+  colnames(query@meta.data)
+)
+reference@meta.data <- reference@meta.data[, common_cols]
+query@meta.data <- query@meta.data[, common_cols]
+
+
+# Merge
+merged <- merge(x = reference, y = query)
+# rm(reference)
+# gc()
+```
+
+
+## Integrate
+
+Let us start by finding the batch-specific highly variable features (HVG):
+
+```{r}
+shared_features <- find_assay_specific_features(merged, assay_var = "batch")
+```
+
+Integrate with Harmony:
+
+```{r}
+# Integrate
+merged <- integrate_assays(
+  merged,
+  assay_specific = TRUE,
+  assay_var = "batch",
+  shared_hvg = shared_features,
+  n_dim = 20
+)
+
+# Visualize integration
+merged <- RunUMAP(merged, dims = 1:20, reduction = "harmony")
+DimPlot(merged, group.by = "batch")
+```
+
+
+# Transfer labels
+
+```{r}
+# Define training and test sets
+data_sets <- split_training_and_test_sets(
+  merged,
+  split_var = "type",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 20
+)
+
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = merged,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 10,
+  response_var = "label"
+)
+```
+
+
+
+# Include annotations and plot
+
+```{r}
+if (all(colnames(query) == annotation_query_df$query_cells)) {
+  query$annotation_general <- annotation_query_df$annotation
+  query$annotation_probability <- annotation_query_df$annotation_prob
+}
+DimPlot(query, group.by = "annotation_general")
+FeaturePlot(query, "annotation_probability") &
+  scale_color_viridis_c(option = "magma")
+query2$annotation_general <- query$annotation_general
+DimPlot(query2, group.by = "annotation_general")
+query2@meta.data %>%
+  group_by(seurat_clusters, annotation_general) %>%
+  summarize(n_cells = n()) %>%
+  group_by(seurat_clusters) %>%
+  mutate(pct_cells = n_cells / sum(n_cells) * 100) %>%
+  ggplot(aes(seurat_clusters, pct_cells, fill = annotation_general)) +
+    geom_col() +
+    theme_classic() +
+    coord_flip()
+```
+
+
+# Save
+
+```{r}
+saveRDS(query2, here("scRNA-seq/results/R_objects/slancytes_revision/5.1.seurat_slan_cells_tonsil_label_transfer_general.rds"))
+```

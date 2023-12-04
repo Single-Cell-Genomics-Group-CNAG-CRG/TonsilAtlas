@@ -1,0 +1,211 @@
+---
+title: 'Compare annotations Slan+ cells'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to compare the annotations between slan+Mono/macro/DC vs slan+ cells.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(here)
+library(glue)
+library(pheatmap2)
+```
+
+
+## Parameters
+
+```{r}
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+process_seurat <- function(seurat_obj, group_by_vars = "gem_id") {
+  seurat_obj <- seurat_obj %>%
+    FindVariableFeatures() %>%
+    ScaleData() %>%
+    RunPCA() %>%
+    RunHarmony(group.by.vars = group_by_vars) %>%
+    RunUMAP(reduction = "harmony", dims = 1:20)
+  seurat_obj
+}
+```
+
+
+## Read data
+
+```{r}
+slan_cells <- readRDS(here("scRNA-seq/results/R_objects/slancytes_revision/3.1.seurat_slan_cells_tonsil_classified_deep_annotation_experiments_2_and_3.rds"))
+unfiltered <- readRDS(here("scRNA-seq/results/R_objects/slancytes_revision/1.3.seurat_slan_cells_tonsil_filtered_experiments_2_and_3.rds"))
+table(slan_cells$gem_id)
+```
+
+
+# Dimensionality reduction
+
+```{r}
+slan_cells <- process_seurat(slan_cells)
+slan_cells$library_name2 <- str_remove(slan_cells$library_name, "BCLL_10_")
+DimPlot(slan_cells, group.by = "library_name2") +
+  theme(
+    legend.text = element_text(size = 15),
+    legend.position = "top",
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    plot.title = element_blank()
+  )
+slan_markers <- read.delim(here("data/raw_data_figures/BA2020Faseb_SLANmarkers.txt"))
+sel_genes <- slan_markers$Gene[slan_markers$Gene %in% rownames(slan_cells)]
+slan_cells <- AddModuleScore(
+  slan_cells,
+  features = list(
+    SLAN = slan_markers$Gene[slan_markers$CellType == "SLAN"],
+    DC = slan_markers$Gene[slan_markers$CellType == "DC"],
+    MAC = slan_markers$Gene[slan_markers$CellType == "MAC"]
+  ),
+  name = c("SLAN", "DC", "MAC")
+)
+FeaturePlot(slan_cells, c("SLAN1", "DC2", "MAC3")) &
+  scale_color_viridis_c(option = "magma") &
+    theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+  )
+DimPlot(slan_cells, group.by = "annotation_20220619", cols = color_palette)
+FeaturePlot(slan_cells, "annotation_probability") &
+  scale_color_viridis_c(option = "magma")
+DimPlot(slan_cells, group.by = "annotation_20220619", cols = color_palette)
+slan_cells@meta.data %>%
+  group_by(annotation_20220619, library_name) %>%
+  summarize(n_cells = n()) %>%
+  group_by(library_name) %>%
+  mutate(total_cells = sum(n_cells), pct_cells = n_cells / total_cells * 100) %>%
+  ggplot(aes(library_name, pct_cells, fill = annotation_20220619)) +
+    geom_col() +
+    labs(y = "Percentage of cells (%)") +
+    scale_fill_manual(values = color_palette) +
+    theme_classic() +
+    theme(axis.title.x = element_blank(),
+          legend.title = element_blank())
+VlnPlot(slan_cells, c("SLAN1", "DC2", "MAC3"), group.by = "library_name")
+```
+
+
+Remove lingering poor-quality cells/doublets
+
+```{r}
+slan_cells$doublet_score <- unfiltered$doublet_score[colnames(slan_cells)]
+FeaturePlot(slan_cells, features = "doublet_score") &
+  scale_color_viridis_c(option = "magma")
+slan_cells <- FindNeighbors(slan_cells, reduction = "harmony", dims = 1:20, k.param = 15)
+slan_cells <- FindClusters(slan_cells, resolution = 1)
+markers_9 <- FindMarkers(slan_cells, ident.1 = "9", ident.2 = "1", only.pos = TRUE, logfc.threshold = 0.75)
+DT::datatable(markers_9, options = list(scrollX = TRUE))
+markers_3 <- FindMarkers(slan_cells, ident.1 = "3", only.pos = TRUE, logfc.threshold = 0.75)
+DT::datatable(markers_3, options = list(scrollX = TRUE))
+DimPlot(slan_cells)
+VlnPlot(slan_cells, "nFeature_RNA", pt.size = 0) & NoLegend()
+slan_cells <- slan_cells[, slan_cells$seurat_clusters != "9"]
+DimPlot(slan_cells)
+slan_cells <- process_seurat(slan_cells)
+DimPlot(slan_cells)
+```
+
+
+
+# Subcluster
+
+```{r}
+slan_cells <- FindNeighbors(slan_cells, reduction = "harmony", dims = 1:20)
+slan_cells <- FindClusters(slan_cells, resolution = 0.15)
+DimPlot(slan_cells)
+slan_sub <- slan_cells[, slan_cells$seurat_clusters == "1" & slan_cells$library_name2 == "SLANCYTES"]
+slan_sub <- slan_sub %>%
+  NormalizeData() %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  # RunHarmony(group.by.vars = "gem_id") %>%
+  RunUMAP(reduction = "pca", dims = 1:20)
+DimPlot(slan_sub, group.by = "gem_id")
+FeaturePlot(slan_sub, c("SELENOP", "C1QA", "MMP9", "MAF"))
+
+
+# Heatmap
+goi_slan <- c("SELENOP", "APOC1", "APOE", "FCGR2A", "MMP9", "MMP12",
+              "C1QA", "C1QB", "HLA-DRA", "HLA-DRB1")
+slan_sub <- FindNeighbors(slan_sub, reduction = "pca", dims = 1:20, k.param = 7)
+slan_sub <- FindClusters(slan_sub, resolution = 1)
+DimPlot(slan_sub)
+slan_sub$subcluster <- case_when(
+  slan_sub$seurat_clusters %in% c("0", "1") ~ "0",
+  slan_sub$seurat_clusters %in% c("3", "4") ~ "1",
+  slan_sub$seurat_clusters == "2" ~ "2",
+  slan_sub$seurat_clusters == "5" ~ "3"
+)
+barcodes <- slan_sub@meta.data %>%
+  rownames_to_column("barcode") %>%
+  arrange(subcluster) %>%
+  pull("barcode")
+input_mat <- as.matrix(slan_sub[["RNA"]]@data[goi_slan, barcodes])
+pheatmap2(
+  input_mat,
+  scale = "none",
+  show_rownames = TRUE,
+  show_colnames = FALSE, 
+  border_color = NA,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_row = 6
+)
+```
+
+
+
+# Save
+
+```{r}
+saveRDS(slan_cells, here("scRNA-seq/results/R_objects/slancytes_revision/4.1.seurat_slan_cells_tonsil_dimensionality_reduction_experiments_2_and_3.rds"))
+saveRDS(slan_sub, here("scRNA-seq/results/R_objects/slancytes_revision/4.2.seurat_slan_cells_tonsil_subset_slancytes_experiments_2_and_3.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+

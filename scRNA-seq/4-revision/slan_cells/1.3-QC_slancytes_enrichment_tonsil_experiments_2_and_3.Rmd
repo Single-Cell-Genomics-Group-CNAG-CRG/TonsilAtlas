@@ -1,0 +1,375 @@
+---
+title: 'QC: slan+ from tonsil (experiments 2 and 3)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to perform a basic quality control of the slan+ cells from tonsil (experiments 2 and 3; subprojects: BCLLATLAS_162 and BCLLATLAS_164).
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(scDblFinder)
+library(here)
+library(glue)
+library(DT)
+library(ggpubr)
+```
+
+
+# Define parameters
+
+```{r}
+subprojects <- c("BCLLATLAS_162", "BCLLATLAS_164")
+
+# Paths
+path_to_cr <- here("scRNA-seq/1-cellranger_mapping/projects")
+path_to_metadata <- here("scRNA-seq/1-cellranger_mapping/data/sequencing_metadata_slan_cells.csv")
+path_to_save_obj <- here("scRNA-seq/results/R_objects/slancytes_revision/1.3.seurat_slan_cells_tonsil_filtered_experiments_2_and_3.rds")
+
+
+# Functions
+source(here("scRNA-seq/bin/utils.R"))
+
+
+# Thresholds
+min_lib_size <- 1250
+min_n_genes <- 600
+max_pct_mt <- 15
+min_cells <- 4
+```
+
+
+# Read data
+
+```{r}
+seq_metadata <- read_csv(path_to_metadata)
+seq_metadata <- seq_metadata[seq_metadata$subproject %in% subprojects, ]
+metrics_summaries <- map_df(1:nrow(seq_metadata), \(x) {
+  subproject <- seq_metadata[x, "subproject", drop = TRUE]
+  gem_id <- seq_metadata[x, "gem_id", drop = TRUE]
+  path_to_metrics <- glue("{path_to_cr}/{subproject}/jobs/{gem_id}/{gem_id}/outs/metrics_summary.csv")
+  df1 <- seq_metadata[x, c("gem_id", "library_name")]
+  df2 <- read_csv(path_to_metrics)
+  df <- bind_cols(df1, df2)
+  df
+})
+DT::datatable(metrics_summaries, options = list(scrollX = TRUE))
+counts <- map(1:nrow(seq_metadata), \(x) {
+  subproject <- seq_metadata[x, "subproject", drop = TRUE]
+  gem_id <- seq_metadata[x, "gem_id", drop = TRUE]
+  path_to_mat <- glue("{path_to_cr}/{subproject}/jobs/{gem_id}/{gem_id}/outs/filtered_feature_bc_matrix")
+  mat <- Read10X(path_to_mat)
+  mat
+})
+names(counts) <- seq_metadata$gem_id
+map(counts, dim)
+```
+
+
+## Create Seurat objects
+
+```{r}
+seurat_list <- map(names(counts), \(x) {
+  seurat_obj <- CreateSeuratObject(counts = counts[[x]])
+  seurat_obj$gem_id <- x
+  seurat_obj$library_name <- seq_metadata[seq_metadata$gem_id == x, "library_name", drop = TRUE]
+  seurat_obj <- RenameCells(seurat_obj, add.cell.id = x)
+  seurat_obj$pct_mt <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+  seurat_obj$pct_ribo <- PercentageFeatureSet(seurat_obj, pattern = "(^RPL|^RPS)")
+  seurat_obj
+})
+names(seurat_list) <- names(counts)
+seurat <- purrr::reduce(seurat_list, merge)
+rm(seurat_list)
+gc()
+seurat
+```
+
+
+# Cell filtering
+
+## Library Size
+
+```{r fig.wide=TRUE}
+lib_size_hist <- seurat@meta.data %>%
+  plot_histogram_qc(x = "nCount_RNA", x_lab = "Library Size (log10(total UMI))") +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red")
+lib_size_hist2 <- lib_size_hist +
+    scale_x_continuous(limits = c(0, 4000)) +
+    xlab("Library Size (total UMI)") +
+    theme_pubr()
+lib_size_hist + lib_size_hist2
+```
+
+
+## Number of detected genes
+
+```{r fig.wide=TRUE}
+n_genes_hist1 <- seurat@meta.data %>%
+  plot_histogram_qc(x = "nFeature_RNA", x_lab = "Number of Detected Genes") +
+  geom_vline(xintercept = min_n_genes, linetype = "dashed", color = "red")
+n_genes_hist2 <- n_genes_hist1 +
+  scale_x_continuous(limits = c(0, 2000)) 
+n_genes_hist1 + n_genes_hist2
+```
+
+
+## Fraction of mitochondrial expression
+
+```{r}
+pct_mt_hist <- seurat@meta.data %>%
+  plot_histogram_qc(x = "pct_mt", x_lab = "% Mitochondrial Expression") +
+  geom_vline(xintercept = max_pct_mt, linetype = "dashed", color = "red") +
+  scale_x_continuous(limits = c(0, 100))
+pct_mt_hist
+```
+
+
+## Fraction of ribosomal expression
+
+Let us also calculate and visualize the proportion of ribosomal expression:
+
+```{r}
+pct_ribosomal_hist <- seurat@meta.data %>%
+  plot_histogram_qc(x = "pct_ribo", x_lab = "% Ribosomal Expression")
+pct_ribosomal_hist
+```
+
+
+## Joint QC metrics
+
+It is important to assess how these variables covary, since metabolically active cells might also have a high mitochondrial expression:
+
+```{r}
+# number of detected genes VS library size
+n_genes_vs_lib_size <- FeatureScatter(
+  seurat,
+  feature1 = "nCount_RNA",
+  feature2 = "nFeature_RNA",
+  pt.size = 0.15,
+  cols = rep("black", length(levels(Idents(seurat))))
+)
+n_genes_vs_lib_size <- n_genes_vs_lib_size +
+  labs(x = "Library Size (total UMI)", y = "Number of Detected Genes") +
+  theme(legend.position = "none", plot.title = element_blank())
+n_genes_vs_lib_size +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = min_n_genes, linetype = "dashed", color = "red")
+
+# % mitochondrial expression VS library size
+pct_mt_vs_lib_size <- FeatureScatter(
+  seurat,
+  feature1 = "nCount_RNA",
+  feature2 = "pct_mt",
+  pt.size = 0.15,
+  cols = rep("black", length(levels(Idents(seurat))))
+)
+pct_mt_vs_lib_size <- pct_mt_vs_lib_size +
+  labs(x = "Library Size (total UMI)", y = "% Mitochondrial Expression") +
+  theme(legend.position = "none", plot.title = element_blank())
+pct_mt_vs_lib_size +
+  geom_vline(xintercept = min_lib_size, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = max_pct_mt, linetype = "dashed", color = "red")
+```
+
+
+Let's assess how the 3 variables distribute across both samples:
+
+```{r}
+VlnPlot(
+  seurat,
+  features = c("nCount_RNA", "nFeature_RNA", "pct_mt"),
+  group.by = "library_name",
+  pt.size = 0
+) &
+  theme(axis.title.x = element_blank())
+```
+
+
+## Subset empty droplets and lysed cells
+
+```{r}
+metadata_before_qc <- seurat@meta.data
+is_low_quality <- with(seurat@meta.data,
+  nCount_RNA < min_lib_size |
+  nFeature_RNA < min_n_genes |
+  pct_mt > max_pct_mt
+)
+table(is_low_quality)
+seurat
+(seurat <- seurat[, !is_low_quality])
+metadata_after_qc <- seurat@meta.data
+```
+
+
+## QC summary table
+
+```{r}
+qc_before <- metadata_before_qc %>%
+  group_by(gem_id) %>% 
+  summarise(num_cells_before_qc = n())
+qc_before
+qc_after <- metadata_after_qc %>%
+  group_by(gem_id) %>%
+  summarise(
+    num_cells_after_qc = n(),
+    average_library_size = mean(nCount_RNA),
+    average_num_detected_genes = mean(nFeature_RNA),
+    average_mitochondrial_fraction = mean(pct_mt)
+  )
+DT::datatable(qc_after, options = list(scrollX = TRUE))
+```
+
+
+# Doublets
+
+We use [scDblFinder](http://bioconductor.org/books/3.15/OSCA.advanced/doublet-detection.html#computing-doublet-densities):
+
+```{r}
+seurat <- NormalizeData(seurat)
+seurat <- FindVariableFeatures(seurat)
+sce <- as.SingleCellExperiment(seurat)
+dbl_densities <- computeDoubletDensity(
+  sce,
+  dims = 30,
+  subset.row = VariableFeatures(seurat)
+)
+summary(dbl_densities)
+seurat$doublet_score <- dbl_densities
+```
+
+
+# Gene filtering
+
+According to [Luecken MD et al.](https://www.embopress.org/doi/10.15252/msb.20188746): "A guideline to setting this threshold is to use the minimum cell cluster size that is of interest and leaving some leeway for dropout effects. For example, filtering out genes expressed in fewer than 20 cells may make it difficult to detect cell clusters with fewer than 20 cells. For datasets with high dropout rates, this threshold may also complicate the detection of larger clusters. The choice of threshold should scale with the number of cells in the dataset and the intended downstream analysis."
+
+Since we want to detect rare cell types in the tonsil, we will be very permissive and retain genes that are expressed in at least `r min_cells` cells.
+
+
+## Set threshold
+
+```{r fig.wide=TRUE}
+n_cells <- Matrix::rowSums(seurat[["RNA"]]@counts > 0)
+gene_qc <- n_cells %>% 
+  as.data.frame() %>% 
+  ggplot(aes(n_cells)) + 
+    geom_histogram(bins = 100, alpha = 0.75) +
+    scale_x_log10("Number of cells") +
+    theme_bw() 
+gene_qc +
+  geom_vline(xintercept = min_cells, linetype = "dashed", color = "red")
+```
+
+
+## Plot genes with highest expression
+
+```{r fig.height=10}
+top_50_genes <- sort(n_cells, decreasing = TRUE)[1:50]
+top_50_genes_df <- data.frame(
+  gene = names(top_50_genes),
+  n_cells = top_50_genes
+)
+top_50_genes_df %>%
+  ggplot(aes(fct_reorder(gene, n_cells), n_cells)) +
+    geom_point() +
+    labs(x = "", y = "Number of expressing cells") +
+    coord_flip()
+```
+
+
+## Filter
+
+```{r}
+kept_genes <- rownames(seurat)[n_cells > min_cells]
+table(n_cells > min_cells)
+(seurat <- subset(seurat, features = kept_genes))
+```
+
+
+# Filter out contaminating cells
+
+We observed in the web_summary.html file that there are contaminating B and T cells in our dataset. That is expected, because they compose over 90% of the tonsil. Thus, let us filter them out in silico:
+
+```{r}
+seurat <- seurat %>%
+  NormalizeData() %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(reduction = "pca", group.by.vars = "gem_id") %>% 
+  RunUMAP(dims = 1:20, reduction = "harmony")
+DimPlot(seurat, group.by = "library_name")
+# FeaturePlot(seurat, c("CD79A", "CD3D", "LYZ"), split.by = "library_name")
+# seurat <- FindNeighbors(seurat, dims = 1:20, reduction = "harmony")
+# seurat <- FindClusters(seurat, resolution = 0.1)
+# DimPlot(seurat)
+# markers_l <- map(levels(Idents(seurat)), \(x) {
+#   df <- FindMarkers(seurat, ident.1 = x, only.pos = TRUE, logfc.threshold = 0.5)
+#   df
+# })
+# names(markers_l) <- levels(Idents(seurat))
+# for (x in names(markers_l)) {
+#   print(x)
+#   print(head(markers_l[[x]], 15))
+# }
+
+slan_markers <- read.delim(here("data/raw_data_figures/BA2020Faseb_SLANmarkers.txt"))
+sel_genes <- slan_markers$Gene[slan_markers$Gene %in% rownames(seurat)]
+seurat <- AddModuleScore(
+  seurat,
+  features = list(
+    SLAN = slan_markers$Gene[slan_markers$CellType == "SLAN"],
+    DC = slan_markers$Gene[slan_markers$CellType == "DC"],
+    MAC = slan_markers$Gene[slan_markers$CellType == "MAC"]
+  ),
+  name = c("SLAN", "DC", "MAC")
+)
+FeaturePlot(seurat, c("SLAN1", "DC2", "MAC3")) &
+  scale_color_viridis_c(option = "magma")
+
+# excluded_clusters <- c("0", "2", "3", "5", "7")
+# seurat <- seurat[, !(seurat$seurat_clusters %in% excluded_clusters)]
+# DimPlot(seurat)
+# seurat
+```
+
+
+NOTE: We will not discard cells from non-myeloid populations at this stage. Instead, in the next notebook we will map the cells to our tonsil reference and keep only those mapped to myeloid cells with high accuracy.
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save_obj)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
