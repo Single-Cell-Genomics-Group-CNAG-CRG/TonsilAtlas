@@ -1,0 +1,141 @@
+---
+title: 'Cell cycle scores: DC1 precursor VS DC1 mature'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to compare the cell cycle score and proportion of cells in different cell cycle stages between DC1 precursor and DC1 mature. We know from a [Cell Reports](https://www.sciencedirect.com/science/article/pii/S2211124718311239) paper that DC1 precursor proliferate more than DC1 mature.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(here)
+```
+
+
+## Read data
+
+```{r}
+myeloid <- readRDS(here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_myeloid_seurat_obj.rds"))
+```
+
+
+# Cell cycle scores
+
+```{r}
+s_score_vln <- myeloid@meta.data %>%
+  filter(annotation_20220215 %in% c("DC1 precursor", "DC1 mature")) %>%
+  mutate(annotation_20220215 = factor(annotation_20220215, rev(c("DC1 precursor", "DC1 mature")))) %>%
+  ggplot(aes(annotation_20220215, S.Score, fill = annotation_20220215)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.1) +
+  scale_fill_manual(values = rev(c("#ff99d6", "#bf408c"))) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none",
+    axis.text.y = element_text(size = 6),
+    axis.text.x = element_text(size = 5),
+    axis.title = element_text(size = 6)
+  ) +
+  coord_flip()
+s_score_vln
+
+g2m_score_vln <- myeloid@meta.data %>%
+  filter(annotation_20220215 %in% c("DC1 precursor", "DC1 mature")) %>%
+  mutate(annotation_20220215 = factor(annotation_20220215, rev(c("DC1 precursor", "DC1 mature")))) %>%
+  ggplot(aes(annotation_20220215, G2M.Score, fill = annotation_20220215)) +
+  geom_boxplot(width = 0.5, outlier.size = 0.1) +
+  scale_fill_manual(values = rev(c("#ff99d6", "#bf408c"))) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "none",
+    axis.text.x = element_text(size = 6),
+    axis.text.y = element_blank(),
+    axis.title = element_text(size = 6)
+  ) +
+  coord_flip()
+arranged <- s_score_vln | g2m_score_vln
+
+
+ggsave(
+  filename = "~/Desktop/tmp/boxplots.pdf",
+  plot = arranged,
+  height = 3,
+  width = 13,
+  units = "cm"
+)
+
+```
+
+
+# Cell cycle phases
+
+```{r}
+stacked_barplot <- myeloid@meta.data %>%
+  filter(annotation_20220215 %in% c("DC1 precursor", "DC1 mature")) %>%
+  mutate(
+    annotation_20220215 = factor(annotation_20220215, c("DC1 precursor", "DC1 mature")),
+    Phase = factor(Phase, c("G1", "S", "G2M"))) %>%
+  group_by(annotation_20220215, Phase) %>%
+  summarise(n_cells = n()) %>%
+  group_by(annotation_20220215) %>%
+  mutate(pct_cells = n_cells / sum(n_cells) * 100) %>% 
+  ggplot(aes(annotation_20220215, pct_cells, fill = Phase)) +
+    geom_col() +
+    ylab("Percentage of cells (%)") +
+    scale_fill_manual(values = c("#00a872", "#0ab1e8", "#f59e06")) +
+    theme_classic() +
+    theme(
+      axis.title.x = element_blank(),
+      axis.text = element_text(size = 6),
+      axis.title.y = element_text(size = 6),
+      legend.text = element_text(size = 6),
+      legend.title = element_text(size = 6)
+    )
+s_score_vln | g2m_score_vln | stacked_barplot
+```
+
+
+# Save
+
+```{r}
+combined <- s_score_vln | g2m_score_vln | stacked_barplot
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/results/paper/figures/revision_DC1_mature_precursor_cell_cycle.pdf",
+  plot = combined,
+  height = 6,
+  width = 18,
+  units = "cm"
+)
+
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

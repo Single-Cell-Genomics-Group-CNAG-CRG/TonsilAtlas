@@ -1,0 +1,283 @@
+---
+title: 'Correct for differences in cell cycle (GCBC)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we will answer the following comment from reviewer 1:
+
+*"The cell cycle seems to have a very important effect on the resulting embedding of sc/snRNA-seq data. Have the authors considered accounting for the cell cycle (e.g. regressing out or removing cell cycle-associated genes) before doing dimensionality reduction and UMAP embedding? Having such a big cluster of cycling cells (which likely correspond to several distinct cell types that are pulled together in the embedding just for being in active proliferation) can mask relevant biology."*.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+library(scater)
+library(SingleCellExperiment)
+library(tidyverse)
+library(here)
+library(glue)
+library(ggrastr)
+library(lisi)
+```
+
+
+## Define parameters
+
+```{r}
+# Source paths and functions
+gcbc_levels_old <- c("DZ early Sphase", "DZ late Sphase", "DZ early G2Mphase",
+                 "DZ late G2Mphase", "DZ cell cycle exit", "DZ non proliferative",
+                 "DZ_LZ transition", "LZ", "LZ_DZ reentry commitment", "LZ proliferative",
+                 "LZ_DZ transition", "Precursor MBCs", "Reactivated proliferative MBCs",
+                 "prePC")
+gcbc_levels_new <- c("DZ early Sphase", "DZ late Sphase", "DZ early G2Mphase",
+                     "DZ late G2Mphase", "DZ cell cycle exit", "DZ non proliferative",
+                     "DZ-LZ transition", "LZ", "LZ-DZ reentry commitment", "LZ proliferative",
+                     "LZ-DZ transition", "Precursor MBCs", "Reactivated proliferative MBCs",
+                     "PC Commited Light Zone GCBC")
+colors_gcbc <- c("#056dbd", "#004f89", "#6c629f", "#857daf", "#2e2e4a", "#326200",
+                 "#d3ee9d", "#fdf498", "#deefef", "#9bd4fc", "#4eaffc", "#c9b86d",
+                 "#574c2e", "#fbcfc2")
+names(colors_gcbc) <- gcbc_levels_new
+cols_cc <- c("G2M" = "#e69f00", "S" = "#56b4e9", "G1" = "#009e73")
+theme_blank <- function() {
+  theme(
+    plot.title = element_blank(),
+    axis.line = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank()
+  )
+}
+```
+
+
+## Load data
+
+```{r}
+seurat <- readRDS(here("scRNA-seq/results/R_objects/final_clusters/20230124/20230124_GCBC_seurat_obj.rds"))
+seurat <- seurat[, seurat$assay == "3P"]
+```
+
+
+# Plot GCBC without cell cycle correction
+
+## UMAPS
+
+```{r}
+seurat$annotation_20230124 <- factor(
+  seurat$names_level_5_clusters_eta,
+  levels = gcbc_levels_old
+)
+levels(seurat$annotation_20230124) <- gcbc_levels_new
+umap_annot_original <- DimPlot(
+  seurat,
+  group.by = "annotation_20230124",
+  pt.size = 0.1,
+  cols = colors_gcbc,
+  shuffle = TRUE
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_annot_original <- rasterise(umap_annot_original, dpi = 600)
+umap_cc_original <- DimPlot(
+  seurat,
+  group.by = "Phase",
+  pt.size = 0.1,
+  cols = cols_cc,
+  shuffle = TRUE
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_cc_original <- rasterise(umap_cc_original, dpi = 600)
+umap_annot_original | umap_cc_original
+```
+
+
+## LISI scores
+
+We use the [Local Inverse Simpson Index (LISI)](https://github.com/immunogenomics/LISI) to quantify the batch diversity at the neigborhood of each cell:
+
+```{r}
+harmony_original <- Embeddings(seurat, "harmony")[, 1:30]
+metadata_df <- seurat@meta.data[, c("annotation_20230124", "Phase")]
+lisi_original <- compute_lisi(
+  harmony_original,
+  metadata_df,
+  c("annotation_20230124", "Phase")
+)
+lisi_original$group <- "No CC correction"
+
+# Save
+dir.create(here("scRNA-seq/6-revision/tmp"))
+saveRDS(umap_annot_original, here("scRNA-seq/6-revision/tmp/umap_annot_original.rds"))
+saveRDS(umap_cc_original, here("scRNA-seq/6-revision/tmp/umap_cc_original.rds"))
+saveRDS(lisi_original, here("scRNA-seq/6-revision/tmp/lisi_original.rds"))
+```
+
+
+# Remove genes correlated with cell cycle
+
+The first strategy to remove the effect of cell cycle from dataset is to remove the genes which show a high correlation with cell cycle. We follow the steps explained in [this vignette](http://bioconductor.org/books/3.17/OSCA.advanced/cell-cycle-assignment.html#removing-cell-cycle-related-genes):
+
+```{r}
+sce <- as.SingleCellExperiment(seurat)
+var_explained <- getVarianceExplained(sce, "Phase")
+var_explained_df <- as.data.frame(var_explained)
+var_explained_df <- var_explained_df[!(is.na(var_explained_df$Phase)), , drop = FALSE]
+var_explained_df %>%
+  ggplot(aes(Phase)) +
+  geom_histogram(binwidth = 0.5) +
+  geom_vline(xintercept = 5, linetype = "dashed", color = "red") +
+  theme_classic()
+table(var_explained_df$Phase >= 5)
+cell_cycle_genes <- rownames(var_explained_df)[var_explained_df$Phase >= 5]
+seurat <- FindVariableFeatures(seurat, nfeatures = 2500)
+var_features <- VariableFeatures(seurat)[!(VariableFeatures(seurat) %in% cell_cycle_genes)]
+seurat <- ScaleData(seurat, features = var_features)
+seurat <- RunPCA(seurat, features = var_features)
+seurat <- RunHarmony(
+  seurat,
+  group.by.vars = "gem_id",
+  dims.use = 1:30,
+  reduction = "pca",
+  max.iter.harmony = 20
+)
+seurat <- RunUMAP(seurat, dims = 1:30, reduction = "harmony")
+```
+
+
+## UMAPS
+
+```{r}
+umap_annot_no_cc_genes <- DimPlot(
+  seurat,
+  group.by = "annotation_20230124",
+  pt.size = 0.1,
+  cols = colors_gcbc,
+  shuffle = TRUE
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_annot_no_cc_genes <- rasterize(umap_annot_no_cc_genes, dpi = 600)
+umap_cc_no_cc_genes <- DimPlot(
+  seurat,
+  group.by = "Phase",
+  pt.size = 0.1,
+  cols = cols_cc,
+  shuffle = TRUE
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_cc_no_cc_genes <- rasterize(umap_cc_no_cc_genes, dpi = 600)
+umap_annot_no_cc_genes | umap_cc_no_cc_genes
+```
+
+## LISI scores
+
+```{r}
+harmony_no_cc_genes <- Embeddings(seurat, "harmony")[, 1:30]
+lisi_no_cc_genes <- compute_lisi(
+  harmony_no_cc_genes,
+  metadata_df,
+  c("annotation_20230124", "Phase")
+)
+lisi_no_cc_genes$group <- "Removed CC genes"
+
+# Save
+saveRDS(umap_annot_no_cc_genes, here("scRNA-seq/6-revision/tmp/umap_annot_no_cc_genes.rds"))
+saveRDS(umap_cc_no_cc_genes, here("scRNA-seq/6-revision/tmp/umap_cc_no_cc_genes.rds"))
+saveRDS(lisi_no_cc_genes, here("scRNA-seq/6-revision/tmp/lisi_no_cc_genes.rds"))
+```
+
+
+
+# Dimensionality reduction after cell cycle regression
+
+In a previous script we followed the [cell cycle regression vignette from Seurat](https://satijalab.org/seurat/articles/cell_cycle_vignette.html). Here, we proceed to reduce the dimensionality and compute UMAP and LISI scores.
+
+```{r}
+rm(seurat)
+gc()
+seurat_regressed <- readRDS(here("scRNA-seq/results/R_objects/revision/seurat_gcbc_cell_cycle_regressed.rds"))
+seurat_regressed <- RunPCA(seurat_regressed, features = VariableFeatures(seurat_regressed))
+seurat_regressed <- RunHarmony(
+  seurat_regressed,
+  group.by.vars = "gem_id",
+  dims.use = 1:30,
+  reduction = "pca",
+  max.iter.harmony = 20
+)
+seurat_regressed <- RunUMAP(seurat_regressed, dims = 1:30, reduction = "harmony")
+```
+
+
+## UMAPS
+
+```{r}
+umap_annot_regressed <- DimPlot(
+  seurat_regressed,
+  group.by = "annotation_20230124",
+  pt.size = 0.1,
+  cols = colors_gcbc,
+  shuffle = TRUE
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_annot_regressed <- rasterize(umap_annot_regressed, dpi = 600)
+umap_cc_regressed <- DimPlot(
+  seurat_regressed,
+  group.by = "Phase",
+  pt.size = 0.1,
+  cols = cols_cc
+) +
+  theme_blank() +
+  theme(legend.text = element_text(size = 7))
+umap_cc_regressed <- rasterize(umap_cc_regressed, dpi = 600)
+umap_annot_regressed | umap_cc_no_cc_genes
+```
+
+## LISI scores
+
+```{r}
+harmony_regressed <- Embeddings(seurat_regressed, "harmony")[, 1:30]
+lisi_regressed <- compute_lisi(
+  harmony_regressed,
+  metadata_df,
+  c("annotation_20230124", "Phase")
+)
+lisi_regressed$group <- "CC regressed out"
+
+# Save
+saveRDS(umap_annot_regressed, here("scRNA-seq/6-revision/tmp/umap_annot_regressed.rds"))
+saveRDS(umap_cc_regressed, here("scRNA-seq/6-revision/tmp/umap_cc_regressed.rds"))
+saveRDS(lisi_regressed, here("scRNA-seq/6-revision/tmp/lisi_regressed.rds"))
+```
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
