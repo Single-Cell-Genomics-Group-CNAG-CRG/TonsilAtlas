@@ -1,9 +1,22 @@
 # A periodic table of human tonsillar cells
 
-Palatine tonsils are secondary lymphoid organs representing the first line of immunological defense against inhaled or ingested pathogens. Here, we provide a comprehensive census of cell types forming the human tonsil by applying single cell transcriptome, epigenome, proteome and adaptive immune repertoire as well as spatial transcriptomics, resulting in an atlas of >357,000 cells. We provide a glossary of 137 annotated cell types and states, and disentangle gene regulatory mechanisms that drive cells through specialized lineage trajectories. Exemplarily, we stratify multiple tonsil-resident myeloid slancyte subtypes, establish a distant BCL6 superenhancer as locally active in both follicle-associated B and T cells, and describe SIX5 as a potentially novel transcriptional regulator of plasma cell maturation. Further, our atlas acts as a reference map to pinpoint alterations observed in disease, shown here discovering immune-phenotype plasticity in tumoral cells and microenvironment shifts of mantle cell lymphomas (MCL). To facilitate such reference-based analysis, we develop HCATonsilData and SLOcatoR, a computational framework that provides programmatic and modular access to our dataset; and allows the straightforward annotation of future single-cell profiles from secondary lymphoid organs.
+Palatine tonsils are secondary lymphoid organs (SLO) representing the first line of immunological defense
+against inhaled or ingested pathogens. Here, we provide a comprehensive census of cell types forming the
+human tonsil by applying single-cell transcriptome, epigenome, proteome and adaptive immune repertoire
+sequencing as well as spatial transcriptomics, resulting in an atlas of >556,000 cells. We provide a glossary
+of 121 annotated cell types and states and disentangle gene regulatory mechanisms that drive cells through
+specialized lineage trajectories. Exemplarily, we stratify multiple tonsil-resident myeloid slan-like subtypes,
+establish a BCL6 distal enhancer as locally active in both follicle-associated T and B cells, and describe
+SIX5 as a potentially novel transcriptional regulator of plasma cell maturation. Further, we demonstrate the
+value of the atlas as a reference to annotate cells from normal or pathological SLO. Therefore, we develop
+HCATonsilData and SLOcatoR, a computational framework that provides easy data access and enables
+future annotation of single-cell profiles from SLO. The integration of a validation cohort confirms the
+presence, annotation and markers of tonsillar cell types and provides evidence of age-related compositional
+shifts. Finally, we apply our reference atlas to characterize neoplastic cell states of B cell-derived
+lymphomas, linking transcriptional heterogeneity in mantle cell lymphoma (MCL) to normal B cell
+differentiation states of the human tonsil.
 
-
-This repository contains all the scripts, notebooks and reports to reproduce all analysis from our recent preprint titled "A periodic table of tonsillar cells" (TODO: update title). Here, we describe how to access the data, document the most important packages and versions used, and explain how to navigate the directories and files in this repository.
+This repository contains all the scripts, notebooks and reports to reproduce all analysis from our recent preprint titled "An Atlas of Cells in the Human Tonsil", published in Immunity in 2024. Here, we describe how to access the data, document the most important packages and versions used, and explain how to navigate the directories and files in this repository.
 
 ![](data/TonsilAtlasPic.png)
 
@@ -55,7 +68,7 @@ to navigate this repo. Likewise, we have tried to code in a shared style. These 
 * 1-cellranger_mapping: scripts used to run cellranger in our cluster. It also contains QC metrics for different sequencing runs.
 * 2-QC: quaity control for the sequencing and mapping of raw data, filtering of poor-quality cells and genes, normalization, doublet detection, and batch effect correction.
 * 3-clustering: we followed a top-down clustering approach (see methods of our manuscript). Thus, the clustering is organized by levels, in which we move from general cellular compartments to granular cell types and states in a hierarchical and recursive fashion. In this notebooks we have also included the annotation, which was established in collaboration with the annotation team.
-
+* 4-revision: we include one folder with the analysis performed to answer each of the major reviews during the revision of the manuscript.
 Other more focused analysis include:
 
 * [Gene regulatory inference using pySCENIC](https://github.com/Single-Cell-Genomics-Group-CNAG-CRG/TonsilAtlas/tree/main/scRNA-seq/gene_regulatory_networks/pyScenic)
