@@ -1,0 +1,292 @@
+---
+title: 'PC: Label and coordinate transfer (validation cohort)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the label and UMAP coordinates from the discovery cohort to the validation cohort. We will do it one compartment at a time (e.g. pc), so we can validate that the transfer is robust
+
+Specifically, we will follow these steps for every compartment:
+
+1. Include or update the annotation label for this object.
+2. Plot the integrated object split by type (quey/reference) to visualize if discovery and validation cohorts were integrated properly.
+3. Transfer label.
+4. Transfer UMAP coordinates + visualize
+5. Exclude cells with a low annotation probability and/or a high doublet score
+6. Visualize heatmap of specific markers to validate that the cluster and annotation holds for the new cohort.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+library(pheatmap2)
+```
+
+
+## Source functions
+
+```{r}
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32",
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2",
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",
+                    "Brown")
+```
+
+
+# PC
+
+```{r}
+# Read data, clean and include annotation
+pc <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/4.9-PC_seurat_object_discovery_validation_cohorts.rds"))
+pc <- updateAnnotation(pc)
+pc$annotation_20230508 <- pc$annotation_20220619
+pc$annotation_20230508[is.na(pc$annotation_20230508)] <- "unannotated"
+pc$annotation_20230508 <- factor(
+  pc$annotation_20230508,
+  levels = c(names(colors_20230508[["PC"]]), "unannotated")
+)
+Idents(pc) <- "annotation_20230508"
+pc$is_reference <- ifelse(
+  pc$cohort_type == "discovery" & pc$assay == "3P",
+  "reference",
+  "query"
+)
+DimPlot(
+  pc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = c(colors_20230508[["PC"]], "unannotated" = "black")
+) &
+  theme(legend.text = element_text(size = 6))
+```
+
+
+We stil see some clusters that did not integrate well. Let us inspect the doublet scores and markers of other populations:
+
+```{r}
+FeaturePlot(pc, c("CD3D", "LYZ")) & scale_color_viridis_c(option = "magma")
+FeaturePlot(pc[, pc$cohort_type == "validation"], "doublet_score_scDblFinder") &
+  scale_color_viridis_c(option = "magma")
+FeaturePlot(pc, c("S.Score", "G2M.Score")) & scale_color_viridis_c(option = "magma")
+```
+
+We see a clear cluster of T-cell doublets. Let us exclude them from the dataset:
+
+```{r}
+pc <- FindNeighbors(pc, reduction = "harmony", dims = 1:25)
+pc <- FindClusters(pc, resolution = 0.3)
+DimPlot(pc, cols = color_palette)
+markers6 <- FindMarkers(pc, ident.1 = "6", only.pos = TRUE, logfc.threshold = 0.6)
+DT::datatable(markers6)
+pc <- pc[, !(pc$cohort_type == "validation" & pc$seurat_clusters == "6")]
+DimPlot(pc)
+```
+
+In addition, we see that cells from other compartments (GCBC, MBC) were included to map trajectories. For clarity, we will exclude them from the analysis:
+
+```{r}
+exclude <- c("Dark Zone GCBC", "Light Zone GCBC")
+pc <- pc[, !(pc$annotation_20230508 %in% exclude)]
+pc$annotation_20230508 <- droplevels(pc$annotation_20230508)
+colors_20230508$PC <- colors_20230508$PC[!(names(colors_20230508$PC) %in% exclude)]
+```
+
+Finally, let's explore how doublet scores distribute per cluster, and remove any cluster with a high doublet score:
+
+```{r}
+VlnPlot(pc[, pc$cohort_type == "validation"], features = "doublet_score_scDblFinder", pt.size = 0)
+```
+
+
+Reintegrate:
+
+```{r}
+pc$type <- str_c(pc$cohort_type, pc$assay, sep = "_")
+shared_hvg <- find_assay_specific_features(pc, assay_var = "type")
+pc <- integrate_assays(
+  pc,
+  assay_var = "type",
+  shared_hvg = shared_hvg
+)
+pc <- RunUMAP(pc, dims = 1:25, reduction = "harmony")
+DimPlot(
+  pc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = c(colors_20230508[["PC"]], "unannotated" = "gray")
+)  &
+  theme(legend.text = element_text(size = 6))
+```
+
+Transfer label:
+
+```{r}
+# Split training and test sets
+Idents(pc) <- "annotation_20230508"
+data_sets <- split_training_and_test_sets(
+  pc,
+  split_var = "cohort_type",
+  referece_label = "discovery",
+  query_label = "validation",
+  reduction = "harmony",
+  n_dims = 25
+)
+
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = pc,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 8,
+  response_var = "annotation_20230508"
+)
+
+# Transfer UMAP coords
+# umap_test_df <- transfer_umap_coords(
+#   seurat_obj = pc,
+#   training_set = data_sets$training_set,
+#   test_set = data_sets$test_set,
+#   umap1_var = "UMAP_1_20220215",
+#   umap2_var = "UMAP_2_20220215",
+#   k = 15
+# )
+
+
+# Include annotation and UMAP coords in Seurat object
+pc$annotation_20230508[annotation_query_df$query_cells] <- annotation_query_df$annotation
+Idents(pc) <- "annotation_20230508"
+pc$annotation_20230508_probability <- NA
+pc$annotation_20230508_probability[annotation_query_df$query_cells] <- annotation_query_df$annotation_prob
+# pc$UMAP_1_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP1
+# pc$UMAP_2_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP2
+p1 <- FeaturePlot(
+  pc[, annotation_query_df$query_cells],
+  "annotation_20230508_probability"
+) + scale_color_viridis_c(option = "magma")
+p2 <- FeaturePlot(
+  pc[, annotation_query_df$query_cells],
+  "doublet_score_scDblFinder"
+) + scale_color_viridis_c(option = "magma")
+p1 | p2
+DimPlot(
+  pc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["PC"]]
+)  &
+  theme(legend.text = element_text(size = 6))
+table(pc$annotation_20230508_probability)
+FeaturePlot(
+  pc[, pc$cohort_type == "validation"],
+  c("annotation_20230508_probability", "doublet_score_scDblFinder")
+) & scale_color_viridis_c(option = "magma")
+```
+
+There is a cluster with a high doublet score and a low annotation probability. We will flag it for later discussion.
+
+Plot heatmap:
+
+```{r}
+goi <- c("SUGCT", "AICDA", "CXCR4", "LMO2", "CD83", "BCL2A1", "BCL6", "IRF8",
+         "MEF2B", "MS4A1", "PAX5", "PRDM1", "XBP1", "IRF4", "SLAMF7", "SSR4",
+         "MZB1", "DERL3", "CREB3L2", "FKBP11", "IGHG1", "IGHG2", "IGHG3", "IGHG4",
+         "IGHA1", "IGHA2", "IGHM", "IGHD", "CCDC50", "FCMR", "CD9", "CD44", "H2AFZ",
+         "MKI67", "TUBA1B", "TOP2A")
+avgexpr_mat <- AverageExpression(
+  pc[, pc$cohort_type == "validation"],
+  features = goi,
+  assays = "RNA",
+  return.seurat = FALSE,
+  group.by = "annotation_20230508",
+  slot = "data"
+)$RNA
+
+
+# Define annotation column
+cell_types <- levels(pc$annotation_20230508)
+mycolors <- list(cell_type = c(colors_20230508$PC))
+annotation_col <- data.frame(cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+
+# Scale per row between 0 and 1 
+input_mat <- t(apply(avgexpr_mat, 1, function(x) (x - min(x)) / diff(range(x))))
+
+
+# Plot heatmap
+pheatmap2(
+  input_mat,
+  annotation_col = annotation_col,
+  annotation_colors = mycolors,
+  annotation_names_col = TRUE,
+  annotation_legend = TRUE,
+  show_rownames = TRUE,
+  show_colnames = FALSE, 
+  border_color = NA,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  fontsize_row = 6
+)
+```
+
+
+Plot annotation probability:
+
+```{r}
+pc@meta.data %>%
+  filter(cohort_type == "validation") %>%
+  ggplot(aes(annotation_20230508, annotation_20230508_probability, fill = annotation_20230508)) +
+    geom_boxplot() +
+    scale_fill_manual(values = colors_20230508$PC) +
+    theme_classic() +
+    theme(legend.position = "none") +
+    coord_flip()
+```
+
+# Save
+
+```{r}
+saveRDS(pc, here("scRNA-seq/results/R_objects/seurat_objects_revision/5.9-pc_seurat_object_discovery_validation_cohorts_annotation.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

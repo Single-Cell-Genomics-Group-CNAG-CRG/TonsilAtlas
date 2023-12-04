@@ -1,0 +1,248 @@
+---
+title: 'PDC: Label and coordinate transfer (validation cohort)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the label and UMAP coordinates from the discovery cohort to the validation cohort. We will do it one compartment at a time (here, follicular dendritic cells, pdc), so we can validate that the transfer is robust.
+
+Specifically, we will follow these steps for every compartment:
+
+1. Include or update the annotation label for this object.
+2. Plot the integrated object split by type (quey/reference) to visualize if discovery and validation cohorts were integrated properly.
+3. Transfer label.
+4. Transfer UMAP coordinates + visualize
+5. Exclude cells with a low annotation probability and/or a high doublet score
+6. Visualize heatmap of specific markers to validate that the cluster and annotation holds for the new cohort.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+```
+
+
+## Source functions
+
+```{r}
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32",
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2",
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",
+                    "Brown")
+```
+
+
+# PDC
+
+```{r}
+# Read data, clean and include annotation
+pdc <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/4.3-PDC_seurat_object_discovery_validation_cohorts.rds"))
+pdc <- updateAnnotation(pdc)
+table(pdc$assay)
+pdc <- pdc[, pdc$assay == "3P"]
+pdc$annotation_20230508 <- pdc$annotation_20220619
+pdc$annotation_20230508[is.na(pdc$annotation_20230508)] <- "unannotated"
+pdc$annotation_20230508 <- factor(
+  pdc$annotation_20230508,
+  levels = c(names(colors_20230508[["PDC"]]), "unannotated")
+)
+Idents(pdc) <- "annotation_20230508"
+pdc$is_reference <- ifelse(
+  pdc$cohort_type == "discovery",
+  "reference",
+  "query"
+)
+DimPlot(
+  pdc,
+  group.by = "annotation_20230508",
+  split.by = "is_reference",
+  cols = colors_20230508[["PDC"]]
+)
+DimPlot(
+  pdc,
+  group.by = "assay",
+  split.by = "is_reference"
+)
+```
+
+
+We see that we have too few multiome cells for a proper label transfer. Thus, we will label them as "pdc", and focus on transering the label from the discovery scRNA-seq dataset to validation scRNA-seq. Let us integrate again this dataset:
+
+```{r}
+Idents(pdc) <- "gem_id"
+shared_hvg <- find_assay_specific_features(pdc, assay_var = "cohort_type")
+print(glue("The number of shared HVG is: {length(shared_hvg)}"))
+table(pdc$cohort_type)
+pdc <- integrate_assays(
+  pdc,
+  assay_var = "cohort_type",
+  shared_hvg = shared_hvg
+)
+pdc <- RunUMAP(pdc, dims = 1:25, reduction = "harmony")
+DimPlot(
+  pdc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["PDC"]]
+)
+DimPlot(
+  pdc,
+  group.by = "cohort_type"
+)
+FeaturePlot(pdc, c("CD79B", "CD3G")) &
+  scale_color_viridis_c(option = "magma")
+pdc <- FindNeighbors(pdc, reduction = "harmony", dims = 1:25, k.param = 10)
+pdc <- FindClusters(pdc, resolution = 0.8)
+DimPlot(pdc, cols = color_palette)
+```
+
+We see that there are two clusters of doublets with B and T cells (5, 10). Let's exclude them and reintegrate:
+
+```{r}
+markers_5 <- FindMarkers(pdc, ident.1 = "5", only.pos = TRUE, logfc.threshold = 0.7)
+DT::datatable(markers_5)
+markers_10 <- FindMarkers(pdc, ident.1 = "10", only.pos = TRUE, logfc.threshold = 0.7)
+DT::datatable(markers_10)
+pdc <- pdc[, !(pdc$seurat_clusters %in% c("5", "10") & pdc$cohort_type == "validation")]
+DimPlot(pdc)
+table(pdc$cohort_type)
+shared_hvg <- find_assay_specific_features(pdc, assay_var = "cohort_type")
+print(glue("The number of shared HVG is: {length(shared_hvg)}"))
+table(pdc$cohort_type)
+pdc <- integrate_assays(
+  pdc,
+  assay_var = "cohort_type",
+  shared_hvg = shared_hvg
+)
+pdc <- RunUMAP(pdc, dims = 1:25, reduction = "harmony")
+DimPlot(
+  pdc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["PDC"]]
+)
+```
+
+
+Now we can transfer the label and UMAP coords
+
+```{r}
+# Split training and test sets
+data_sets <- split_training_and_test_sets(
+  pdc,
+  split_var = "cohort_type",
+  referece_label = "discovery",
+  query_label = "validation",
+  reduction = "harmony",
+  n_dims = 25
+)
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = pdc,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 8,
+  response_var = "annotation_20230508"
+)
+
+# Transfer UMAP coords
+# umap_test_df <- transfer_umap_coords(
+#   seurat_obj = pdc,
+#   training_set = data_sets$training_set,
+#   test_set = data_sets$test_set,
+#   umap1_var = "UMAP_1_20220215",
+#   umap2_var = "UMAP_2_20220215",
+#   k = 15
+# )
+
+
+# Include annotation and UMAP coords in Seurat object
+pdc$annotation_20230508[annotation_query_df$query_cells] <- annotation_query_df$annotation
+Idents(pdc) <- "annotation_20230508"
+pdc$annotation_20230508_probability <- NA
+pdc$annotation_20230508_probability[annotation_query_df$query_cells] <- annotation_query_df$annotation_prob
+# pdc$UMAP_1_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP1
+# pdc$UMAP_2_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP2
+p1 <- FeaturePlot(
+  pdc[, annotation_query_df$query_cells],
+  "annotation_20230508_probability"
+) + scale_color_viridis_c(option = "magma")
+p2 <- FeaturePlot(
+  pdc[, annotation_query_df$query_cells],
+  "doublet_score_scDblFinder"
+) + scale_color_viridis_c(option = "magma")
+p1 | p2
+DimPlot(
+  pdc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["PDC"]]
+)
+table(pdc$annotation_20230508_probability)
+FeaturePlot(pdc, c("nFeature_RNA", "pct_mt"))
+```
+
+We see that there is a cluster with hallmarks of poor-quality cells: high % of mitochondrial expression and low number of detected features. We will exclude it:
+
+```{r}
+pdc <- FindNeighbors(pdc, k.param = 15, dims = 1:20, reduction = "harmony")
+pdc <- FindClusters(pdc, resolution = 0.2)
+DimPlot(pdc)
+markers_2 <- FindMarkers(pdc, ident.1 = "2", only.pos = TRUE)
+DT::datatable(markers_2)
+pdc <- pdc[, !(pdc$cohort_type == "validation" & pdc$seurat_clusters == "2")]
+DimPlot(pdc, cols = color_palette)
+goi <- c("IRF8", "IL3RA", "LILRA4", "IFI44", "IFI6")
+FeaturePlot(pdc, goi) &
+  scale_color_viridis_c(option = "magma")
+DimPlot(pdc, group.by = "annotation_20230508", cols = colors_20230508$PDC)
+```
+
+
+# Save
+
+```{r}
+saveRDS(pdc, here("scRNA-seq/results/R_objects/seurat_objects_revision/5.3-PDC_seurat_object_discovery_validation_cohorts_annotation.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

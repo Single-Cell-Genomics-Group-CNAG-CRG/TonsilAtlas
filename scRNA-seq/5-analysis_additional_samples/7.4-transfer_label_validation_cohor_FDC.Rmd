@@ -1,0 +1,272 @@
+---
+title: 'FDC: Label and coordinate transfer (validation cohort)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the label and UMAP coordinates from the discovery cohort to the validation cohort. We will do it one compartment at a time (here, follicular dendritic cells, FDC), so we can validate that the transfer is robust.
+
+Specifically, we will follow these steps for every compartment:
+
+1. Include or update the annotation label for this object.
+2. Plot the integrated object split by type (quey/reference) to visualize if discovery and validation cohorts were integrated properly.
+3. Transfer label.
+4. Transfer UMAP coordinates + visualize
+5. Exclude cells with a low annotation probability and/or a high doublet score
+6. Visualize heatmap of specific markers to validate that the cluster and annotation holds for the new cohort.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+```
+
+
+## Source functions
+
+```{r}
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32",
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2",
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",
+                    "Brown")
+```
+
+
+# FDC
+
+```{r}
+# Read data, clean and include annotation
+fdc <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/4.4-FDC_seurat_object_discovery_validation_cohorts.rds"))
+fdc <- updateAnnotation(fdc)
+fdc$annotation_20230508 <- fdc$annotation_20220619
+fdc$annotation_20230508[fdc$annotation_20230508 == "FDC_multiome"] <- "unannotated" 
+fdc$annotation_20230508[is.na(fdc$annotation_20230508)] <- "unannotated"
+fdc$annotation_20230508 <- factor(
+  fdc$annotation_20230508,
+  levels = names(colors_20230508[["FDC"]])
+)
+Idents(fdc) <- "annotation_20230508"
+fdc$is_reference <- ifelse(
+  fdc$cohort_type == "discovery" & fdc$assay == "3P",
+  "reference",
+  "query"
+)
+DimPlot(
+  fdc,
+  group.by = "annotation_20230508",
+  split.by = "is_reference",
+  cols = colors_20230508[["FDC"]]
+)
+DimPlot(
+  fdc,
+  group.by = "assay",
+  split.by = "is_reference"
+)
+```
+
+
+We see that we have too few multiome cells for a proper label transfer. Thus, we will label them as "FDC", and focus on transering the label from the discovery scRNA-seq dataset to validation scRNA-seq. Let us integrate again this dataset:
+
+```{r}
+Idents(fdc) <- "gem_id"
+fdc_rna <- fdc[, fdc$assay == "3P"]
+shared_hvg <- find_assay_specific_features(fdc_rna, assay_var = "cohort_type")
+print(glue("The number of shared HVG is: {length(shared_hvg)}"))
+table(fdc_rna$cohort_type)
+fdc_rna <- integrate_assays(
+  fdc_rna,
+  assay_var = "cohort_type",
+  shared_hvg = shared_hvg
+)
+fdc_rna <- RunUMAP(fdc_rna, dims = 1:25, reduction = "harmony")
+DimPlot(
+  fdc_rna,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["FDC"]]
+)
+DimPlot(
+  fdc_rna,
+  group.by = "cohort_type"
+)
+FeaturePlot(fdc_rna, c("CD79B", "CD3G", "CCR7")) &
+  scale_color_viridis_c(option = "magma")
+fdc_rna <- FindNeighbors(fdc_rna, reduction = "harmony", dims = 1:25, k.param = 10)
+fdc_rna <- FindClusters(fdc_rna, resolution = 1)
+DimPlot(fdc_rna,  cols = color_palette)
+```
+
+We see that there are two clusters of doublets with B and T cells (1, 4, 9, 11). Let's exclude them and reintegrate:
+
+```{r}
+markers <- map(
+  c("1", "4", "9", "11"),
+  \(x) FindMarkers(fdc_rna, ident.1 = x, only.pos = TRUE)
+)
+map(markers, head, 20)
+fdc_rna <- fdc_rna[, !(fdc_rna$seurat_clusters %in% c("4", "9") & fdc_rna$cohort_type == "validation")]
+DimPlot(fdc_rna)
+table(fdc_rna$cohort_type)
+shared_hvg <- find_assay_specific_features(fdc_rna, assay_var = "cohort_type")
+print(glue("The number of shared HVG is: {length(shared_hvg)}"))
+table(fdc_rna$cohort_type)
+fdc_rna <- integrate_assays(
+  fdc_rna,
+  assay_var = "cohort_type",
+  shared_hvg = shared_hvg
+)
+fdc_rna <- RunUMAP(fdc_rna, dims = 1:25, reduction = "harmony")
+DimPlot(
+  fdc_rna,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["FDC"]]
+)
+```
+
+
+
+Now we can transfer the label and UMAP coords
+
+```{r}
+# Split training and test sets
+data_sets <- split_training_and_test_sets(
+  fdc_rna,
+  split_var = "cohort_type",
+  referece_label = "discovery",
+  query_label = "validation",
+  reduction = "harmony",
+  n_dims = 25
+)
+
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = fdc_rna,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 10,
+  response_var = "annotation_20230508"
+)
+
+# Transfer UMAP coords
+# umap_test_df <- transfer_umap_coords(
+#   seurat_obj = fdc_rna,
+#   training_set = data_sets$training_set,
+#   test_set = data_sets$test_set,
+#   umap1_var = "UMAP_1_20220215",
+#   umap2_var = "UMAP_2_20220215",
+#   k = 15
+# )
+
+
+# Include annotation and UMAP coords in Seurat object
+fdc_rna$annotation_20230508[annotation_query_df$query_cells] <- annotation_query_df$annotation
+Idents(fdc_rna) <- "annotation_20230508"
+fdc_rna$annotation_20230508_probability <- NA
+fdc_rna$annotation_20230508_probability[annotation_query_df$query_cells] <- annotation_query_df$annotation_prob
+# fdc$UMAP_1_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP1
+# fdc$UMAP_2_20220215[umap_test_df$query_cells] <- umap_test_df$UMAP2
+p1 <- FeaturePlot(
+  fdc_rna[, annotation_query_df$query_cells],
+  "annotation_20230508_probability"
+) + scale_color_viridis_c(option = "magma")
+p2 <- FeaturePlot(
+  fdc_rna[, annotation_query_df$query_cells],
+  "doublet_score_scDblFinder"
+) + scale_color_viridis_c(option = "magma")
+p1 | p2
+DimPlot(
+  fdc_rna,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["FDC"]]
+)
+table(fdc_rna$annotation_20230508_probability)
+```
+
+
+
+Plot dot plot
+
+```{r}
+goi_fdc <- list(
+  "FDC" = c("FDCSP", "CLU", "CR2", "CXCL13", "VIM"),
+  "CD14+CD55+ FDC" = c("CD14", "CD55"),
+  "COL27A1+ FDC" = c("COL27A1"),
+  "FRC" = c("PERP", "CCL20", "S100A2", "S100A9"),
+  "MRC" = c("DCN", "DIO2", "LUM", "BGN", "PDGFRB", "COL1A1", "COL1A2", "COL3A1",
+            "COL5A2", "COL6A3", "COL12A1", "COL14A1", "COL18A1")
+)
+goi_fdc <- unlist(goi_fdc)
+names(goi_fdc) <- NULL
+dot_plot_fdc <- DotPlot(
+  fdc_rna[, fdc_rna$cohort_type == "validation"],
+  features = rev(goi_fdc),
+  group.by = "annotation_20230508"
+)
+dot_plot_fdc <- dot_plot_fdc +
+  labs(x = "", y = "") +
+  scale_size_continuous(
+    limits = c(0, 100),
+    breaks = c(0, 25, 50, 75, 100),
+    range = c(0.1, 4.5)
+  ) +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  coord_flip() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 6),
+    axis.text.y = element_text(size = 6),
+    legend.text = element_text(size = 6),
+    legend.title = element_text(size = 7)
+  )
+dot_plot_fdc
+```
+
+
+# Save
+
+```{r}
+saveRDS(fdc_rna, here("scRNA-seq/results/R_objects/seurat_objects_revision/5.4-FDC_seurat_object_discovery_validation_cohorts_annotation.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

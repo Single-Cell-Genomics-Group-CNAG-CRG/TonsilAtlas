@@ -1,0 +1,267 @@
+---
+title: 'NBC/MBC: Label and coordinate transfer (validation cohort)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will transfer the label and UMAP coordinates from the discovery cohort to the validation cohort. We will do it one compartment at a time (e.g. nbc_mbc), so we can validate that the transfer is robust
+
+Specifically, we will follow these steps for every compartment:
+
+1. Include or update the annotation label for this object.
+2. Plot the integrated object split by type (quey/reference) to visualize if discovery and validation cohorts were integrated properly.
+3. Transfer label.
+4. Transfer UMAP coordinates + visualize
+5. Exclude cells with a low annotation probability and/or a high doublet score
+6. Visualize heatmap of specific markers to validate that the cluster and annotation holds for the new cohort.
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(scCustomize)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+library(pheatmap)
+```
+
+
+## Source functions
+
+```{r}
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32",
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2",
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",
+                    "Brown")
+```
+
+
+# NBC/MBC
+
+```{r}
+# Read data, clean and include annotation
+nbc_mbc <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/4.10-NBC_MBC_seurat_object_discovery_validation_cohorts.rds"))
+load(here("scRNA-seq/7-analysis_additional_samples/tmp/NBC_MBC_annotation_df.rda"))
+```
+
+
+We proceed to update the annotation:
+
+```{r}
+nbc_mbc$annotation_20220619 <- NA
+nbc_mbc$annotation_20220619[NBC_MBC_annotation_df$barcode] <- NBC_MBC_annotation_df$annotation_20220619
+nbc_mbc$annotation_20230508 <- nbc_mbc$annotation_20220619
+nbc_mbc$annotation_20230508[is.na(nbc_mbc$annotation_20230508)] <- "unannotated"
+nbc_mbc$annotation_20230508 <- factor(
+  nbc_mbc$annotation_20230508,
+  levels = c(names(colors_20230508[["NBC_MBC"]]), "unannotated")
+)
+Idents(nbc_mbc) <- "annotation_20230508"
+nbc_mbc$is_reference <- ifelse(
+  nbc_mbc$cohort_type == "discovery",
+  "reference",
+  "query"
+)
+DimPlot(
+  nbc_mbc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["NBC_MBC"]]
+)
+```
+
+Let us explore if there are lingering doublets:
+
+```{r}
+Idents(nbc_mbc) <- "cohort_type"
+FeaturePlot(nbc_mbc, c("CD3D", "LYZ")) &
+  scale_color_viridis_c(option = "magma")
+FeaturePlot(nbc_mbc[, nbc_mbc$cohort_type == "validation"], "doublet_score_scDblFinder") &
+  scale_color_viridis_c(option = "magma")
+```
+
+Indeed, one cluster is composed of doublets between B and T cells. Let us find it and remove it:
+
+```{r}
+nbc_mbc <- FindNeighbors(nbc_mbc, dims = 1:25, reduction = "harmony")
+nbc_mbc <- FindClusters(nbc_mbc, resolution = 0.1)
+DimPlot(nbc_mbc, cols = rev(color_palette))
+markers6 <- FindMarkers(nbc_mbc, ident.1 = "6", only.pos = TRUE, logfc.threshold = 0.5)
+head(markers6, 30)
+nbc_mbc <- nbc_mbc[, !(nbc_mbc$seurat_clusters == "6" & nbc_mbc$cohort_type == "validation")]
+DimPlot(nbc_mbc, cols = rev(color_palette), split.by = "cohort_type")
+```
+
+Reintegrate:
+
+```{r}
+nbc_mbc$type <- str_c(nbc_mbc$cohort_type, nbc_mbc$assay, sep = "_")
+shared_hvg <- find_assay_specific_features(nbc_mbc, assay_var = "type")
+nbc_mbc <- integrate_assays(
+  nbc_mbc,
+  assay_var = "type",
+  shared_hvg = shared_hvg
+)
+nbc_mbc <- RunUMAP(nbc_mbc, dims = 1:25, reduction = "harmony")
+DimPlot(
+  nbc_mbc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = c(colors_20230508[["NBC_MBC"]], "unannotated" = "gray")
+)  &
+  theme(legend.text = element_text(size = 6))
+```
+
+
+Transfer label:
+
+```{r}
+# Split training and test sets
+data_sets <- split_training_and_test_sets(
+  nbc_mbc,
+  split_var = "cohort_type",
+  referece_label = "discovery",
+  query_label = "validation",
+  reduction = "harmony",
+  n_dims = 25
+)
+
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = nbc_mbc,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 30,
+  response_var = "annotation_20230508"
+)
+
+# Include annotation and UMAP coords in Seurat object
+nbc_mbc$annotation_20230508[annotation_query_df$query_cells] <- annotation_query_df$annotation
+Idents(nbc_mbc) <- "annotation_20230508"
+nbc_mbc$annotation_20230508_probability <- NA
+nbc_mbc$annotation_20230508_probability[annotation_query_df$query_cells] <- annotation_query_df$annotation_prob
+p1 <- FeaturePlot(
+  nbc_mbc[, annotation_query_df$query_cells],
+  "annotation_20230508_probability"
+) + scale_color_viridis_c(option = "magma")
+p2 <- FeaturePlot(
+  nbc_mbc[, annotation_query_df$query_cells],
+  "doublet_score_scDblFinder"
+) + scale_color_viridis_c(option = "magma")
+p1 | p2
+DimPlot(
+  nbc_mbc,
+  group.by = "annotation_20230508",
+  split.by = "cohort_type",
+  cols = colors_20230508[["NBC_MBC"]]
+)
+table(nbc_mbc$annotation_20230508_probability)
+```
+
+
+Plot dot plot
+
+```{r}
+goi_rna <- c("TCL1A", "FCER2", "CD27", "TNFRSF13B", "IGHD", "IGHM", "IGHA1",
+             "IGHG1", "CD69", "EGR2", "CCL3", "MYC", "BATF", "CCND2", "NFKB1",
+             "NFKB2", "RELB", "CD40", "BCL2A1", "MIR155HG", "EBI3", "TRAF1",
+             "MEF2B", "RGS13", "MKI67", "TOP2A", "LY9", "LILRA4", "IFIT1", 
+             "IFIT3", "FCRL4", "FCRL5")
+avgexpr_mat <- AverageExpression(
+  nbc_mbc[, nbc_mbc$cohort_type == "validation"],
+  features = goi_rna,
+  assays = "RNA",
+  return.seurat = FALSE,
+  group.by = "annotation_20230508",
+  slot = "data"
+)$RNA
+
+
+# Define annotation column
+cell_types <- levels(nbc_mbc$annotation_20230508)
+mycolors <- list(cell_type = c(colors_20230508$NBC_MBC))
+annotation_col <- data.frame(cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+
+# Scale per row between 0 and 1 
+input_mat <- t(apply(avgexpr_mat, 1, function(x) (x - min(x)) / diff(range(x))))
+
+
+# Plot heatmap
+pheatmap(
+  t(input_mat),
+  annotation_row = annotation_col,
+  annotation_colors = mycolors,
+  annotation_names_row = FALSE,
+  annotation_legend = FALSE,
+  show_rownames = FALSE,
+  show_colnames = TRUE, 
+  border_color = NA,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  gaps_col = c(1, 3, 8),
+  fontsize_row = 6
+)
+```
+
+
+Plot annotation probability:
+
+```{r}
+nbc_mbc@meta.data %>%
+  filter(cohort_type == "validation") %>%
+  ggplot(aes(annotation_20230508, annotation_20230508_probability, fill = annotation_20230508)) +
+    geom_boxplot() +
+    scale_fill_manual(values = colors_20230508$NBC_MBC) +
+    theme_classic() +
+    coord_flip()
+```
+
+
+
+# Save
+
+```{r}
+saveRDS(nbc_mbc, here("scRNA-seq/results/R_objects/seurat_objects_revision/5.10-NBC_MBC_seurat_object_discovery_validation_cohorts_annotation.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
