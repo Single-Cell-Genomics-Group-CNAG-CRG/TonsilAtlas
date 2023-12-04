@@ -1,0 +1,397 @@
+---
+title: 'Differential abundance analysis: CD4 T'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to perform a differential abundance analysis with [miloR](https://www.bioconductor.org/packages/release/bioc/html/miloR.html). We will compare how the proportions of the different cell types change between children and adults. We will subset to keep tonsils whose cause for tonsillectomy was tonsillitis.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(scater)
+library(purrr)
+library(SingleCellExperiment)
+library(ComplexHeatmap)
+library(miloR)
+library(patchwork)
+library(here)
+library(ggrastr)
+```
+
+
+## Source functions
+
+```{r}
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+```
+
+
+## Read data
+
+```{r}
+seurat <- readRDS(here("scRNA-seq/results/R_objects/seurat_objects_revision/5.8-CD4_seurat_object_discovery_validation_cohorts_annotation.rds"))
+donor_metadata <- read_csv(here("data/tonsil_atlas_donor_metadata.csv"))
+```
+
+
+# Differential abundance analysis
+
+We start by subsetting to keep only tonsils obtained after tonsillitis:
+
+```{r}
+table(seurat$donor_id, seurat$cause_for_tonsillectomy)
+selected <-
+  # seurat$cause_for_tonsillectomy == "tonsillitis" &
+  # seurat$preservation == "fresh" &
+  seurat$assay == "3P"
+seurat <- seurat[, selected]
+# seurat$preservation[str_detect(seurat$gem_id, "frozen")] <- "frozen"
+```
+
+
+Let us explore the compositional differences:
+
+```{r}
+# Contour plot
+seurat$UMAP1 <- Embeddings(seurat, "umap")[, "UMAP_1"]
+seurat$UMAP2 <- Embeddings(seurat, "umap")[, "UMAP_2"]
+p1 <- seurat@meta.data %>%
+  ggplot(aes(UMAP1, UMAP2)) +
+    facet_grid(~age_group) +
+    geom_point(aes(color = annotation_20230508), size = 0.5, alpha = 0.5) +
+    geom_density_2d(color = "black") +
+    scale_color_manual(values = colors_20230508[["CD4"]]) +
+    theme_classic() +
+    theme(
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+      axis.title = element_text(size = 7),
+      strip.text = element_text(size = 7),
+      legend.title = element_blank(),
+      legend.text = element_text(size = 7)
+    ) +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+p1
+
+# Bar plot
+seurat@meta.data %>%
+  group_by(donor_id, age_group, annotation_20230508) %>%
+  summarize(n_cells = n()) %>%
+  group_by(donor_id, age_group) %>%
+  mutate(total_cells = sum(n_cells), pct_cells = n_cells / total_cells * 100) %>%
+  ggplot(aes(donor_id, pct_cells, fill = annotation_20230508)) +
+    facet_grid(.~age_group, scales = "free", space = "free", ) +
+    geom_col() +
+    scale_fill_manual(values = colors_20230508[["CD4"]]) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+  
+
+# Heatmap
+seurat$annotation_20230508 <- droplevels(seurat$annotation_20230508)
+seurat$donor_preservation <- str_c(seurat$donor_id, seurat$preservation, sep = "_")
+confusion_matrix <- as.matrix(
+  table(
+    seurat$donor_preservation,
+    seurat$annotation_20230508
+  )
+)
+confusion_matrix <- t(confusion_matrix / rowSums(confusion_matrix) * 100)
+confusion_matrix <- round(confusion_matrix, 1)
+levels_donors_df <- seurat@meta.data %>%
+  arrange(age) %>%
+  select("donor_preservation", "age", "age_group", "sex", "cohort_type", "preservation", "cause_for_tonsillectomy") %>%
+  unique()
+tumors <- c(
+  "tonsil removed during surgery for squamous laryngeal carcinoma",
+  "tonsil removed during surgery for oropharyngeal papillomatosis"
+)
+levels_donors_df$cause_for_tonsillectomy[levels_donors_df$cause_for_tonsillectomy == tumors[1]] <- 
+  "squamous laryngeal carcinoma"
+levels_donors_df$cause_for_tonsillectomy[levels_donors_df$cause_for_tonsillectomy == tumors[2]] <- 
+  "oropharyngeal papillomatosis"
+confusion_matrix <- confusion_matrix[, levels_donors_df$donor_preservation]
+colors_function <- colorRampPalette(colors = c("white", "red"))
+colors <- colors_function(100)
+total_cells_donor <- table(seurat$donor_preservation)[colnames(confusion_matrix)]
+age_groups <- levels_donors_df$age_group
+names(age_groups) <- levels_donors_df$donor_preservation
+age_groups <- factor(age_groups, levels = c("kid", "young_adult", "old_adult"))
+levels(age_groups) <- c("Child", "Young adult", "Old adult")
+sex <- levels_donors_df$sex
+names(sex) <- levels_donors_df$donor_preservation
+sex <- str_to_title(sex)
+# kids <- names(age_groups)[age_groups == "Child"]
+# adults <- names(age_groups)[age_groups != "Child"]
+# logFC <- apply(confusion_matrix, 1, \(x) {
+#   out <- log2(mean(x[kids]) / mean(x[adults]))
+#   out
+# })
+# col_fun_fc <- circlize::colorRamp2(c(min(logFC), 0, max(logFC)), c("purple", "white", "darkgreen"))
+col_fun_age <- circlize::colorRamp2(c(0, 65), c("white", "purple"))
+anno_top <- HeatmapAnnotation(
+  number_of_cells1 = anno_barplot(
+    as.matrix(total_cells_donor),
+    add_numbers = TRUE,
+    ylim = c(0, 15000),
+    numbers_gp = gpar(fontsize = 6),
+    height = unit(1.5, "cm"),
+    border = FALSE
+  ),
+  age = levels_donors_df$age,
+  "age group" = age_groups,
+  sex = sex,
+  cohort = levels_donors_df$cohort_type,
+  preservation = levels_donors_df$preservation,
+  tonsillectomy = levels_donors_df$cause_for_tonsillectomy,
+  col = list(
+    age = col_fun_age,
+    "age group" = c("Child" = "#d7e4f3", "Young adult" = "#8fa6da", "Old adult" = "#2e5398"),
+    sex = c("Female" = "#f2c096", "Male" = "#c38b68"),
+    cohort = c("discovery" = "goldenrod2", "validation" = "forestgreen"),
+    preservation = c("fresh" = "#ff7011", "frozen" = "#9acced"),
+    tonsillectomy = c(
+      "tonsillitis"= "dodgerblue3",
+      "sleep apnea" = "firebrick3",
+      "squamous laryngeal carcinoma" = "chartreuse",
+      "oropharyngeal papillomatosis" = "yellow2"
+    )
+  ),
+  annotation_name_gp = gpar(fontsize = 8),
+  annotation_legend_param = list(
+    "age group" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8), height = unit(10, "cm")),
+    "sex" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8)),
+    "cohort" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8)),
+    "preservation" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8)),
+    "tonsillectomy" = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+  )
+)
+total_cells_cell_type <- table(seurat$annotation_20230508)
+probs_l <- map(levels(seurat$annotation_20230508), \(x) {
+  x <- seurat$annotation_20230508_probability[seurat$annotation_20230508 == x & seurat$cohort_type == "validation"]
+  x
+})
+names(probs_l) <- levels(seurat$annotation_20230508)
+probs_l
+anno_row <- rowAnnotation(
+  number_of_cells2 = anno_barplot(
+    as.matrix(total_cells_cell_type),
+    add_numbers = TRUE,
+    ylim = c(0, 11000),
+    border = FALSE,
+    width = unit(1.5, "cm"),
+    numbers_gp = gpar(fontsize = 6),
+    annotation_name_gp = gpar(fontsize = 8)
+  ),
+  annotation_probability = anno_boxplot(x = probs_l),
+  annotation_name_gp = gpar(fontsize = 8)
+)
+heatmap_props <- Heatmap(
+  t(scale(t(confusion_matrix))),
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of cells\nby donor",
+  row_names_side = "left",
+  row_names_gp = gpar(fontsize = 7),
+  column_names_gp = gpar(fontsize = 7),
+  column_names_rot = 45,
+  top_annotation = anno_top,
+  right_annotation = anno_row,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    grid.text(sprintf("%.1f", confusion_matrix[i, j]), x, y, gp = gpar(fontsize = 5))
+  },
+  heatmap_legend_param = list(labels_gp = gpar(fontsize = 7), title_gp = gpar(fontsize = 8))
+)
+heatmap_props
+
+
+# Annotation probability
+seurat@meta.data %>%
+  filter(preservation == "fresh", cohort_type == "validation") %>%
+  ggplot(aes(annotation_20230508, annotation_20230508_probability, fill = annotation_20230508)) +
+    geom_boxplot(outlier.size = 0.1) +
+    scale_fill_manual(values = colors_20230508$CD4) +
+    ylab("P(annotation)") +
+    theme_classic() +
+    theme(legend.position = "none", axis.title.y = element_blank()) +
+    coord_flip()
+```
+
+
+Now we proceed with the differential abundance analysis:
+
+```{r}
+# Set up milo object
+sce <- as.SingleCellExperiment(seurat)
+sce <- sce[, sce$cause_for_tonsillectomy == "tonsillitis"]
+(milo <- Milo(sce))
+milo <- buildGraph(milo, k = 40, d = 30, reduced.dim = "HARMONY")
+
+
+# Create KNN embedding
+milo <- makeNhoods(
+  milo,
+  prop = 0.2,
+  k = 40, 
+  d = 30,
+  refined = TRUE,
+  reduced_dims = "HARMONY"
+)
+plotNhoodSizeHist(milo)
+
+
+# Count cells and define design matrix
+milo <- countCells(
+  milo,
+  meta.data = as.data.frame(colData(milo)),
+  sample = "donor_id"
+) 
+head(nhoodCounts(milo))
+design_df <- data.frame(colData(milo))[, c("donor_id", "age_group")]
+design_df <- distinct(design_df)
+rownames(design_df) <- design_df$donor_id
+design_df
+milo <- calcNhoodDistance(milo, d = 30, reduced.dim = "HARMONY")
+da_results <- testNhoods(
+  milo,
+  design = ~ age_group,
+  design.df = design_df,
+  reduced.dim = "HARMONY"
+)
+head(da_results)
+da_results %>%
+  arrange(SpatialFDR) %>%
+  head() 
+
+
+# Inspect results
+ggplot(da_results, aes(PValue)) + geom_histogram(bins=50)
+ggplot(da_results, aes(logFC, -log10(SpatialFDR))) + 
+  geom_point() +
+  geom_hline(yintercept = 1)
+milo <- buildNhoodGraph(milo)
+umap_pl <- plotReducedDim(milo, dimred = "UMAP", colour_by = "age_group", text_by = "annotation_20230508", 
+                          text_size = 3, point_size=0.5) +
+  guides(fill="none")
+nh_graph_pl <- plotNhoodGraphDA(milo, da_results, layout = "UMAP",alpha=0.1) 
+  
+umap_pl + nh_graph_pl +
+  plot_layout(guides="collect")
+da_results <- annotateNhoods(milo, da_results, "annotation_20230508")
+plotDAbeeswarm(da_results, group.by = "annotation_20230508", alpha = 0.1)
+
+```
+
+
+# scCODA data prep
+
+```{r}
+selected <-
+  seurat$cause_for_tonsillectomy == "tonsillitis" &
+  seurat$preservation == "fresh" &
+  seurat$assay == "3P"
+seurat <- seurat[, selected]
+seurat$annotation_20230508 <- droplevels(seurat$annotation_20230508)
+celltype_prop <- table(seurat$donor_id, seurat$annotation_20230508)
+celltype_prop <- as.data.frame.matrix(celltype_prop)
+celltype_prop <- rownames_to_column(celltype_prop, "donor_id")
+celltype_prop_metadata <- seurat@meta.data %>% 
+  dplyr::select("donor_id", "age_group") %>% 
+  unique()
+celltype_prop <- left_join(
+  celltype_prop,
+  celltype_prop_metadata,
+  by = "donor_id"
+)
+celltype_prop <- celltype_prop[, c(1, ncol(celltype_prop), 2:(ncol(celltype_prop)-1))]
+write_csv(
+  celltype_prop,
+  file = here("scRNA-seq/results/tables/scCODA_input_CD4_T_kid_vs_young_adult.csv"),
+  col_names = TRUE
+)
+```
+
+
+# Plot results
+
+```{r}
+set.seed(123)
+seurat$age_group <- factor(seurat$age_group)
+# levels(seurat$age_group) <- c("Child", "Young adult")
+p2 <- seurat@meta.data %>%
+  mutate(annotation_20230508 = factor(annotation_20230508, rev(levels(annotation_20230508)))) %>%
+  mutate(age_group = factor(age_group, c("Young adult", "Child"))) %>%
+  group_by(age_group, donor_id, annotation_20230508) %>%
+  summarize(n_cells = n()) %>%
+  group_by(donor_id) %>%
+  mutate(total_cells = sum(n_cells), pct_cells = n_cells / total_cells * 100) %>%
+  ggplot(aes(annotation_20230508, pct_cells, color = age_group)) +
+    geom_boxplot(outlier.shape = NA, fill = NA, lwd = 0.3) +
+    geom_point(size = .1, position = position_jitterdodge(dodge.width = 1.5)) +
+    ylab("Percentage of cells (%)") +
+    scale_color_manual(values = c("#c9d1e1", "#7384b1"), breaks = c("Child", "Young adult")) +
+    theme_classic() +
+    theme(
+      legend.title = element_blank(),
+      legend.position = c(0.8, 0.2),
+      axis.title.y = element_blank(),
+      axis.text = element_text(size = 7),
+      axis.title = element_text(size = 8),
+      legend.text = element_text(size = 7),
+      axis.line = element_line(linewidth = 0.25),
+      axis.ticks = element_line(linewidth = 0.25),
+    ) +
+    coord_flip()
+p2
+p1 <- rasterize(p1, dpi = 600)
+p1 <- p1 + theme(legend.position = "none")
+p3 <- wrap_plots(p1, p2, widths = c(2.25, 1.5))
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/results/paper/figures/figure_7_differential_abundance_analysis.pdf",
+  plot = p3,
+  width = 20,
+  height = 7,
+  units = "cm"
+)
+ggsave(
+  filename = "~/Desktop/CNAG/mnt_clust/tonsil_atlas/current/results/paper/figures/figure_7_differential_abundance_analysis.pdf",
+  plot = p2,
+  width = 10.5,
+  height = 8.5,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
