@@ -1,0 +1,471 @@
+---
+title: 'Validate heterogeneity gamma-delta T-cells'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will perform the analysis needed to answer this concern from reviewer #3:
+
+*"The authors report the presence of novel- gd T cells expressing NK cell markers. Other datasets appear to also have relevant data, indicating expression of NK cell makers in gdT cells (ie. https://www.frontiersin.org/articles/10.3389/fimmu.2017.00892/full https://www.pnas.org/doi/10.1073/pnas.1818488116"*
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(tidyverse)
+library(UCell)
+library(here)
+library(scCustomize)
+library(Nebulosa)
+library(harmony)
+library(chromVARmotifs)
+library(BSgenome.Hsapiens.UCSC.hg38)
+```
+
+
+
+## Define parameters
+
+```{r}
+# Source paths and functions
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/utils_figure3.R"))
+source(here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+cd8 <- readRDS(path_to_save_cd8)
+ilc_nk <- readRDS(path_to_save_ilc_nk)
+ilc_nk$UMAP_1_20220215 <- ilc_nk$UMAP_1_20220215 + 10
+ilc_nk$UMAP_2_20220215 <- ilc_nk$UMAP_2_20220215 + 10
+seurat_rna <- merge(x = cd8, y = ilc_nk)
+seurat_rna$annotation_20220215[seurat_rna$annotation_20220215 == "CXCR6+ RM CD8 T"] <- "RM CD8 activated T"
+seurat_rna$annotation_paper <- factor(
+  seurat_rna$annotation_20220215,
+  levels = names(colors_rna)
+)
+atac <- readRDS(path_to_save_atac_cytotoxic)
+cytotoxic_cite <- readRDS(path_to_save_cite_cytotoxic)
+cytotoxic_cite <- subset(cytotoxic_cite, subset = annotation_prob >= 0.6)
+auc_mat <- read_csv(here("data/raw_data_figures/Table_S6.csv"))
+```
+
+
+# Plot
+
+```{r}
+Idents(seurat_rna) <- "annotation_paper"
+umap_title <- format(ncol(seurat_rna), big.mark = ",", scientific = FALSE)
+umap_annotation <- seurat_rna@meta.data %>%
+  ggplot(aes(UMAP_1_20220215, UMAP_2_20220215, color = annotation_paper)) +
+  geom_point(size = 0.25, alpha = 0.9) +
+  scale_color_manual(values = colors_rna, breaks = names(colors_rna)) +
+  labs(title = str_c(umap_title, "cells", sep = " "), x = "UMAP1", y = "UMAP2") +
+  theme_classic() +
+  coord_fixed() +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "right",
+    legend.spacing = unit(0, "cm"),
+    legend.box.spacing = unit(0, "cm"),
+    legend.margin = margin(0, 0, 0, 0),
+    legend.key.height = unit(0, "cm"),
+    legend.key.width = unit(0, "cm"),
+    plot.title = element_text(hjust = 0.5, size = 7),
+    axis.title = element_text(size = 6),
+    legend.text = element_text(size = 5),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 16, size = 2)))
+umap_annotation
+```
+
+
+# Plot signatures
+
+We will plot signatures for TCRVdelta1 and TCRVdelta2 gamma-delta T cells from figure 4C of the paper ["Single-cell RNA sequencing unveils the shared and the distinct cytotoxic hallmarks of human TCRVδ1 and TCRVδ2 γδ T lymphocytes"](https://www.pnas.org/doi/10.1073/pnas.1818488116):
+
+```{r}
+tcrv_delta1_sig <- c("FCGR3A", "KLRC2", "CCL3", "KLRF1", "FGFBP2", "TYROBP",
+                     "CMC1", "TRGC2", "GZMB", "GZMH", "PLAC8", "CD63", "GNLY",
+                     "PRF1", "CCL4", "NKG7", "HOPX", "CD99", "KLRD1", "CLIC1",
+                     "CLEC2B", "PARK7")
+tcrv_delta2_sig <- c("CD44", "CD52", "CD74", "LAPTM5", "KLRB1", "EIF3E", "LYAR",
+                     "HINT1", "CD247", "ANXA1", "CXCR4", "CD2", "EEF2", "LDHB",
+                     "TAGLN", "ICAM3", "LTB", "NOSIP", "IL7R", "TRGC1", "GZMK")
+gene_sets <- list(
+  "tcrv_delta1_sig" = tcrv_delta1_sig,
+  "tcrv_delta2_sig" = tcrv_delta2_sig
+)
+seurat_rna <- AddModuleScore_UCell(seurat_rna, features = gene_sets)
+Stacked_VlnPlot(
+  seurat_object = seurat_rna,
+  features = c("tcrv_delta1_sig_UCell", "tcrv_delta2_sig_UCell"),
+  x_lab_rotate = TRUE,
+  colors_use = colors_rna
+)
+VlnPlot(
+  seurat_rna, "tcrv_delta1_sig_UCell", pt.size = 0) & NoLegend()
+```
+
+
+# Subset and recluster unconventional T-cells
+
+```{r}
+selected <- c("CD56+ gd T", "TCRVδ+ gd T", "Nksig CD8 T", "MAIT")
+unconventional <- seurat_rna[, seurat_rna$annotation_20220215 %in% selected]
+unconventional <- unconventional[, unconventional$assay == "3P"]
+unconventional <- unconventional %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunUMAP(reduction = "pca", dims = 1:20)
+unconventional <- RunHarmony(unconventional, group.by.vars = "donor_id")
+unconventional <- RunUMAP(unconventional, reduction = "harmony", dims = 1:20)
+DimPlot(unconventional, group.by = "donor_id")
+DimPlot(unconventional)
+unconventional <- AddModuleScore_UCell(unconventional, features = gene_sets)
+Stacked_VlnPlot(
+  seurat_object = unconventional,
+  features = c("tcrv_delta1_sig_UCell", "tcrv_delta2_sig_UCell"),
+  x_lab_rotate = TRUE,
+  colors_use = colors_rna
+)
+FeaturePlot(unconventional, c("tcrv_delta1_sig_UCell", "tcrv_delta2_sig_UCell"))
+```
+
+
+# Reasoning for the annotation
+
+## MAIT cells
+
+Dr. Lucy Garner suggested (based on [this paper](https://www.frontiersin.org/articles/10.3389/fimmu.2018.00756/full)) that the cluster of MAIT cells could correspond to a mix of MAIT cells and Vdelta2+ gd T-cells. This paper shows that this subset of gd T-cells can express CD161 (KLRB1), so perhaps it could be labeled MAIT/CD161+ gd T-cells. This cluster expresses TRGC1 but not TRGC1. In gd T-cells, is CD161 upregulated upon stimulation, or is it a constitutively expressed gene?
+
+In addition, this cells express TRDV2 and are negative for TRDV1 and TRDV3
+
+A key difference between MAIT and CD161+TRDV2+ gd T-cells is that MAIT cells can perform type 17 effector functions. In this regard, the cluster of MAIT cells expresses CCR6 and RORC
+
+Proposal: label them as MAIT/CD161+TRDV2+ gd T-cells.
+
+
+## NKsig CD8 T
+
+We noticed that these cells express high levels of CX3CR1, which according to [this paper](https://www.cell.com/immunity/pdfExtended/S1074-7613(16)30429-0) can stratify memory and effector subsets of T-cells. That's the summary of the papers:
+
+**"Gerlach et al. (2016) demonstrate that CX3CR1 identifies three distinct CD8+ effector and memory T cell (Tmem) subsets. CX3CR1 correlated with the degree of effector differentiation. Surprisingly, a newly identified CX3CR1int Tmem population, not effector memory cells (CX3CR1hi), was the predominant subset that surveyed non-lymphoid tissues."**
+
+
+```{r}
+FeaturePlot(unconventional, "CX3CR1") &
+  scale_color_viridis_c(option = "magma")
+VlnPlot(unconventional, "TBX21")
+FeaturePlot(unconventional, "KLRG1") &
+  scale_color_viridis_c(option = "magma")
+```
+
+
+TBET is an essential TF for the development of CX3CR1hi T-cells. Let's check if its motif is more accessible in these cells:
+
+```{r}
+DefaultAssay(atac) <- "chromvar"
+moi_atac <- "MA0690.1" # motif of interest
+names(moi_atac) <- "TBX21"
+atac@reductions$umap@cell.embeddings[, "UMAP_1"] <- atac$UMAP_1_RNA_based
+atac@reductions$umap@cell.embeddings[, "UMAP_2"] <- atac$UMAP_2_RNA_based
+p <- FeaturePlot(
+  atac,
+  min.cutoff = "q5",
+  max.cutoff = "q95",
+  raster = FALSE,
+  features = moi_atac,
+  pt.size = 0.01,
+  order = TRUE
+) +
+  scale_colour_gradient(low = "lightgray", high = "green4") +
+  labs(x = "UMAP1", y = "UMAP2", color = "Accessibility") +
+  theme_classic() +
+  theme(
+    legend.title = element_text(size = 6),
+    legend.position = "bottom",
+    legend.text = element_blank(),
+    axis.title = element_blank(),
+    axis.line = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank()
+  )
+p
+VlnPlot(atac, moi_atac, pt.size = 0) +
+  ylab("TBET motif activity") +
+  ggtitle("")
+```
+
+Let us also assess the TF activity, as calculated with pySCENIC:
+
+```{r}
+auc_mat <- as.data.frame(auc_mat)
+rownames(auc_mat) <- auc_mat[, 1]
+unconventional$TBET_activity <- auc_mat[colnames(unconventional), "TBX21(+)"]
+FeaturePlot(unconventional, "TBET_activity") +
+  scale_color_viridis_c(option = "magma")
+unconventional@meta.data %>%
+  ggplot(aes(annotation_paper, TBET_activity, fill = annotation_paper)) +
+    geom_violin() +
+    theme_classic()
+VlnPlot(unconventional, features = "TBET_activity")
+```
+
+
+Now let's check CD45RA protein expression, which will determine if we label them as TEM or TEMRA:
+
+```{r}
+VlnPlot(cytotoxic_cite, "CD45RA", group.by = "annotation_20220215")
+  ylab("TBET motif activity") +
+  ggtitle("")
+```
+
+
+# Reannotation
+
+```{r}
+unconventional$annotation_paper <- as.character(unconventional$annotation_paper)
+unconventional$annotation_20230328 <- case_when(
+  unconventional$annotation_paper == "MAIT" ~ "MAIT/Vδ2+ gd T",
+  unconventional$annotation_paper == "TCRVδ+ gd T" ~ "non-Vδ2+ gd T",
+  unconventional$annotation_paper == "CD56+ gd T" ~ "ZNF683+ CD8 T",
+  unconventional$annotation_paper == "Nksig CD8 T" ~ "EM CD8 T"
+)
+colors_unconventional <- c(
+  "ZNF683+ CD8 T" = "#a2c8c7",
+  "non-Vδ2+ gd T" = "#5ea19e",
+  "MAIT/Vδ2+ gd T" = "#008080",
+  "EM CD8 T" = "#E58F47"
+)
+unconventional$annotation_20230328 <- factor(
+  unconventional$annotation_20230328,
+  levels = names(colors_unconventional)
+)
+Idents(unconventional) <- "annotation_20230328"
+```
+
+
+# Subset EM CD8 T
+
+We note that, since the cluster "NKsig CD8 T" was reannotated to "EM CD8 T", they do not belong to the unconventional CD8 T cluster anymore. Thus, we will subset it and redo the UMAP:
+
+```{r}
+unconventional <- unconventional[, unconventional$annotation_20230328 != "EM CD8 T"]
+unconventional$annotation_20230328 <- droplevels(unconventional$annotation_20230328)
+unconventional <- unconventional %>%
+  FindVariableFeatures() %>%
+  ScaleData() %>%
+  RunPCA()
+unconventional <- RunHarmony(unconventional, group.by.vars = "donor_id")
+unconventional <- RunUMAP(unconventional, reduction = "harmony", dims = 1:20)
+umap_unconventional <- DimPlot(
+  unconventional,
+  cols = colors_unconventional,
+  pt.size = 0.65
+)
+umap_unconventional <- umap_unconventional +
+  theme(
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    legend.position = "none")
+umap_unconventional
+ggsave(
+  filename = here("results/paper/figures/revision_unconventional_T_cells_umap.pdf"),
+  plot = umap_unconventional,
+  height = 6,
+  width = 6,
+  units = "cm"
+)
+
+# Dot plot gene of interest (GOI)
+goi_unconventional <- c("ZNF683", "ITGAE", "ITGA1", "XCL1", "KLRC2",
+                        "KLRC3", "KIR2DL4", "IKZF2", "TRDC", "TRGC1", "TRGC2", "NCR3", "ZBTB16", "IL23R",
+                        "TRDV2", "CCR6", "CEBPD", "SLC4A10", "DPP4")
+dot_plot <- DotPlot(unconventional, features = rev(goi_unconventional)) +
+  coord_flip() +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  scale_size_continuous(range = c(0.1, 4.5)) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 6),
+    legend.text = element_text(size = 5.5),
+    legend.title = element_text(size = 6),
+    axis.text.x = element_text(size = 6, angle = 45, hjust = 1, vjust = 1))
+dot_plot
+ggsave(
+  filename = here("results/paper/figures/revision_unconventional_T_cells_dotplot.pdf"),
+  plot = dot_plot,
+  height = 7,
+  width = 8.5,
+  units = "cm"
+)
+dot_plot
+```
+
+
+# Markers and motifs
+
+Let's find markers and motifs:
+
+```{r}
+# Markers
+markers_dfs <- map(unique(unconventional$annotation_20230328), \(x) {
+  df <- FindMarkers(unconventional, ident.1 = x, only.pos = TRUE)
+  df$gene <- rownames(df)
+  df <- df[df$p_val_adj < 0.05, ]
+  df
+})
+names(markers_dfs) <- unique(unconventional$annotation_20230328)
+```
+
+Before finding motifs let's plot and save TBET activity across CD8 T cell clusters:
+
+```{r}
+atac <- updateAnnotation(atac)
+DefaultAssay(atac) <- "chromvar"
+vln_tbet <- atac@meta.data %>%
+  mutate(
+    TBET_motif_activity = atac[["chromvar"]]@data["MA0690.1",],
+    annotation_20220619 = factor(annotation_20220619, names(colors_20230508$Cytotoxic))
+  ) %>%
+  ggplot(aes(annotation_20220619, TBET_motif_activity, fill = annotation_20220619)) +
+    geom_violin(fill = "green4", alpha = 0.7) +
+    stat_summary(fun = "mean", geom = "point", color = "black", size = 0.1) +
+    labs(y = "TBX21 motif activity") +
+    theme_classic() +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.text.y = element_text(size = 6),
+      axis.title.y = element_text(size = 6),
+      axis.text.x = element_text(size = 6, angle = -45, hjust = 0, vjust = 0)
+    )
+ggsave(
+  filename = here("results/paper/figures/revision_EM_CD8_T_motif_activity"),
+  plot = vln_tbet,
+  height = 5,
+  width = 8,
+  units = "cm"
+)
+```
+
+Now we proceed with motifs for unconventional:
+
+```{r}
+# Motifs
+atac <- atac[, atac$annotation_20220215 %in% c("MAIT", "TCRVδ+ gd T", "CD56+ gd T")]
+# atac$annotation_20230328 <- case_when(
+#   atac$annotation_20220215 == "MAIT" ~ "MAIT/Vδ2+ gd T",
+#   atac$annotation_20220215 == "TCRVδ+ gd T" ~ "non-Vδ2+ gd T",
+#   atac$annotation_20220215 == "CD56+ gd T" ~ "ZNF683+ CD8 T"
+# )
+atac$annotation_20230328 <- factor(
+  atac$annotation_20230328,
+  levels = names(colors_unconventional)
+)
+atac$annotation_20230328 <- droplevels(atac$annotation_20230328)
+Idents(atac) <- "annotation_20230328"
+motifs_names <- unlist(atac@assays$peaks_redefined@motifs@motif.names)
+motifs_dfs <- map(unique(atac$annotation_20230328), \(x) {
+  df <- FindMarkers(
+    object = atac,
+    ident.1 = x,
+    only.pos = TRUE,
+    test.use = "LR",
+    min.pct = 0.05,
+    latent.vars = "nCount_peaks_macs"
+  )
+  df$motif_id <- rownames(df)
+  df$motif_name <- motifs_names[df$motif_id]
+  df <- df[df$p_val_adj < 0.05, ]
+  df
+})
+names(motifs_dfs) <- unique(atac$annotation_20230328)
+motifs_dfs
+
+
+# Plot motifs of interest (MOI)
+selected_moi <- c("TCF7", "RORC", "CEBPD")
+moi <- motifs_names[motifs_names %in% c("IRF8", "TBX21", "EOMES", "RORC", "CEBPD", "TCF7", "LEF1")]
+vln_plots_access <- map2(moi, names(moi), function(motif_name, motif_id) {
+  p <- atac@meta.data %>%
+    mutate(motif_activity = atac[["chromvar"]]@data[motif_id, ]) %>%
+    ggplot(aes(annotation_20230328, motif_activity)) +
+    geom_violin(fill = "green4", alpha = 0.7) +
+    stat_summary(fun = "mean", geom = "point", color = "black", size = 0.35) +
+    labs(y = motif_name) +
+    theme_classic() +
+    theme(
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.text.y = element_text(size = 6),
+      axis.title.y = element_text(size = 7),
+      axis.text.x = element_blank()
+    )
+  p
+})
+names(vln_plots_access) <- moi
+vln_plots_access <- vln_plots_access[selected_moi]
+vln_plots_access[[length(vln_plots_access)]] <- vln_plots_access[[length(vln_plots_access)]] +
+  theme(axis.text.x = element_text(size = 7))
+vln_plots_access_arranged <- wrap_plots(vln_plots_access, nrow = length(vln_plots_access))
+vln_plots_access_arranged
+vln_plots_access
+ggsave(
+  filename = here("results/paper/figures/revision_unconventional_T_cells_violin_plots_atac.pdf"),
+  plot = vln_plots_access_arranged,
+  height = 12,
+  width = 8.5,
+  units = "cm"
+)
+```
+
+
+# Save
+
+```{r}
+seurat_rna[["ADT"]] <- NULL
+unconventional[["ADT"]] <- NULL
+saveRDS(seurat_rna, here("scRNA-seq/results/R_objects/final_clusters/20230124/20230124_cytotoxic_cells_seurat_obj.rds"))
+saveRDS(unconventional, here("scRNA-seq/results/R_objects/final_clusters/20230124/20230328_unconventional_T_cells_seurat_obj.rds"))
+names(markers_dfs)[names(markers_dfs) == "MAIT/CD161+TRDV2+ gd T-cells"] <- "MAIT or TRDV2+ gd T"
+names(motifs_dfs)[names(motifs_dfs) == "MAIT/CD161+TRDV2+ gd T-cells"] <- "MAIT or TRDV2+ gd T"
+openxlsx::write.xlsx(x = markers_dfs, here("scRNA-seq/results/tables/revision/markers_unconventional_t_cells.xlsx"))
+openxlsx::write.xlsx(x = motifs_dfs, here("scRNA-seq/results/tables/revision/motifs_unconventional_t_cells.xlsx"))
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
