@@ -1,0 +1,17 @@
+library_id,fastq_path,read,pair_id
+269550,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D8_1.fastq.gz,R1,P1
+269550,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D8_2.fastq.gz,R2,P1
+269550,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D8_1.fastq.gz,R1,P2
+269550,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D8_2.fastq.gz,R2,P2
+269551,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D9_1.fastq.gz,R1,P3
+269551,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D9_2.fastq.gz,R2,P3
+269551,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D9_1.fastq.gz,R1,P4
+269551,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D9_2.fastq.gz,R2,P4
+269552,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D10_1.fastq.gz,R1,P5
+269552,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D10_2.fastq.gz,R2,P5
+269552,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D10_1.fastq.gz,R1,P6
+269552,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D10_2.fastq.gz,R2,P6
+269553,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D11_1.fastq.gz,R1,P7
+269553,/scratch/project/production/fastq/HCNHVDMXY/1/fastq/HCNHVDMXY_1_SI-TT-D11_2.fastq.gz,R2,P7
+269553,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D11_1.fastq.gz,R1,P8
+269553,/scratch/project/production/fastq/HCNHVDMXY/2/fastq/HCNHVDMXY_2_SI-TT-D11_2.fastq.gz,R2,P8
