@@ -1,0 +1,401 @@
+---
+title: 'Integrate RNA and Multiome with and without intron inclusion'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here we will assess whether running cellranger with introns included in the reference improves the integration between scRNA-seq and Multiome.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(harmony)
+library(tidyverse)
+library(ggpubr)
+library(here)
+library(glue)
+library(DT)
+library(patchwork)
+library(HCATonsilData)
+library(lisi)
+library(ggrastr)
+library(pdfCluster)
+```
+
+
+## Read data
+
+```{r}
+seurat_list <- readRDS(
+  here("scRNA-seq/results/R_objects/intronic_read_mapping/1.seurat_list_rna_multiome_with_and_without_introns.rds")
+)
+```
+
+
+## Merge
+
+```{r}
+seurat_introns <- merge(seurat_list$rna_introns, seurat_list$multiome_introns)
+seurat_no_introns <- merge(seurat_list$rna_no_introns, seurat_list$multiome_introns)
+rm(seurat_list)
+gc()
+```
+
+
+# Include annotations
+
+
+```{r}
+# Subset to CD4 T cells
+tonsil <- HCATonsilData()
+gems <- unique(seurat_introns$gem_id)
+tonsil <- tonsil[, tonsil$gem_id %in% gems]
+common_cells <- Reduce(
+  intersect,
+  list(colnames(tonsil), colnames(seurat_introns), colnames(seurat_no_introns))
+)
+tonsil <- tonsil[, common_cells]
+seurat_introns <- seurat_introns[, common_cells]
+seurat_no_introns <- seurat_no_introns[, common_cells]
+seurat_introns$annotation_figure_1 <- tonsil$annotation_figure_1
+seurat_no_introns$annotation_figure_1 <- tonsil$annotation_figure_1
+seurat_introns$annotation <- tonsil$annotation_20220619
+seurat_no_introns$annotation <- tonsil$annotation_20220619
+```
+
+
+# Find shared highly variable genes (HVG)
+
+```{r}
+seurat_list <- list(
+  with_introns = seurat_introns,
+  without_introns = seurat_no_introns
+)
+rm(seurat_introns, seurat_no_introns)
+gc()
+hvg_list <- map(seurat_list, \(seurat_obj) {
+  seurat_obj <- NormalizeData(seurat_obj)
+  se_list <- SplitObject(seurat_obj, split.by = "assay")
+  se_list <- map(se_list, FindVariableFeatures, nfeatures = 5000)
+  hvg <- map(se_list, VariableFeatures)
+  shared_hvg <- intersect(hvg$`scRNA-seq`, hvg$multiome)
+  shared_hvg
+})
+n_hvg <- map_dbl(hvg_list, length)
+names(n_hvg) <- str_replace(names(n_hvg), "_", " ")
+n_hvg_df <- data.frame(condition = names(n_hvg), n_hvg = n_hvg)
+n_hvg_gg <- ggplot(n_hvg_df, aes(condition, n_hvg)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = n_hvg), size = 3, hjust = -0.15) +
+  ylab("Number of shared HVG") +
+  scale_y_continuous(limits = c(0, 4000)) +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),
+    axis.text = element_text(size = 7),
+    axis.title.x = element_text(size = 8)
+  ) +
+  coord_flip()
+n_hvg_gg
+ggsave(
+  plot = n_hvg_gg,
+  filename = here("results/paper/figures/revision_intron_inclusion_bar_plot_n_shared_hvg.pdf"),
+  height = 4,
+  width = 10,
+  units = "cm"
+)
+```
+
+
+# Integration
+
+```{r}
+seurat_list <- map2(seurat_list, hvg_list, \(seurat_obj, x) {
+  seurat_obj <- seurat_obj %>%
+    NormalizeData() %>%
+    ScaleData(features = x) %>%
+    RunPCA(features = x) %>%
+    RunHarmony(group.by.vars = "assay", reduction = "pca", dims = 1:30) %>%
+    RunUMAP(reduction = "harmony", dims = 1:30) %>%
+    FindNeighbors(reduction = "harmony", dims = 1:30)
+  seurat_obj
+})
+umaps_corrected <- map(seurat_list, \(seurat_obj) {
+  p <- DimPlot(
+    seurat_obj,
+    group.by = "assay",
+    pt.size = 0.01
+  ) +
+    scale_color_manual(values = c("#d52f55", "#4aafdd"), breaks = c("scRNA-seq", "multiome")) +
+    theme(plot.title = element_blank(),
+          axis.ticks = element_blank(),
+          axis.title = element_blank(),
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          legend.position = "none")
+  p <- rasterize(p, dpi = 600)
+  p
+})
+umaps_corrected$with_introns <- umaps_corrected$with_introns +
+  ggtitle("With Introns") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+umaps_corrected$without_introns <- umaps_corrected$without_introns +
+  ggtitle("Without Introns") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+umaps_corrected <- umaps_corrected$with_introns | umaps_corrected$without_introns
+
+
+# Calculate and plot UMAP before correction
+seurat_list <- map(seurat_list, \(seurat_obj) {
+  seurat_obj <- RunUMAP(
+    seurat_obj,
+    reduction = "pca",
+    dims = 1:30,
+    pt.size = 0.15,
+    reduction.name = "umap_PCA",
+    reduction.key = "UMAP_PCA_"
+  )
+  seurat_obj
+})
+umaps_original <- map(seurat_list, \(seurat_obj) {
+  p <- DimPlot(
+    seurat_obj,
+    pt.size = 0.01,
+    group.by = "assay",
+    reduction = "umap_PCA"
+  ) +
+    scale_color_manual(values = c("#d52f55", "#4aafdd"), breaks = c("scRNA-seq", "multiome")) +
+    theme(plot.title = element_blank(),
+          axis.ticks = element_blank(),
+          axis.title = element_blank(),
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          legend.position = "none")
+  p <- rasterize(p, dpi = 600)
+  p
+})
+umaps_original$with_introns <- umaps_original$with_introns +
+  ggtitle("With Introns") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+umaps_original$without_introns <- umaps_original$without_introns +
+  ggtitle("Without Introns") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+umaps_original <- umaps_original$with_introns | umaps_original$without_introns
+
+
+# Join and save
+umaps <- umaps_original / umaps_corrected
+ggsave(
+  plot = umaps,
+  filename = here("results/paper/figures/revision_intron_inclusion_umaps_integration.pdf"),
+  height = 12,
+  width = 12,
+  units = "cm"
+)
+```
+
+
+Let us compute the LISI score:
+
+```{r}
+lisi_scores_list <- map(seurat_list, \(seurat_obj) {
+  pca_unintegrated <- Embeddings(seurat_obj, "pca")[, 1:30]
+  pca_integrated <- Embeddings(seurat_obj, "harmony")[, 1:30]
+  dim_red_mats <- list(pca_unintegrated, pca_integrated)
+  names(dim_red_mats) <- c("unintegrated", "integrated")
+  confounders_df <- seurat_obj@meta.data[, c("annotation", "assay")]
+  lisi_scores <- map(dim_red_mats, \(mat) {
+    scores <- compute_lisi(
+      X = mat,
+      meta_data = confounders_df,
+      label_colnames = colnames(confounders_df)
+    )
+    scores
+  })
+  lisi_scores <- bind_rows(lisi_scores, .id = "is_integrated")
+  lisi_scores
+})
+lisi_assay_gg <- map(lisi_scores_list, \(mat) {
+  p <- mat %>%
+    as.data.frame() %>%
+    mutate(is_integrated = factor(is_integrated, c("unintegrated", "integrated"))) %>%
+    ggplot(aes(is_integrated, assay, fill = is_integrated)) +
+      geom_boxplot(outlier.size = 0.1, width = 0.75) +
+      ylab("LISI (assay)") +
+      scale_fill_manual(values = c("#878787", "#2fc726")) +
+      theme_classic() +
+      theme(
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 8),
+        legend.position = "none",
+        axis.text = element_text(size = 7),
+        plot.title = element_text(size = 8, hjust = 0.5))
+  p
+})
+lisi_assay_gg[[1]] <- lisi_assay_gg[[1]] + ggtitle("with introns")
+lisi_assay_gg[[2]] <- lisi_assay_gg[[2]] + ggtitle("without introns")
+lisi_assay_arranged <- lisi_assay_gg$without_introns | lisi_assay_gg$with_introns
+lisi_assay_arranged
+
+
+lisi_cell_type_gg <- map(lisi_scores_list, \(mat) {
+  p <- mat %>%
+    as.data.frame() %>%
+    mutate(is_integrated = factor(is_integrated, c("unintegrated", "integrated"))) %>%
+    ggplot(aes(is_integrated, annotation, fill = is_integrated)) +
+      geom_boxplot(outlier.size = 0.1, width = 0.75) +
+      ylab("LISI (annotation)") +
+      scale_y_continuous(limits = c(0, 10)) +
+      scale_fill_manual(values = c("#878787", "#2fc726")) +
+      theme_classic() +
+      theme(
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 8),
+        legend.position = "none",
+        axis.text = element_text(size = 7),
+        plot.title = element_text(size = 8, hjust = 0.5))
+  p
+})
+lisi_cell_type_gg[[1]] <- lisi_cell_type_gg[[1]] + ggtitle("with introns")
+lisi_cell_type_gg[[2]] <- lisi_cell_type_gg[[2]] + ggtitle("without introns")
+lisi_cell_type_arranged <- lisi_cell_type_gg$without_introns | lisi_cell_type_gg$with_introns
+lisi_cell_type_arranged
+
+
+lisi_gg_all <- lisi_assay_arranged / lisi_cell_type_arranged
+ggsave(
+  plot = lisi_gg_all,
+  filename = here("results/paper/figures/revision_intron_inclusion_lisi_integration.pdf"),
+  height = 8,
+  width = 12,
+  units = "cm"
+)
+```
+
+
+# CD4 T cells
+
+```{r}
+cd4_levels <- c("Naive CD4 T", "CD4 T")
+cd4 <- seurat_list$with_introns[, seurat_list$with_introns$annotation_figure_1 %in% cd4_levels]
+se_list <- SplitObject(cd4, split.by = "assay")
+se_list <- map(se_list, FindVariableFeatures, nfeatures = 5000)
+hvg <- map(se_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`scRNA-seq`, hvg$multiome)
+cd4 <- cd4 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction = "pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+source(here("scRNA-seq/bin/utils_figure2.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+umap_annotation <- Embeddings(cd4, "umap") %>%
+  as.data.frame() %>%
+  mutate(annotation = cd4$annotation) %>%
+  ggplot(aes(UMAP_1, UMAP_2, color = annotation)) +
+    geom_point(size = 0.05, alpha = 0.9) +
+    scale_color_manual(values = colors_rna, breaks = names(colors_rna)) +
+    labs(x = "UMAP1", y = "UMAP2") +
+    theme_classic() +
+    theme(
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.spacing = unit(0, "cm"),
+      legend.box.spacing = unit(0, "cm"),
+      legend.margin = margin(0, 0, 0, 0),
+      legend.key.height = unit(0, "cm"),
+      legend.key.width = unit(0, "cm"),
+      plot.title = element_text(hjust = 0.5, size = 7),
+      axis.title = element_text(size = 6),
+      legend.text = element_text(size = 5),
+      axis.text = element_blank(),
+      axis.ticks = element_blank(),
+    ) +
+    guides(
+      color = guide_legend(
+        override.aes = list(shape = 16, size = 2),
+        nrow = 7,
+        byrow = FALSE
+      )
+    )
+umap_annotation <- rasterize(umap_annotation, dpi = 300)
+ggsave(
+  plot = umap_annotation,
+  filename = here("results/paper/figures/revision_intron_inclusion_lisi_integration.pdf"),
+  height = 8,
+  width = 12,
+  units = "cm"
+)
+```
+
+
+
+# Adjusted Rand Index (ARI) for varying clustering resolutions
+
+```{r}
+selected_resolutions <- c(0.01, 0.05, seq(from = 0.1, to = 4, by = 0.1))
+seurat_list$with_introns <- FindClusters(
+  seurat_list$with_introns,
+  resolution = selected_resolutions,
+  reduction = "harmony",
+  dims = 1:30
+)
+seurat_list$without_introns <- FindClusters(
+  seurat_list$without_introns,
+  resolution = selected_resolutions,
+  reduction = "harmony",
+  dims = 1:30
+)
+aris <- map_dbl(selected_resolutions, \(x) {
+  clusters_introns <- seurat_list$with_introns@meta.data[, glue("RNA_snn_res.{x}")]
+  clusters_no_introns <- seurat_list$without_introns@meta.data[, glue("RNA_snn_res.{x}")]
+  ari <- adj.rand.index(cl1 = clusters_introns, cl2 = clusters_no_introns)
+  ari
+})
+aris_df <- data.frame(resolution = selected_resolutions, ari = aris)
+aris_df %>%
+  ggplot(aes(resolution, ari)) +
+    geom_point() +
+    labs(x = "Clustering resolution", y = "Adjusted Rand Index (ARI)") +
+    scale_y_continuous(limits = c(0, 1)) +
+    theme_bw() +
+    theme(
+      axis.title = element_text(size = 8),
+      axis.text = element_text(size = 7)
+    )
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat_list, here("scRNA-seq/results/R_objects/intronic_read_mapping/2.seurat_list_with_and_without_introns_integrated.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
