@@ -1,0 +1,110 @@
+---
+title: "GCBC: Annotation (level 3)"
+author: "Ramon Massoni-Badosa"
+date: "2021/05/13"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The purpose of this notebook is to annotate GCBC cells with the feedback we received from the annotation team.
+
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_obj <- here::here("scRNA-seq/results/R_objects/level_3/GCBC/GCBC_clustered_level_3_with_pre_freeze.rds")
+path_to_save <- here::here("scRNA-seq/results/R_objects/level_3/GCBC/GCBC_annotated_level_3.rds")
+path_to_save_df <- here::here("scRNA-seq/3-clustering/3-level_3/tmp/GCBC/GCBC_annotation_level_3_df.rds")
+
+
+# Colors
+color_palette <-  c("#1CFFCE", "#90AD1C", "#C075A6", "#85660D", "#5A5156", "#AA0DFE",   
+                    "#F8A19F", "#F7E1A0", "#1C8356", "#FEAF16", "#822E1C", "#C4451C",   
+                    "#1CBE4F", "#325A9B", "#F6222E", "#FE00FA", "#FBE426", "#16FF32", 
+                    "black",   "#3283FE", "#B00068", "#DEA0FD", "#B10DA1", "#E4E1E3",   
+                    "#90AD1C", "#FE00FA", "#85660D", "#3B00FB", "#822E1C", "coral2", 
+                    "#1CFFCE", "#1CBE4F", "#3283FE", "#FBE426", "#F7E1A0", "#325A9B",   
+                    "#2ED9FF", "#B5EFB5", "#5A5156", "#DEA0FD", "#FEAF16", "#683B79",   
+                    "#B10DA1", "#1C7F93", "#F8A19F", "dark orange", "#FEAF16", "#FBE426",  
+                    "Brown")
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+```{r}
+# Seurat object
+seurat <- readRDS(path_to_obj)
+seurat
+DimPlot(seurat, cols = color_palette, pt.size = 0.2)
+```
+
+
+# Annotation
+
+```{r}
+annotation_level_3 <- c(
+  "0" = "0_6",
+  "1" = "proliferative DZ_1",
+  "2" = "AID-positive non-proliferative",
+  "3" = "AID-positive proliferative",
+  "4" = "B cell activation, pro-survival LZ",
+  "5" = "proliferaitve DZ_2",
+  "6" = "0_6",
+  "7" = "proliferative LZ?",
+  "8" = "technical",
+  "9" = "prePB",
+  "10" = "proliferative DZ_3",
+  "11" = "technical",
+  "12" = "technical"
+)
+seurat$annotation_level_3 <- seurat$seurat_clusters
+seurat$annotation_level_3 <- annotation_level_3[seurat$annotation_level_3]
+DimPlot(
+  seurat,
+  group.by = "annotation_level_3",
+  cols = color_palette,
+  pt.size = 0.2
+)
+```
+
+
+# Save
+
+```{r}
+saveRDS(seurat, path_to_save)
+seurat$cell_barcode <- colnames(seurat)
+df <- seurat@meta.data[, c("cell_barcode", "annotation_level_3")]
+saveRDS(df, path_to_save_df)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```

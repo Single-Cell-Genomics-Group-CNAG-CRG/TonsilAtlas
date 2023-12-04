@@ -1,0 +1,1646 @@
+---
+title: "Naive and Memory B cells level 3 to level 4"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+```
+
+
+## Introduction
+
+In this Rmd we are going to clean the level 3 of the __*Naive B Cells and Memory B Cells (NBC_MBC)*__. Here, we will focus on removing potential doublets and low quality cells to provide a curated level 4 for the for the *NBC_MBC* cell types. 
+
+## Libraries 
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(knitr)
+```
+
+
+## Parameters 
+
+### Folder structure
+```{r}
+level <- "level_3"
+cell_type <- "NBC_MBC"
+base_folder <- here::here(paste0(level,"/",cell_type,"/"))
+  data_folder <- paste0(base_folder, "data/")
+  results_folder <- paste0(base_folder, "results/")
+  figures_folder <- paste0(results_folder, "figures/")
+  markers_folder <- paste0(results_folder, "objects/markers/")
+
+level_4_folder = here::here(paste0("level_4/",cell_type,"/data/"))
+```
+
+### Palette and pt.size
+```{r}
+palette<-c('#e6194b', '#3cb44b', '#ffd8b1', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffe119', '#000075', '#808080', '#ffffff', '#000000')
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+## Load data 
+```{r}
+seurat_object_l3 <- readRDS(paste0(data_folder, cell_type, "_clustered_level_3_with_pre_freeze.rds"))
+```
+
+
+## Addition of proposed annotation
+
+### Naive vs Memory 
+```{r}
+seurat_object_l3$naive_memory <- ifelse(seurat_object_l3$RNA_snn_res.0.5 %in% c(0,2,5,7,9), "naive_B_cells", 
+                                                    ifelse(seurat_object_l3$RNA_snn_res.0.5 %in% c(1,3,4,10), "memory_B_cells", 
+                                                            "undefined_naive_or_memory"
+                                                    )
+                                                )
+```
+
+
+### Detailed annotation
+```{r}
+seurat_object_l3$RNA_snn_res.0.5 <- as.factor(seurat_object_l3$RNA_snn_res.0.5)
+seurat_object_l3$RNA_snn_res.0.5 <- factor(seurat_object_l3$RNA_snn_res.0.5, levels=c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"))
+
+Idents(seurat_object_l3) <- "RNA_snn_res.0.5"
+
+
+new.cluster.ids <- c("NBC", # subdivide
+                     "csMBC", 
+                     "NBC_BACH2", # maybe techinical issues upper and lower part
+                     "ncsMBC",
+                     "MBCs_FCRL4", # 
+                     "preGC_activated_MIR155HG", 
+                     "preGC_proliferative_early_response", # sublustering needed
+                     "preGC_NFkB_signature_MYC", 
+                     "RoyalLondon_specific", 
+                     "IFN-activated", 
+                     "csMBC_FCRL4_intermediate",
+                     "unclear_doublets",
+                     "RoyalLondon_specific",
+                     "Technical",
+                     "Donor_RL_specific_cluster"
+                     )
+names(new.cluster.ids) <- levels(seurat_object_l3)
+seurat_object_l3 <- RenameIdents(seurat_object_l3, new.cluster.ids)
+seurat_object_l3$annotation_level_3 <- seurat_object_l3@active.ident
+seurat_object_l3$annotation_level_3 <- as.character(seurat_object_l3$annotation_level_3)
+```
+
+## Exploratory analysis of level 3
+
+### Explore the UMAP and different grouping variables 
+```{r fig.height = 12, fig.width = 16}
+#### LEVEL 3 CLUSTERS
+Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE, 
+        label = TRUE)
+
+Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "naive_memory", 
+        raster = FALSE) 
+```
+
+```{r fig.height = 12, fig.width = 16}
+#### COMBINED EXPLORATORY DATA GROUPS ANALYSIS
+p1 <- Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+
+p2 <- Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1", "red"), 
+        group.by = "assay", 
+        raster = FALSE) 
+
+p3 <- Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE) 
+
+p4 <- Seurat::DimPlot(seurat_object_l3, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1", "red"), 
+        group.by = "hospital", 
+        raster = FALSE) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+```
+
+
+### Explore the UMAP and different data variables 
+```{r fig.height = 12, fig.width = 16}
+p1 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+p1 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    raster = FALSE) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    raster = FALSE) 
+                    
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+
+g1 <- ggplot(seurat_object_l3@meta.data, aes(x=annotation_level_3, y=nFeature_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(seurat_object_l3@meta.data, aes(x=annotation_level_3, y=nCount_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+patchwork::wrap_plots(g1, g2, ncol = 2)
+
+
+
+```
+
+### Explore the hospital procedence of the cells
+```{r}
+table(seurat_object_l3$hospital)
+table(seurat_object_l3$annotation_level_3, seurat_object_l3$assay)
+table(seurat_object_l3$annotation_level_3, seurat_object_l3$age_group)
+```
+
+## Removal of Royal London cells (Hamish King)
+```{r}
+Idents(seurat_object_l3) <- "hospital"
+seurat_object_l3_clean <- subset(
+  seurat_object_l3,
+  cells = colnames(seurat_object_l3)[Idents(seurat_object_l3) != "Royal London"]
+)
+```
+
+### Re-processing without Royal London cells
+
+```{r}
+seurat_list <- SplitObject(seurat_object_l3_clean, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(seurat_object_l3_clean, reduction = "harmony")
+seurat_object_l3_clean <- seurat_object_l3_clean %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.5, 0.75, 0.9, 1)
+seurat_object_l3_clean <- seurat_object_l3_clean %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+```
+
+
+```{r}
+seurat_object_l3_noRoyalLondon <- seurat_object_l3_clean
+```
+
+### Exploratory analysis without Royal London Cells 
+
+#### Data groups
+
+```{r fig.height = 12, fig.width = 16}
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE, 
+        label = TRUE)
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "naive_memory", 
+        raster = FALSE) 
+
+
+```
+
+
+```{r fig.height = 12, fig.width = 16}
+list_plots <- list()
+for (index in 1:length(resolution_vector)) {
+  resolution <- resolution_vector[index]
+  resolution_wanted <- paste0("RNA_snn_res.", resolution)
+  Idents(seurat_object_l3_noRoyalLondon) <- resolution_wanted
+  p <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, reduction = "umap",  pt.size = pt_size/3, raster = FALSE)
+  list_plots[[index]] <- p
+}
+print(patchwork::wrap_plots(list_plots))
+
+```
+
+```{r fig.height = 12, fig.width = 16}
+#### COMBINED EXPLORATORY DATA GROUPS ANALYSIS
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.35", 
+        raster = FALSE)  
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1"), 
+        group.by = "assay", 
+        raster = FALSE) 
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE) 
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1", "red"), 
+        group.by = "hospital", 
+        raster = FALSE) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+```
+
+#### Data features
+
+```{r fig.height = 12, fig.width = 16}
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    raster = FALSE) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    raster = FALSE, 
+                    order = TRUE) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    raster = FALSE, 
+                    order = TRUE) 
+                    
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+g1 <- ggplot(seurat_object_l3_noRoyalLondon@meta.data, aes(x=annotation_level_3, y=nFeature_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(seurat_object_l3_noRoyalLondon@meta.data, aes(x=annotation_level_3, y=nCount_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+```
+
+```{r}
+table(seurat_object_l3_noRoyalLondon$annotation_level_3)
+table(seurat_object_l3_noRoyalLondon$annotation_level_3, seurat_object_l3_noRoyalLondon$assay)
+table(seurat_object_l3_noRoyalLondon$annotation_level_3, seurat_object_l3_noRoyalLondon$age_group)
+```
+
+
+As can be seen there is a high degree of cells with low number of features and counts, however these cells are spread among all the cluster and just few of them are potential candidates for removal due to their quality: 
+
+1. Donor_RL_specific_cluster
+
+2. unclear_doublets
+
+3. technical
+
+As for the rest of the clusters refers, there are not clear low quality clusters but low quality regions within the pre-annotated clusters, particularly we see a gradient in two different clusters (NBCs and csMBCs). Additionally, there seems to be a low quality region at the preGC_proliferative_early_response cluster: 
+
+1. NBCs _(NBC and NBC_BACH2 clusters)_: There seems to be a gradient of number of features and counts from left to right. Worthwhile to mention the group of cells from NBC_BACH2 cluster that have low number of features (see features_visualization last plot).
+
+2. csMBCs _(csMBC and csMBC_FCRL4+_intermediate clusters)_: Similarly, we also see a gradient at the csMBC clusters, particularly the bottom left tail of the csMBC cluster. 
+
+3. preGC_proliferative_early_response: Finally, it seems that this cluster is composed of (at least) 4 clear clusters and maybe some of them could correlate with low quality regions. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Analysis of low quality clusters 
+
+#### Donor_RL_specific_cluster cluster 
+Donor_RL_specific_cluster is composed of 6 cells which, as shown previously, display clearly features from low quality cells. Therefore, we decided to removed them. 
+
+#### unclear_doublets cluster 
+
+```{r}
+cluster_name <- "unclear_doublets"
+subcluster_name <- paste0(cluster_name, "_subcluster")
+```
+
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "annotation_level_3"
+seurat_object_l3_noRoyalLondon <- FindSubCluster(
+  seurat_object_l3_noRoyalLondon,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.05
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon$annotation_level_3 == cluster_name)]
+```
+
+##### Visualization analysis
+```{r}
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL VARIABLES
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols=palette, 
+        group.by = "assay", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "donor_id", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT nCOUNTS and nFEATURES removing the extreme values 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l3_noRoyalLondon@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+```
+
+##### Subcluster markers analysis
+
+###### Cluster unclear_doublets_0
+```{r}
+Idents(seurat_object_l3_noRoyalLondon) <- "unclear_doublets_subcluster"
+markers_df <- FindMarkers(
+  seurat_object_l3_noRoyalLondon,
+  ident.1 = "unclear_doublets_0",
+  ident.2 = "unclear_doublets_1",
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% 
+  tibble::rownames_to_column(var = "gene")
+
+markers
+```
+
+###### Cluster unclear_doublets_1
+```{r}
+interesting_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon@meta.data[,subcluster_name] == "unclear_doublets_1")]
+
+Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = c("LYZ", "MAF", "S100A8", "S100A9"), 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=interesting_cells, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90')
+
+
+```
+
+
+##### Conclusion
+When analyzing this cluster we realize that it is clearly divided into two subclusters, which mainly differ in homeostatic genes and MT genes. Consequently, we remove the subcluster 0 due to the clear signal of death cells. As for the subcluster 1 refers, we thought that could be doublets with macrophages. Nevertheless, the  expression analysis of some macrophage markers do not seem to clarify our hipothesys and hence, we do not have enough power to remove this subcluster. 
+
+
+
+#### Technical cluster 
+
+```{r}
+cluster_name <- "Technical"
+subcluster_name <- paste0(cluster_name, "_subcluster")
+```
+
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "annotation_level_3"
+seurat_object_l3_noRoyalLondon <- FindSubCluster(
+  seurat_object_l3_noRoyalLondon,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon$annotation_level_3 == cluster_name)]
+```
+
+##### Visualization analysis
+```{r}
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL VARIABLES
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols=palette, 
+        group.by = "assay", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "donor_id", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT nCOUNTS and nFEATURES removing the extreme values 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l3_noRoyalLondon@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+
+```
+
+##### Conclusion
+After checking the markers from level 3 (no representative genes + low logFC) and taking into account the mt% we decided to remove this cluster.
+
+
+
+
+
+
+#### NBC_BACH2 cluster 
+
+##### Subclustering 
+
+```{r}
+cluster_name <- "NBC_BACH2"
+subcluster_name <- paste0(cluster_name, "_subcluster")
+```
+
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "annotation_level_3"
+seurat_object_l3_noRoyalLondon <- FindSubCluster(
+  seurat_object_l3_noRoyalLondon,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon$annotation_level_3 == cluster_name)]
+```
+
+##### Visualization analysis
+```{r}
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL VARIABLES
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols=palette, 
+        group.by = "assay", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "donor_id", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT nCOUNTS and nFEATURES removing the extreme values 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l3_noRoyalLondon@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+
+```
+
+##### Conclusion
+After discussing with Ramon Massoni we commented that this gradient of counts and features is an artifact with which we have to deal in this type of analysis. Furthermore, this gradient is opposite to the clusters that we identify which therefore do not correlate with the quality. However, here is interesting to mention that the clusters correlate with the age_group more or less and hence, we should check it in the following analysis. 
+
+#### csMBC cluster 
+
+```{r}
+cluster_name <- "csMBC"
+subcluster_name <- paste0(cluster_name, "_subcluster")
+```
+
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "annotation_level_3"
+seurat_object_l3_noRoyalLondon <- FindSubCluster(
+  seurat_object_l3_noRoyalLondon,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon$annotation_level_3 == cluster_name)]
+```
+
+##### Visualization analysis
+```{r}
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL VARIABLES
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols=palette, 
+        group.by = "assay", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "donor_id", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT nCOUNTS and nFEATURES removing the extreme values 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l3_noRoyalLondon@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+
+```
+
+##### Subcluster markers analysis
+
+###### Cluster csMBC_3
+```{r}
+Idents(seurat_object_l3_noRoyalLondon) <- subcluster_name
+markers_df <- FindMarkers(
+  seurat_object_l3_noRoyalLondon,
+  ident.1 = "csMBC_3",
+  ident.2 = c("csMBC_1","csMBC_2","csMBC_4","csMBC_5","csMBC_0"),
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% # changed avg_log2FC > 0.9 after discussion with Ramon Massoni
+  tibble::rownames_to_column(var = "gene")
+
+markers
+```
+
+
+##### Conclusion
+When analyzing this cluster we realize there seems to be a correspondence between the left tail of the cluster and the low quality region of this cluster, which additionally correlates with some clusters that have been already removed: technical + unclear_doublets_0. Prior to remove this cluster, we assessed the markers of this subcluster in order and we confirmed its low quality features as we saw MT-genes and macrophages markers as the top markers of this cluster. Consequently, we decided to remove this cluster. 
+
+
+
+
+#### preGC_proliferative_early_response cluster 
+
+```{r}
+cluster_name <- "preGC_proliferative_early_response"
+subcluster_name <- paste0(cluster_name, "_subcluster")
+```
+
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "annotation_level_3"
+seurat_object_l3_noRoyalLondon <- FindSubCluster(
+  seurat_object_l3_noRoyalLondon,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.7
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l3_noRoyalLondon)[which(seurat_object_l3_noRoyalLondon$annotation_level_3 == cluster_name)]
+```
+
+##### Visualization analysis
+```{r}
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black"), 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL VARIABLES
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+
+p2 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols=palette, 
+        group.by = "assay", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p3 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+p4 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "donor_id", 
+        raster = FALSE, 
+        cells=cluster_cells)
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+## INSPECT nCOUNTS and nFEATURES removing the extreme values 
+p1 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l3_noRoyalLondon, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_noRoyalLondon, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l3_noRoyalLondon@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+```
+
+##### Conclusion
+When analyzing this cluster we realize there seems to be a correspondence between subclusters 1, 3 and 5 with the low quality region. However, due to the ambiguity of the annotation and the suggestion to provide subclusters, we decide to postpone the decision of removing these subclusters. 
+
+
+
+## Remove Low quality clusters 
+
+```{r}
+
+### Remove the unclear_doublets_0 subcluster 
+Idents(seurat_object_l3_noRoyalLondon) <- "unclear_doublets_subcluster"
+seurat_object_l3_clean <- subset(
+  seurat_object_l3_noRoyalLondon,
+  cells = colnames(seurat_object_l3_noRoyalLondon)[Idents(seurat_object_l3_noRoyalLondon) != "unclear_doublets_0"]
+)
+### Remove completely the Technical cluster 
+Idents(seurat_object_l3_clean) <- "annotation_level_3"
+seurat_object_l3_clean <- subset(
+  seurat_object_l3_clean,
+  cells = colnames(seurat_object_l3_clean)[Idents(seurat_object_l3_clean) != "Technical"]
+)
+### Remove completely the Donor-RL_specific_cluster 
+Idents(seurat_object_l3_clean) <- "annotation_level_3"
+seurat_object_l3_clean <- subset(
+  seurat_object_l3_clean,
+  cells = colnames(seurat_object_l3_clean)[Idents(seurat_object_l3_clean) != "Donor_RL_specific_cluster"]
+)
+### Remove the csMBC_subcluster
+Idents(seurat_object_l3_clean) <- "csMBC_subcluster"
+seurat_object_l3_clean <- subset(
+  seurat_object_l3_clean,
+  cells = colnames(seurat_object_l3_clean)[Idents(seurat_object_l3_clean) != "csMBC_3"]
+)
+```
+
+## Reprocessing with the cleaned level 3 
+
+### Reprocessing 
+```{r}
+seurat_list <- SplitObject(seurat_object_l3_clean, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(seurat_object_l3_clean, reduction = "harmony")
+seurat_object_l3_clean <- seurat_object_l3_clean %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.025, 0.05, 0.1, 0.25, 0.35,  0.4, 0.45, 0.55, 0.6, 0.65, 0.75, 1)
+seurat_object_l3_clean <- seurat_object_l3_clean %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+```
+
+## Exploratory analysis of level 4 
+
+### Data groups and features visualization
+
+#### Data groups
+```{r fig.height = 12, fig.width = 16}
+#### COMBINED EXPLORATORY DATA GROUPS ANALYSIS
+p1 <- Seurat::DimPlot(seurat_object_l3_clean, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.55", 
+        raster = FALSE) 
+
+p2 <- Seurat::DimPlot(seurat_object_l3_clean, 
+        reduction = "umap", 
+        pt.size = pt_size/3, 
+        raster = FALSE,   
+        cols= c("tan", "royalblue1"), 
+        group.by = "assay")
+
+p3 <- Seurat::DimPlot(seurat_object_l3_clean, 
+        reduction = "umap", 
+        pt.size = pt_size/3, 
+        raster = FALSE,   
+        cols= palette, 
+        group.by = "age_group")
+
+p4 <- Seurat::DimPlot(seurat_object_l3_clean, 
+        reduction = "umap", 
+        pt.size = pt_size/3, 
+        raster = FALSE, 
+        cols= c("tan", "royalblue1", "red"), 
+        group.by = "hospital")
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+```
+
+#### Data features
+
+```{r fig.height = 12, fig.width = 16}
+p1 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    raster = FALSE, 
+                    pt.size = pt_size/3)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nFeature_RNA", 
+                    reduction="umap",  
+                    raster = FALSE, 
+                    pt.size = pt_size/3)
+
+p3 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "pct_mt", 
+                    reduction="umap",  
+                    raster = FALSE, 
+                    pt.size = pt_size/3)
+
+p4 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "pct_ribosomal", 
+                    reduction="umap",  
+                    raster = FALSE, 
+                    pt.size = pt_size/3)
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+
+p1 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3,  
+                    raster = FALSE, 
+                    max.cutoff = 1000)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3,  
+                    raster = FALSE, 
+                    max.cutoff = 1000)
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+
+p1 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3,  
+                    raster = FALSE, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90'
+                    )
+
+p2 <- Seurat::FeaturePlot(seurat_object_l3_clean, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3,  
+                    raster = FALSE, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90'
+                    )
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+
+g1 <- ggplot(seurat_object_l3_clean@meta.data, aes(x=annotation_level_3, y=nFeature_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(seurat_object_l3_clean@meta.data, aes(x=annotation_level_3, y=nCount_RNA, fill=annotation_level_3)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+patchwork::wrap_plots(g1, g2, ncol = 2)
+```
+
+## Save object for Level 4 annotation
+
+```{r eval=FALSE}
+seurat_object_l4<- seurat_object_l3_clean
+#saveRDS(seurat_object_l4, paste0(level_4_folder, cell_type, "_clustered_level_4.rds"))
+```
