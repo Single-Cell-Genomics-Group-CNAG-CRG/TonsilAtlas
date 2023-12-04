@@ -1,0 +1,228 @@
+---
+title: "Naive and Memory B cells level  5"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+```
+
+
+## Introduction
+
+In this Rmd we are going to obtain the panels that correspond to __*Naive B Cells and Memory B Cells (NBC_MBC)*__ in figure 5. 
+
+## Setting up 
+
+### Libraries 
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(pheatmap2)
+library(UCell)
+library(viridis)
+```
+
+
+### Parameters 
+
+```{r}
+cell_type <- "NBC_MBC"
+data_folder <-  paste0(here::here("data/"))
+figures_folder <-  paste0(here::here("figures/DZnoproli/"))
+```
+
+## Load data 
+```{r load data}
+NBC_MBCseurat_object_l5 <- readRDS(paste0(data_folder ,cell_type, "_seu_obj_level_5_eta_DZnoproli.rds"))
+```
+
+## Palette 
+```{r}
+cols_nbc <- c(
+  "NBC" = "#dcf0f4",
+  "NBC early activation" = "#95d1de", 
+  "NBC IFN-activated" = "#52828D",
+  "NBC CD229+" = "#8C76B0", 
+  
+  "Early GC-commited NBC" = "#75a5b0",
+  "GC-commited NBC" = "#71ccb7", 
+  
+  "preGC" = "#69c291",
+  "Proliferative NBC" = "#205b67",
+  "GC DZ Noproli"  = "#588e1a", 
+
+  "Early MBC" = "#eae2c6", 
+  "ncsMBC" = "#dbcc9b", 
+  "ncsMBC FCRL4+/FCRL5+" = "#bca146", 
+  "csMBC" = "#72663f",  
+  "csMBC FCRL4+/FCRL5+" = "#a3925a", 
+  "MBC FCRL5+" = "#352f1d"
+)
+
+NBC_MBCseurat_object_l5$names_level_5_clusters_eta <- factor(NBC_MBCseurat_object_l5$names_level_5_clusters_eta, levels = names(cols_nbc))
+```
+
+## MAIN figures 
+
+### Panel 5A 
+```{r}
+pdf(paste(figures_folder, "MA_eta_names.pdf", sep=""),width=10,height=10,paper='special') 
+Seurat::DimPlot(NBC_MBCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = 0.7,  
+        cols= cols_nbc, 
+        label = FALSE,
+        raster = FALSE,
+        group.by = "names_level_5_clusters_eta") + theme(
+  plot.title = element_blank())  
+dev.off()
+```
+
+### Panel 5B 
+
+```{r}
+### Remove DZ-no-proli for a beter characterization
+NBC_MBCseurat_object_l5_s <- subset(NBC_MBCseurat_object_l5, subset = names_level_5_clusters_eta != "GC DZ Noproli")
+cell_types <- names(table(NBC_MBCseurat_object_l5$names_level_5_clusters_eta))
+cell_typesnodz <- cell_types[cell_types != "GC DZ Noproli"]
+cols_nbc_nodz <- cols_nbc[cell_typesnodz]
+NBC_MBCseurat_object_l5_s$names_level_5_clusters_eta <- factor(NBC_MBCseurat_object_l5_s$names_level_5_clusters_eta, levels = cell_typesnodz)
+```
+
+
+```{r}
+features_main <- c("TCL1A", "FCER2", "CD27", "TNFRSF13B", "IGHD", "IGHM", "IGHA1", "IGHG1", 
+  "CD69","EGR2","CCL3","MYC","BATF","CCND2", 
+  "NFKB1","NFKB2","RELB",
+  "CD40","BCL2A1","MIR155HG","EBI3","TRAF1", 
+  "MEF2B","RGS13",
+  "MKI67","TOP2A", 
+  "LY9","LILRA4", 
+  "IFIT1","IFIT3", 
+  "FCRL4","FCRL5" 
+)  
+```
+
+
+```{r}
+avgexpr_mat <- AverageExpression(
+  features = features_main,
+  NBC_MBCseurat_object_l5_s,
+  assays = "RNA",
+  return.seurat = F,
+  group.by = "names_level_5_clusters_eta",
+  slot = "counts")
+
+cell_types <- cell_typesnodz
+mycolors <- list(cell_type = cols_nbc)
+mat <- as.data.frame(avgexpr_mat$RNA)
+colnames(mat) <- cell_types
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+
+input_mat <- t(apply(mat, MARGIN = 1, FUN = function(X) (X - min(X))/diff(range(X))))
+
+
+pdf(paste(figures_folder, "MB_reduced_genes_heatmap.pdf", sep=""),width=5,height=7,paper='special') 
+pheatmap2(input_mat,
+                annotation_col = annotation_col,
+                annotation_colors = mycolors,
+                annotation_names_col = F,
+                annotation_legend = F,
+                show_rownames=T, show_colnames = F, 
+                border_color = NA,
+                cluster_rows = F,
+                cluster_cols = F,
+                fontsize_row = 10,
+                gaps_row = c(8,14,17,22,24,26,28,30), 
+                gaps_col = c(8) 
+)
+
+library(grid)
+grid.ls(grid.force())
+grid.gedit("col_annotation", gp = gpar(col="black"))
+dev.off()
+```
+
+
+## SUPPLEMENTARY FIGRUES
+
+```{r}
+features_supp <- c(
+  "IL4R","EGR3","CCL4",
+  "CD44","NFKBIA","NFKBID",
+  "TRAF4", 
+  "NME1","HMGB1", 
+  "CENPF",
+  "IFI44L","IFITM2",
+  "FCRL2","GSN","SOX5"
+)  
+```
+
+### Panel S12A 
+```{r}
+Idents(NBC_MBCseurat_object_l5) <- "names_level_5_clusters_eta"
+dot_plot <- DotPlot(NBC_MBCseurat_object_l5, features = rev(features_supp)) +
+  coord_flip() +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8),
+    legend.text = element_text(size = 5.5),
+    legend.title = element_text(size = 6), 
+    axis.text.x=element_text(angle=45, hjust=1))
+
+pdf(paste(figures_folder, "SA_supp_genes_dotplot.pdf", sep=""),width=5,height=7,paper='special') 
+dot_plot
+dev.off()
+```
+
+
+### Panel S12D 
+```{r}
+pdf(paste(figures_folder, "SD_BATF_expression.pdf", sep=""),width=7,height=5,paper='special') 
+FeaturePlot(NBC_MBCseurat_object_l5,
+      order = FALSE,
+      pt.size = pt_size*2,
+      min.cutoff = 'q1',
+      max.cutoff = 'q99',
+      features = "BATF", 
+      raster = TRUE)
+dev.off()
+
+```
+
+
+### Panel S12E
+```{r}
+NBC_MBCseurat_object_l5<- AddModuleScore_UCell(
+    obj = NBC_MBCseurat_object_l5,
+    features = list(NFKB_signature = c("NFKBIA","NFKBID","NFKB1","NFKB2","REL", "RELA", "RELB")),
+    name = ''
+  )
+
+pdf(paste(figures_folder, "SE_NFKB_signature.pdf", sep=""),width=7,height=5,paper='special') 
+plot2 <- FeaturePlot(NBC_MBCseurat_object_l5,
+      order = FALSE,
+      pt.size = pt_size*2,
+      min.cutoff = 'q1',
+      max.cutoff = 'q99',
+      features = "NFKB_signature", 
+      raster = TRUE)  +
+  scale_color_gradientn( colours = magma(256))
+dev.off()
+```
+
+
+

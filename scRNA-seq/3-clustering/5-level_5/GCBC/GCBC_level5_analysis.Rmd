@@ -1,0 +1,209 @@
+---
+title: "Germinal Center B cells level  5"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+```
+
+
+## Introduction
+
+In this Rmd we are going to obtain the panels that correspond to the transcriptomics analysis of __*Germinal Center B Cells (GCBC)*__ in figure 5. 
+
+## Setting up 
+
+### Libraries 
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(pheatmap2)
+library(UCell)
+library(viridis)
+```
+
+
+### Parameters 
+
+```{r}
+cell_type <- "GCBC"
+data_folder <-  paste0(here::here("data/"))
+figures_folder <-  paste0(here::here("figures/"))
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+## Load data 
+```{r load data}
+GCBCseurat_object_l5 <- readRDS(paste0(data_folder, cell_type, "_seu_obj_level_5_eta.rds"))
+```
+
+## Palette 
+```{r}
+cols_gcbc <- c(
+  "DZ early Sphase" = "#006fc4", 
+  "DZ late Sphase" = "#004d89", 
+  "DZ early G2Mphase" = "#6f66a3",
+  "DZ late G2Mphase" = "#8981af", 
+  
+  "DZ cell cycle exit" = "#2f2f4a", 
+  "DZ non proliferative" = "#356200", 
+  
+  "DZ_LZ transition" = "#d4f0a3", 
+  
+  "LZ" = "#fff59a",  
+  "LZ_DZ reentry commitment" = "#e0efef",
+  "LZ proliferative" = "#9ad3ff", 
+  "LZ_DZ transition"  = "#4eb2ff",
+  
+  "Precursor MBCs" = "#ccb771", 
+  "Reactivated proliferative MBCs" = "#564c2f",  
+  
+  "prePC" = "#FECFC7" 
+)
+GCBCseurat_object_l5$names_level_5_clusters_eta <- factor(GCBCseurat_object_l5$names_level_5_clusters_eta, levels = names(cols_gcbc))
+```
+
+## MAIN figures 
+
+### Panel 5C 
+```{r}
+pdf(paste(figures_folder, "MA_eta_names.pdf", sep=""),width=10,height=10,paper='special') 
+Seurat::DimPlot(GCBCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt.size,  
+        cols= cols_gcbc, 
+        #label = TRUE,
+        raster = FALSE,
+        group.by = "names_level_5_clusters_eta") + theme(
+  plot.title = element_blank()) 
+dev.off()
+```
+
+### Panel 5D 
+
+```{r}
+features_main <- c("CXCR4", "AICDA", "CD83", "LMO2", 
+             "POLA1", "HIST1H4C", 
+             "MKI67","TOP2A","CDC20","CCNB1", 
+             "STMN1", "HMGB2", 
+             "FOXP1","MME",
+             "CD40","BCL2A1","MIR155HG","EBI3","TRAF1",
+             "NFKB1","NFKB2","RELB", 
+             "MYC","BATF",
+             "CCR6","CELF2","BANK1",
+             "PRDM1","XBP1"
+)
+```
+
+
+```{r}
+avgexpr_mat <- AverageExpression(
+  features = features_main,
+  GCBCseurat_object_l5,
+  assays = "RNA",
+  return.seurat = F,
+  group.by = "names_level_5_clusters_eta",
+  slot = "counts")
+
+cell_types <- names(cols_gcbc)
+mycolors <- list(cell_type = c(cols_gcbc[cell_types]))
+mat <- as.data.frame(avgexpr_mat$RNA)
+colnames(mat) <- cell_types
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+input_mat <- t(apply(mat, MARGIN = 1, FUN = function(X) (X - min(X))/diff(range(X))))
+
+
+pdf(paste(figures_folder, "5D_reduced_genes_heatmap.pdf", sep=""),width=5,height=7,paper='special') 
+library(pheatmap2)
+pheatmap2(input_mat,
+                annotation_col = annotation_col,
+                annotation_colors = mycolors,
+                annotation_names_col = F,
+                annotation_legend = F,
+                show_rownames=T, show_colnames = F, 
+                border_color = NA,
+                cluster_rows = F,
+                cluster_cols = F,
+                fontsize_row = 8,
+                gaps_row = c(4,6,10,12,14,19,22, 24, 27), 
+                gaps_col = c(4,7,8,11,13) 
+)
+
+library(grid)
+grid.ls(grid.force()) 
+grid.gedit("col_annotation", gp = gpar(col="black"))
+dev.off()
+```
+
+
+
+
+## SUPPLEMENTARY FIGRUES
+
+```{r}
+features_supp <- c(
+             "MCM3", "PCNA", "HIST1H1B", 
+             "AURKB","CDK1","TUBB4B","BUB1","CENPE",
+             "BIRC5", "RAD21", "HMGN2", 
+             "PRKCB","BACH2", 
+             "BCL2L1","TRAF4","CD58", 
+             "NFKBIA","NFKBID",
+             "CD44","SRM",
+             "BCL2","TNFRSF13B", 
+             "IRF4"
+)
+```
+
+### Panel S12B 
+```{r}
+Idents(GCBCseurat_object_l5) <- "names_level_5_clusters_eta"
+dot_plot <- DotPlot(GCBCseurat_object_l5, features = rev(features_main)) +
+  coord_flip() +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8),
+    legend.text = element_text(size = 5.5),
+    legend.title = element_text(size = 6), 
+    axis.text.x=element_text(angle=45, hjust=1))
+
+pdf(paste(figures_folder, "SB_supp_genes_dotplot.pdf", sep=""),width=5,height=7,paper='special') 
+dot_plot
+dev.off()
+```
+
+
+### Panel S12C 
+```{r}
+pdf(paste(figures_folder, "SC_GCBC_Phase.pdf", sep=""),width=7,height=5,paper='special') 
+Seurat::DimPlot(GCBCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = 1,  
+        cols= c("G2M" = "#E69F00", "S" = "#56B4E9","G1" = "#009E73"), 
+        raster = TRUE,
+        group.by = "Phase") + theme(
+  plot.title = element_blank()) 
+dev.off()
+
+```
+
+
+

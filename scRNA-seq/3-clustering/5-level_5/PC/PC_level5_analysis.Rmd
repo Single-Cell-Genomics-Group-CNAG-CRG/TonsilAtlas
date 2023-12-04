@@ -1,0 +1,553 @@
+---
+title: "Plasma cells level  5"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+```
+
+
+## Introduction
+
+In this Rmd we are going to obtain the panels that correspond to the transcriptomics analysis of __*Plasma Cells (PC)*__ in figure 6. 
+
+## Setting up 
+
+### Libraries 
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(pheatmap2)
+library(UCell)
+library(viridis)
+```
+
+
+### Parameters 
+
+```{r}
+cell_type <- "PC"
+data_folder <-  paste0(here::here("data/"))
+figures_folder <-  paste0(here::here("figures/"))
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+## Load data 
+```{r load data}
+PC_level5 <- readRDS(paste0(data_folder, cell_type, "_seu_obj_level_5_eta.rds"))
+```
+
+## Palette 
+```{r}
+cols_PCrnaseq <- c(
+  "Dark Zone GCBC" = "#73787E",
+  "DZ migratory PC precursor" = "#D94701",
+  "Light Zone GCBC" = "#B8BCC1", 
+  "PC committed Light Zone GCBC" = "#FECFC7",
+  "Early PC precursor" = "#FF8E7B", 
+  
+  "PB committed early PC precursor" = "#F3BFCB", 
+  "Transitional PB" = "#E68098", 
+  "PB" = "#CA4A68", 
+  
+  "IgG+ PC precursor" = "#A6E1F4", 
+  "preMature IgG+ PC" = "#008ECE", 
+  "Mature IgG+ PC" = "#324376", 
+  "MBC derived IgG+ PC" = "#586BA4",
+  
+  "Mature IgA+ PC"  = "#4A332D",
+  "MBC derived IgA+ PC" = "#896B60", 
+
+  "class switch MBC" = "#035F72", 
+  "MBC derived early PC precursor" = "#398D9F", 
+  "MBC derived PC precursor" = "#9CC6CF", 
+  
+  "IgM+ early PC precursor" = "#66b266", 
+  "IgM+ PC precursor" = "#198c19", 
+  "preMature IgM+ PC" = "#006600", 
+  "Mature IgM+ PC" = "#003300", 
+  "Short lived IgM+ PC" = "#99cc99", 
+  
+  "IgD PC precursor" = "#ffd8b1"
+  
+  
+)
+PC_level5$names_level_5_clusters_eta <- factor(PC_level5$names_level_5_clusters_eta, levels = names(cols_PCrnaseq))
+```
+
+## MAIN figures 
+
+### Panel 6A 
+```{r}
+pdf(paste(figures_folder, "M6A_eta_names.pdf", sep=""),width=10,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt.size,  
+        cols= cols_PCrnaseq, 
+        #label = TRUE,
+        raster = FALSE,
+        group.by = "names_level_5_clusters_eta") + theme(
+  plot.title = element_blank()) 
+dev.off()
+```
+
+### Panel 6B 
+
+```{r}
+features <- c("SUGCT", "AICDA","CXCR4",
+              "LMO2", "CD83", "BCL2A1", 
+              "BCL6", "IRF8", "MEF2B", "MS4A1", "PAX5",   
+              "PRDM1", "XBP1", "IRF4", "SLAMF7", "SSR4", "MZB1", "DERL3", "CREB3L2", "FKBP11",
+              "IGHG1","IGHG2", "IGHG4","IGHG4","IGHA1", "IGHA2","IGHM","IGHD",
+              "CCDC50", "FCMR",
+              "CD9", "CD44", 
+              "H2AFZ","MKI67", "TUBA1B", "TOP2A")
+```
+
+
+```{r}
+avgexpr_mat <- AverageExpression(
+  features = features,
+  PC_level5,
+  assays = "RNA",
+  return.seurat = F,
+  group.by = "names_level_5_clusters_eta",
+  slot = "counts")
+
+cell_types <- names(table(PC_level5$names_level_5_clusters_eta))
+mycolors <- list(cell_type = c(cols_PCrnaseq[cell_types]))
+mat <- as.data.frame(avgexpr_mat$RNA)
+colnames(mat) <- cell_types
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+
+input_mat <- t(apply(mat, MARGIN = 1, FUN = function(X) (X - min(X))/diff(range(X))))
+
+
+pdf(paste(figures_folder, "M6B_reduced_genes_heatmap.pdf", sep=""),width=5,height=7,paper='special') 
+library(pheatmap2)
+pheatmap2(input_mat,
+                annotation_col = annotation_col,
+                annotation_colors = mycolors,
+                annotation_names_col = F,
+                annotation_legend = F,
+                show_rownames=T, show_colnames = F, 
+                border_color = NA,
+                cluster_rows = F,
+                cluster_cols = F,
+                fontsize_row = 6,
+                gaps_row = c(3,6,11,20,28,30,33), 
+                gaps_col = c(1,2,5,8,12,14,17,22) 
+)
+
+library(grid)
+grid.ls(grid.force()) # "col_annotation" looks like it's the one to edit
+grid.gedit("col_annotation", gp = gpar(col="black"))
+dev.off()
+
+```
+
+
+
+
+### Panel 6G
+```{r}
+pdf(paste(figures_folder, "M6G_triad_activity.pdf", sep=""),width=5,height=7,paper='special') 
+Seurat::FeaturePlot(PC_level5_3P, 
+                          cols = c("lightgrey", "red"),
+                          features = c("PRDM1(+)", "XBP1(+)", "IRF4(+)"),
+                          reduction="umap", 
+                          raster = FALSE, 
+                          ncol = 1,
+                          pt.size = pt_size/3)
+dev.off()
+```
+
+
+### Panel 6H
+```{r}
+pdf(paste(figures_folder, "M6H_six5_activity.pdf", sep=""),width=5,height=7,paper='special') 
+Seurat::FeaturePlot(PC_level5_3P, 
+                          cols = c("lightgrey", "red"),
+                          features = c("SIX5(+)"),
+                          reduction="umap", 
+                          raster = FALSE, 
+                          ncol = 1,
+                          pt.size = pt_size)
+dev.off()
+```
+
+
+```{r}
+PC_level5$atac_groups <- revalue(PC_level5$names_level_5_clusters_eta,
+c("Dark Zone GCBC"="Dark Zone GCBC",
+"DZ migratory PC precursor"=NA,
+"Light Zone GCBC"="Light Zone GCBC",
+"PC committed Light Zone GCBC"="PC committed Light Zone GCBC",
+"Early PC precursor"="Early PC precursor",
+"PB committed early PC precursor"="PB",
+"Transitional PB"="PB",
+"PB"="PB",
+"IgG+ PC precursor"="IgG+ PC precursor",
+"preMature IgG+ PC"="preMature IgG+ PC",
+"Mature IgG+ PC"="Mature PC",
+"MBC derived IgG+ PC"="Mature PC",
+"Mature IgA+ PC"="Mature PC",
+"MBC derived IgA+ PC"="Mature PC",
+"class switch MBC"="class switch MBC",
+"MBC derived early PC precursor"="MBC derived PC precursor",
+"MBC derived PC precursor"="MBC derived PC precursor",
+"IgM+ early PC precursor"="Early PC precursor",
+"IgM+ PC precursor"="IgM+ PC precursor",
+"preMature IgM+ PC"="preMature IgM+ PC",
+"Mature IgM+ PC"="Mature PC",
+"Short lived IgM+ PC"=NA,
+"IgD PC precursor"="IgD PC precursor"))
+
+PC_level5_atac <- subset(PC_level5, atac_groups = NA)
+```
+
+```{r}
+color_palette <- c("#73787E", "#B8BCC1","#FECFC7" ,
+                   "#FF8E7B","#A13B53","#A6E1F4",
+                   "#198C19", "#FFD8B1","#586BA4",
+                   "#006600" ,"#323734","#9CC6CF","#035F72")
+
+cels_order <- c("Dark Zone GCBC",
+                "Light Zone GCBC",
+                "PC committed Light Zone GCBC",
+                "Early PC precursor",
+                "PB",
+                "IgG+ PC precursor",
+                "IgM+ PC precursor",
+                "IgD PC precursor",
+                "preMature IgG+ PC",
+                "preMature IgM+ PC",
+                "Mature PC",
+                "MBC derived PC precursor",
+                "class switch MBC")
+
+names(color_palette) <- cels_order
+
+PC_level5_atac$atac_groups <- factor(PC_level5_atac$atac_groups, levels = cels_order)
+```
+
+
+```{r}
+features <- c("PDK1", "TMEM198","ITM2C", "BHLHA15", "SLC38A2", "TSC22D3")
+```
+
+```{r}
+avgexpr_mat <- AverageExpression(
+  features = features,
+  PC_level5_atac,
+  assays = "RNA",
+  return.seurat = F,
+  group.by = "atac_groups",
+  slot = "counts")
+
+cell_types <- names(table(PC_level5_atac$atac_groups))
+mycolors <- list(cell_type = c(color_palette[cell_types]))
+mat <- as.data.frame(avgexpr_mat$RNA)
+annotation_col = data.frame(
+                    cell_type = cell_types) 
+rownames(annotation_col) <- cell_types
+
+input_mat <- t(apply(mat, MARGIN = 1, FUN = function(X) (X - min(X))/diff(range(X))))
+
+
+pdf(paste(figures_folder, "M6H_six5_targets_expression_heatmap.pdf", sep=""),width=5,height=7,paper='special') 
+library(pheatmap2)
+pheatmap2(input_mat,
+
+                annotation_col = annotation_col,
+                annotation_colors = mycolors,
+                annotation_names_col = F,
+                annotation_legend = F,
+                show_rownames=T, show_colnames = F, 
+                border_color = NA,
+                cluster_rows = F,
+                cluster_cols = F,
+                fontsize_row = 6,
+)
+
+library(grid)
+grid.ls(grid.force()) 
+grid.gedit("col_annotation", gp = gpar(col="black"))
+dev.off()
+
+```
+
+### Panel 6I
+```{r}
+library("readxl")
+library("tidyverse")
+library("ggpubr")
+
+# xlsx files
+bulk_RNA <- as.data.frame(read_excel(paste0(data_folder, "Xabi_aguirre_bulk_data.xlsx")))
+bulk_RNA <- bulk_RNA[,2:ncol(bulk_RNA)]
+bulk_RNA_melted <- melt(bulk_RNA)
+celltypes <- c(
+  "NBC" = 5, 
+  "CB" = 7,
+  "CC" = 7,
+  "MBC" = 8, 
+  "TPC" = 5, 
+  "BMPC" = 3, 
+  "MM" = 37
+)
+cell_type_v <- rep(names(celltypes), times = unname(celltypes))
+cell_type_v <- rep(cell_type_v, each=nrow(bulk_RNA))
+bulk_RNA_melted$cell_type <- cell_type_v
+bulk_RNA_melted$gene_name <- factor(bulk_RNA_melted$gene_name, levels = c("SIX5", 
+                                                                             "BHLHA15", "ITM2C",   "PDK1",
+                                                                             "SLC38A2", "TMEM198", "TSC22D3"))
+
+six5_bulk_palette <- c(
+  "NBC" = "#dcf0f4", 
+  "CB" = "#FDD0A2",
+  "CC" = "#FDAE6B",
+  "MBC" = "#035F72", 
+  "TPC" = "#A6E1F4", 
+  "BMPC" = "#324376", 
+  "MM" = "#009E73"
+)
+
+
+
+pdf(file=paste0(figures_folder, "M6H_six5_targets_bulk_expression_aguirre_et_al.pdf"),width = 10,height = 10)
+ggboxplot(bulk_RNA_melted, x = "cell_type", y = "value",
+  fill = "cell_type", 
+  x.text.angle = 45) +
+  facet_wrap(scales = "free_y", ~gene_name) + 
+  theme(legend.position="none", 
+    axis.title.x = element_blank()) + 
+        ylab("Bulk RNAseq expression") + 
+        scale_fill_manual(values = six5_bulk_palette)
+
+dev.off()
+```
+
+
+
+
+
+## SUPPLEMENTARY FIGRUES
+
+
+
+### S13C
+```{r}
+pdf(paste0(figures_folder, "S13C_Ig_and_MBC_expression.pdf"),width=10,height=8,paper='special')
+Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHG1", "IGHG2", "IGHG3", "BANK1", 
+                                   "IGHG4", "IGHA1", "IGHA2", "CELF2",
+                                   "IGHD",  "IGHE",  "IGHM", "TXNIP"           
+                        ), 
+                      reduction="umap", 
+                      raster = TRUE, 
+                      ncol = 4, 
+                      order = FALSE,
+                      pt.size = pt_size)
+                      #pt.size = pt_size/12)
+dev.off()
+```
+
+### S13D
+
+
+```{r gene_sig}
+re_sig <- c(
+"DNAJB11",
+"DNAJC1",
+"DNAJC3",
+"EDEM1",
+"EDEM2",
+"EDEM3",
+"NGLY1",
+"OS9",
+"SEC13",
+"SEC23B",
+"SEC24A",
+"SEC24D",
+"SEC31A",
+"SEC61A1",
+"SEC61B",
+"SEC61G",
+"SEC62",
+"SEC63",
+"SEL1L",
+"SIL1",
+"STT3A",
+"STT3B",
+"UBXN4",
+"XBP1",
+"ATF4",
+"ATF6",
+"CANX",
+"CALR",
+"CKAP4",
+"DAD1",
+"DERL1",
+"DERL2",
+"DERL3",
+"DDOST",
+"ERLEC1",
+"ERO1A",
+"ERN1",
+"EIF2AK3",
+"EIF2AK4",
+"HSP90B1",
+"HSPA1B",
+"HSPA5",
+"HERPUD1",
+"HYOU1",
+"LMAN1",
+"LMAN2",
+"MAN1A1",
+"MAN1A2",
+"MOGS",
+"MBTPS1",
+"PREB",
+"P4HB",
+"PDIA3",
+"PDIA4",
+"PDIA6",
+"RPN1",
+"RPN2",
+"RRBP1",
+"SAR1B",
+"SELENOS",
+"SSR1",
+"SSR2",
+"SSR3",
+"SSR4",
+"TXNDC5",
+"TRAM1",
+"UBE2G1",
+"UBE2J1",
+"VCP",
+"WFS1"
+)
+```
+
+```{r}
+library(UCell)
+PC_level5 <- AddModuleScore_UCell(
+    obj = PC_level5,
+    features = list(RE_signature = re_sig),
+    name = ''
+  )
+```
+
+
+```{r}
+pdf(paste(figures_folder, "S13D_RE_signature_Vln.pdf", sep=""),width=5,height=5,paper='special')
+Seurat::VlnPlot(PC_level5, 
+                        features = c("RE_signature"), 
+                        pt.size = 0, 
+                        cols = cols_PCrnaseq,
+                        group.by = "names_level_5_clusters_eta") + NoLegend() + 
+  theme(
+    axis.title = element_blank(), 
+    axis.text.x = element_blank()
+  )
+dev.off() 
+```
+
+
+### S13H
+```{r}
+pdf(paste(figures_folder, "S13H_VDR_CREB_activity.pdf", sep=""),width=7,height=5,paper='special')
+Seurat::FeaturePlot(PC_level5_3P, 
+                      features = c("VDR(+)", "CREB3(+)"), 
+                      reduction="umap", 
+                      raster = TRUE, 
+                      ncol = 2,
+                      cols = c("lightgrey", "red"),
+                      order = TRUE,
+                      pt.size = pt_size) & NoLegend()
+dev.off()
+```
+
+
+### S13I
+```{r}
+names <- c(
+  "CD14 mono" = 0.001,
+  "CD16 mono" = 0.001,
+  "CD4 naive" = 0.001,
+  "CD4 CTL" = 0.001,
+  "CD4 TCM 1" = 0.001,
+  "CD4 TEM 3" = 0.000,
+  "Treg naive" = 0.002,
+  "Treg memory" = 0.001,
+  "CD8 naive" = 0.001,
+  "CD8 TCM 1" = 0.001,
+  "CD8 TEM 4" = 0.002,
+  "ILC" = 0.005,
+  "MAIT" = 0.002,
+  "NK 2" = 0.002,
+  "cDC1" = 0.000,
+  "cDC2" = 0.000,
+  "pDC" = 0.000,
+  "B naive kappa" = 0.001,
+  "B naive lambda" = 0.001,
+  "B intermediate kappa" = 0.004,
+  "B intermediate lambda" = 0.002,
+  "B memory kappa" = 0.003,  
+  "B memory lambda" = 0.002,  
+  "B plasmablast" = 0.014,  
+  "B plasma" = 0.041  
+)
+
+df <- as.data.frame(names)
+colnames(df) <- "PB_expression_value"
+df$cell_types <- rownames(df)
+df$cell_types <- factor(df$cell_types, levels = names(names))
+df$highlight <- c(rep("no", (length(names)-2)), "yes1", "yes2")
+
+```
+
+```{r}
+plot <- ggplot(df, aes(x = cell_types, y = PB_expression_value, fill = highlight ) ) +
+    geom_bar(stat = "identity" ) +
+    scale_fill_manual( values = c("yes2"="tomato", "yes1"="#FF9579","no"="grey" ), guide = FALSE ) + 
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), 
+          axis.title = element_blank(), 
+          axis.text = element_text(size = 12)
+      ) 
+
+pdf(paste(figures_folder, "S13I_PB-scRNAseqdata_barplot.pdf", sep=""),width=12,height=5,paper='special')
+print(plot) 
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
