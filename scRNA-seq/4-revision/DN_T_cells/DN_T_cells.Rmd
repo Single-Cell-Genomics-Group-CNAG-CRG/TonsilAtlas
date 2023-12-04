@@ -1,0 +1,222 @@
+---
+title: 'Validate heterogeneity gamma-delta T-cells'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here, we will perform the analysis needed to answer this concern from reviewer #3:
+
+*"Presence of double negative CD4-/CD8- cells. As a caution to the authors, double negative T cells have been typically described (particularly in autoimmunity) based on protein expression. Data for these cells in tonsil come from scRNAseq and not CITE seq (if I understood correctly). As CD4 particularly is not a high abundance transcript, this data could represent CD4 T cells (where CD4 is not detected), unless confirmed by protein."*
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(UCell)
+library(here)
+library(scCustomize)
+library(Nebulosa)
+library(harmony)
+library(ggrastr)
+```
+
+
+## Define parameters
+
+```{r}
+# Source paths and functions
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/utils_figure3.R"))
+colors_clusters <- c(
+  "CD4 T" = "#9d402f",
+  "CD8 T" = "#d07b98",
+  "NK" = "#71374b",
+  "ILC"= "#906f86",
+  "DN" = "#d7a93b"
+)
+```
+
+
+## Load data
+
+```{r}
+cytotoxic_cite <- readRDS(path_to_save_cite_cytotoxic)
+cytotoxic_cite <- subset(cytotoxic_cite, subset = annotation_prob >= 0.6)
+selected <- c("Naive CD8 T", "CD8 T", "NK", "ILC", "DN")
+cytotoxic_cite <- cytotoxic_cite[, cytotoxic_cite$annotation_figure_1 %in% selected]
+cd4_cite <- readRDS(path_to_save_cite_cd4)
+cd4_cite <- subset(cd4_cite, subset = annotation_figure_2_prob >= 0.6)
+cd4_cite$annotation_figure_1 <- "CD4 T"
+merged <- merge(cd4_cite, cytotoxic_cite)
+```
+
+
+# Process
+
+```{r}
+DefaultAssay(merged) <- "ADT"
+merged <- NormalizeData(merged, normalization.method = "CLR", margin = 2)
+DefaultAssay(merged) <- "RNA"
+merged <- merged %>%
+  FindVariableFeatures(nfeatures = 1000) %>%
+  ScaleData() %>%
+  RunPCA() %>%
+  RunHarmony(group.by.vars = "gem_id", dims.use = 1:20, reduction.save = "harmony_rna")
+# merged <- merged %>%
+#   ScaleData(features = rownames(merged[["ADT"]]@counts)) %>%
+#   RunPCA(features = rownames(merged[["ADT"]]@counts)) %>%
+#   RunHarmony(group.by.vars = "gem_id", dims.use = 1:15, reduction.save = "harmony_prot")
+# merged <- FindMultiModalNeighbors(
+#   merged,
+#   reduction.list = list("harmony_rna", "harmony_prot"), 
+#   dims.list = list(1:20, 1:20),
+#   modality.weight.name = c("RNA.weight", "prot.weight")
+# )
+merged <- RunUMAP(
+  merged,
+  dims = 1:20,
+  reduction = "harmony_rna", 
+  reduction.name = "umap_rna"
+)
+merged$annotation <- merged$annotation_figure_1
+merged$annotation[merged$annotation == "Naive CD8 T"] <- "CD8 T"
+merged$annotation <- factor(merged$annotation, names(colors_clusters))
+DimPlot(merged, group.by = "annotation_figure_1", reduction = "umap_rna")
+DefaultAssay(merged) <- "ADT"
+FeaturePlot(merged, c("CD4", "CD8"))
+```
+
+
+# Check protein expression of CD4 and CD8 in DN cells
+
+```{r}
+umap_annotation_fig1 <- DimPlot(
+  merged,
+  group.by = "annotation",
+  reduction = "umap_rna",
+  cols = colors_clusters
+)
+umap_annotation_fig1 <- umap_annotation_fig1 +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 8),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    plot.title = element_blank()
+  )
+umap_annotation_fig1 <- rasterize(umap_annotation_fig1, dpi = 600)
+umap_annotation_fig1
+levels(merged$annotation) <- names(colors_clusters)
+Idents(merged) <- "annotation"
+stacked_violin_plot <- Stacked_VlnPlot(
+  seurat_object = merged,
+  features = c("CD3", "CD4", "CD8"),
+  x_lab_rotate = TRUE,
+  colors_use = colors_clusters
+)
+stacked_violin_plot <- stacked_violin_plot &
+  theme(axis.title = element_text(size = 8),
+        axis.text = element_text(size = 7))
+stacked_violin_plot
+cd4_cutoff <- 1.25
+cd8_cutoff <- 1
+merged$CD4 <- merged[["ADT"]]@data["CD4", ]
+merged$CD8 <- merged[["ADT"]]@data["CD8", ]
+scatter_plot_all <- merged@meta.data %>%
+  ggplot(aes(CD4, CD8, color = annotation)) +
+    facet_grid(~annotation) +
+    geom_point(size = 0.5) +
+    geom_vline(xintercept = 0.8, linetype = "dashed", color = "black") +
+    geom_hline(yintercept = 0.7, linetype = "dashed", color = "black") +
+    scale_color_manual(values = colors_clusters) +
+    theme_classic() +
+    theme(
+      legend.title = element_blank(),
+      axis.title = element_text(size = 9),
+      axis.text = element_text(size = 8),
+      legend.text = element_text(size = 8))
+scatter_plot_all <- scatter_plot_all + theme(legend.position = "none")
+(umap_annotation_fig1 | stacked_violin_plot) / scatter_plot_all
+```
+
+Percentages:
+
+```{r}
+pct_df <- merged@meta.data %>%
+  mutate(group = case_when(
+    CD4 >= cd4_cutoff & CD8 >= cd8_cutoff ~ "CD4+CD8+",
+    CD4 < cd4_cutoff & CD8 >= cd8_cutoff ~ "CD4-CD8+",
+    CD4 >= cd4_cutoff & CD8 < cd8_cutoff ~ "CD4+CD8-",
+    CD4 < cd4_cutoff & CD8 < cd8_cutoff ~ "CD4-CD8-",
+  )) %>%
+  group_by(group, annotation) %>%
+  summarize(n_cells = n()) %>%
+  group_by(annotation) %>%
+  mutate(total_cells = sum(n_cells), pct_cells = n_cells / total_cells * 100)
+pct_gg <- pct_df %>%
+  mutate(annotation = factor(annotation, rev(names(colors_clusters)))) %>%
+  ggplot(aes(annotation, pct_cells, fill = group)) +
+    geom_col() +
+    ylab("Percentage of Cells (%)") +
+    scale_fill_manual(values = c("#7fc97f", "#beaed4", "#fdc086", "#ffff99")) +
+    coord_flip() +
+    theme_classic() +
+    theme(legend.title = element_blank(),
+          axis.title.y = element_blank(),
+          axis.title.x = element_text(size = 8),
+          axis.text = element_text(size = 7),
+          legend.text = element_text(size = 7),
+          legend.position = "bottom")
+pct_gg
+```
+
+
+# Save
+
+```{r}
+figure <- (umap_annotation_fig1 | stacked_violin_plot) / scatter_plot_all
+ggsave(
+  plot = figure,
+  filename = here("results/paper/figures/revision_dn_t_cells_cite_seq.pdf"),
+  width = 19,
+  height = 15,
+  units = "cm"
+)
+ggsave(
+  plot = pct_gg,
+  filename = here("results/paper/figures/revision_dn_t_cells_cite_seq_percentages.pdf"),
+  width = 9,
+  height = 7.5,
+  units = "cm"
+)
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
