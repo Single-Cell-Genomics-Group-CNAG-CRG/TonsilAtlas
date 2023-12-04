@@ -1,0 +1,7 @@
+fastqs,sample,library_type
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/cDNA/lane2,altbaco5_45sf3wul,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/cDNA/lane4,altbaco5_45sf3wul,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/cDNA/lane1,altbaco5_45sf3wul,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/cDNA/lane3,altbaco5_45sf3wul,Gene Expression
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/HTO/lane2,altbaco5_45sf3wul_HTO,Antibody Capture
+/scratch/devel/rmassoni/tonsil_atlas/current/scRNA-seq/1-cellranger_mapping/projects/BCLLATLAS_54/jobs/altbaco5_45sf3wul/fastq/HTO/lane1,altbaco5_45sf3wul_HTO,Antibody Capture

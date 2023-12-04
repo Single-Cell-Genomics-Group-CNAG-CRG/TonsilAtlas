@@ -1,0 +1,8 @@
+id,name,read,pattern,sequence,feature_type
+Antibody_1,Antibody_1,R2,^(BC),GTCAACTCTTTAGCG,Antibody Capture
+Antibody_2,Antibody_2,R2,^(BC),TGATGGCCTATTGGG,Antibody Capture
+Antibody_3,Antibody_3,R2,^(BC),TTCCGCCTCTCTTTG,Antibody Capture
+Antibody_4,Antibody_4,R2,^(BC),AGTAAGTTCAGCGTA,Antibody Capture
+Antibody_5,Antibody_5,R2,^(BC),AAGTATCGTTTCGCA,Antibody Capture
+Antibody_6,Antibody_6,R2,^(BC),GGTTGCCAGATGTCA,Antibody Capture
+Antibody_7,Antibody_7,R2,^(BC),TGTCTTTCCTGCCAG,Antibody Capture
