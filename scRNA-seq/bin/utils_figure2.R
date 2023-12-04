@@ -176,7 +176,7 @@ colors_rna <- c(
   "Tfh T:B border" = "#67a9cf",
   "Tfh-LZ-GC" = "#3690c0",
   "GC-Tfh-SAP" = "#02818a",
-  "GC-Tfh-0X40"= "#016c59",
+  "GC-Tfh-OX40"= "#016c59",
   "Tfh-Mem" = "#014636",
   "T-Trans-Mem" = "#fd8d3c",
   "T-Eff-Mem" = "#e31a1c",

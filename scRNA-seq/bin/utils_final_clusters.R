@@ -198,3 +198,189 @@ cols_fig1 <- c(
 
 
 
+colors_20230508 <- list(
+  "myeloid" = c(
+    "DC1 precursor" = "#ff99d6",
+    "DC1 mature" = "#bf408c",
+    "DC2" = "#f99fa7",
+    "DC3" = "#e06c6c",
+    "DC4" = "#8f523d",
+    "DC5" = "#d73919",
+    "IL7R DC" = "#e1b40e",
+    "aDC1" = "#e2f155",
+    "aDC2" = "#b4d84b",
+    "aDC3" = "#6ead34",
+    "M1 Macrophages" = "#3f56ca",
+    "Monocytes" = "#cd87de",
+    "Mast" = "#825e7b",
+    "Neutrophils" = "#aa7c60",
+    "Cycling" = "gray",
+    "MMP Slancytes" = "#91f8ca",
+    "C1Q Slancytes" = "#68cde8",
+    "SELENOP Slancytes" = "#519bdb",
+    "ITGAX Slancytes" = "#7ef1eb"
+  ),
+  "FDC" = c(
+    "FDC" = "#632c63",
+    "cycling FDC" = "#cc66cc",
+    "CD14+CD55+ FDC" = "#e4624e",
+    "COL27A1+ FDC" = "#92e8df",
+    "FRC" = "yellow3",
+    "MRC" = "limegreen",
+    "unknown" = "#999999"
+  ),
+  "epithelial" = c(
+    "Basal cells" = "#1b9e77",
+    "VEGFA+" = "#d95f02",
+    "Surface epithelium" = "#7570b3",
+    "Outer surface" = "#e7298a",
+    "Crypt" = "#66a61e",
+    "FDCSP epithelium" = "#e6ab02"
+  ),
+  "PC" = c(
+    "Dark Zone GCBC" = "#76797e",             
+    "DZ migratory PC precursor" = "#d74403",
+    "Light Zone GCBC" = "#b8bac1",
+    "PC committed Light Zone GCBC" = "#fccec4",
+    "Early PC precursor" = "#fd887d",
+    "PB committed early PC precursor" = "#eebecb",
+    "Transitional PB" = "#e57d95",
+    "PB" = "#c24667",           
+    "IgG+ PC precursor" = "#a3e0ee",
+    "preMature IgG+ PC" = "#0a8fc8",
+    "Mature IgG+ PC" = "#304074",
+    "MBC derived IgG+ PC" = "#546a9d",
+    "Mature IgA+ PC" = "#4a322e",
+    "MBC derived IgA+ PC" = "#866a5a",
+    "csMBC" = "#035e6f",
+    "MBC derived early PC precursor" = "#418b9d",
+    "MBC derived PC precursor" = "#96c2cf",
+    "IgM+ early PC precursor" = "#62b160",     
+    "IgM+ PC precursor" = "#1a8e18",
+    "preMature IgM+ PC" = "#016400",
+    "Mature IgM+ PC" = "#013701",
+    "Short lived IgM+ PC" = "#92cc92",
+    "IgD PC precursor" = "#f3ddc2"
+  ),
+  "Cytotoxic" = c(
+    "Naive CD8 T" = "#ffb6c1",
+    "SCM CD8 T" = "#ffc4a6",
+    "CM CD8 T" = "#e46c70",
+    "RM CD8 T" = "#ce262f",
+    "RM CD8 activated T" = "#862222",
+    "CD8 Tf" = "#74b2d0",
+    "DC recruiters CD8 T" = "#9E8073", 
+    "IFN+ CD8 T" = "#441815",
+    "EM CD8 T" = "#E58F47",
+    "ZNF683+ CD8 T" = "#a2c8c7",
+    "non-Vδ2+ γδ T" = "#5ea19e",
+    "MAIT/Vδ2+ γδ T" = "#008080",
+    "CD16-CD56+ NK" = "#a19d41",
+    "CD16-CD56- NK" = "#fcf75e",
+    "CD16+CD56- NK" = "#cec94f",
+    "ILC1" = "#80eda8",
+    "NKp44+ ILC3" = "#6ac18a",
+    "NKp44- ILC3" = "#55976d",
+    "DN"= "#003b59" 
+  ),
+  "CD4" = c(
+    "Naive" = "gray88",
+    "CM Pre-non-Tfh" = "gray71",
+    "CM PreTfh" = "gray59",
+    "Tfh T:B border" = "#67a9cf",
+    "Tfh-LZ-GC" = "#3690c0",
+    "GC-Tfh-SAP" = "#02818a",
+    "GC-Tfh-OX40"= "#016c59",
+    "Tfh-Mem" = "#014636",
+    "T-Trans-Mem" = "#fd8d3c",
+    "T-Eff-Mem" = "#e31a1c",
+    "T-helper" = "#800026",
+    "Eff-Tregs" = "#df65b0",
+    "Eff-Tregs-IL32" = "#e7298a",
+    "Tfr" = "#ce1256",
+    "cycling T" = "#e9001b"
+  ),
+  "PDC" = c(
+    "PDC" = "#f032e6",
+    "IFN1+ PDC" = "#510791"
+  ),
+  "NBC_MBC" = c(
+    "NBC" = "#dbeef2",
+    "NBC early activation" = "#95cce0",
+    "NBC IFN-activated" = "#4d828c",
+    "NBC CD229+" = "#8a73ae",
+    "Early GC-commited NBC" = "#74c9b8",
+    "GC-commited NBC" = "#6dcbb4",
+    "preGC" = "#6ebf90",
+    "Proliferative NBC" = "#205b69",
+    "GC DZ Noproli" = "#558e1b",
+    "Early MBC" = "#ebe2c3",
+    "ncsMBC" = "#dccb9b",
+    "ncsMBC FCRL4/5+" = "#bca041",
+    "csMBC" = "#6f663a",
+    "csMBC FCRL4/5+" = "#a29158",
+    "MBC FCRL5+" = "#332d1b"
+  ),
+  "GCBC" = c(
+    "DZ early Sphase"= "#036ebf",
+    "DZ late Sphase" = "#004f89",
+    "DZ early G2Mphase" = "#6f65a1",
+    "DZ late G2Mphase" = "#867fa8",
+    "DZ cell cycle exit" = "#2e2d4c",
+    "DZ non proliferative" = "#336103",
+    "DZ_LZ transition" = "#d0efa1",
+    "LZ" = "#fbf397",
+    "LZ_DZ reentry commitment" = "#e1efef",
+    "LZ proliferative" = "#97d1f8",
+    "LZ_DZ transition" = "#4eb0f9",
+    "Precursor MBCs" = "#c4b771",
+    "Reactivated proliferative MBCs" = "#574b2e",
+    "PC committed Light Zone GCBC" = "#fccac3"
+  ),
+  level_1 = c(
+    "NBC_MBC" = "#a6cee3",
+    "GCBC" = "#398D9F",
+    "PC" = "#032872",
+    "CD4_T" = "#a50000",
+    "Cytotoxic" = "#67253a",
+    "myeloid" = "#6ac087",
+    "FDC" = "#d5ff00",
+    "PDC" = "#f032e6",
+    "epithelial" = "#ffdc9f",
+    "preBC" = "#45d7c7",
+    "preTC" = "#e87281"
+  )
+)
+
+cols_fig1 <- c(
+  "NBC" = "#dcf0f4",
+  "Activated NBC" = "#7bc6d6", 
+  "GCBC" = "#398D9F",
+  "MBC" = "#025566", 
+  "PC" = "#032872", 
+  
+  "CD4 T" = "#a50000", 
+  "Naive CD4 T" = "#eeb3a4", 
+  "Naive CD8 T" = "#e5b7c6", 
+  "CD8 T" = "#cb708e", 
+  "NK" = "#67253a", 
+  "DN" = "#c15260", 
+  "ILC" = "#88657f",
+  "cycling T"  = "#cc0000",
+  
+  "preB/T" = "#4363d8", 
+  
+  
+  "DC" = "#b6dec3", 
+  "Mono/Macro" = "#6ac087", 
+  "Mast" = "#3a8b55", 
+  "Granulocytes" = "#32d732", 
+  "cycling myeloid" = "#2b6840",
+  
+  "FDC" = "#d5ff00", 
+  "cycling FDC" = "#aacc00", 
+  
+  "epithelial" = "#ffdc9f", 
+  
+  "PDC" = "#f032e6"
+)

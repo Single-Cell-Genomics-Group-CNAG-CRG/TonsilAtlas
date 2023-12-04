@@ -469,3 +469,60 @@ find_markers_subclusters <- function(seurat_obj, var, pattern) {
   names(markers_interest) <- clusters_interest
   markers_interest
 }
+
+
+updateAnnotation <- function(seurat_obj,
+                            refAnnotation = "20220215",
+                            newAnnotation = "20220619") {
+  dict_20220619 <- c(
+    "GC-Tfh-0X40" = "GC-Tfh-OX40",
+    "non-GC-Tf-regs" = "Eff-Tregs-IL32",
+    "GC-Tf-regs" = "Tfr",
+    "IFN CD8 T" = "IFN+ CD8 T",
+    "CXCR6+ RM CD8 T" = "RM CD8 activated T",
+    "IL7R MMP12 macrophages" = "MMP Slancytes",
+    "C1Q HLA macrophages" = "C1Q Slancytes",
+    "SELENOP FUCA1 PTGDS macrophages" = "SELENOP Slancytes",
+    "ITGAX ZEB2 macrophages" = "ITGAX Slancytes",
+    "Mast cells" = "Mast",
+    "LZ FDC" = "FDC",
+    "DZ FDC" = "COL27A1+ FDC",
+    "DZ_Sphase" = "DZ early Sphase",
+    "DZ_Sphase_HistoneHigh" = "DZ late Sphase",
+    "DZ_G2M_HistoneHigh" = "DZ early G2Mphase",
+    "DZ_G2M_CCNBHigh"= "DZ late G2Mphase",
+    "DZ-cell cycle exit" = "DZ cell cycle exit",
+    "DZ-nonproliferative" = "DZ cell cycle exit",
+    "DZ-nonproliferative_FOXP1hi"= "DZ non proliferative",
+    "DZ/LZ" = "DZ_LZ transition",
+    "DZ/LZ" = "DZ_LZ transition",
+    "LZ" = "LZ",
+    "LZ-BCL2A1 neg"= "LZ",
+    "LZ-DZ-re-entry early commitment" = "LZ_DZ reentry commitment",
+    "LZ-proliferative_BCL2A1pos" = "LZ proliferative",
+    "LZ-proliferative_BCL2A1neg" = "LZ_DZ transition",
+    "MBC-like_nonproli" = "Precursor MBCs",
+    "MBC-like_proli1" = "Precursor MBCs",
+    "MBC-like_proli2"= "Reactivated proliferative MBCs",
+    "MBC-like_proli3" = "Reactivated proliferative MBCs",
+    "MBC-like_FCRL4+"= "Reactivated proliferative MBCs",
+    "PC-precursors" = "PC committed Light Zone GCBC",
+    "class switch MBC" = "csMBC",
+    "Neutrophil Granulocytes" = "Neutrophils",
+    
+    
+    # Update post-revision
+    "MAIT" = "MAIT/Vδ2+ γδ T",
+    "TCRVδ+ gd T" = "non-Vδ2+ γδ T",
+    "CD56+ gd T" = "ZNF683+ CD8 T",
+    "Nksig CD8 T" = "EM CD8 T"
+  )
+  oldAnnot <- paste("annotation", refAnnotation, sep = "_")
+  newAnnot <- paste("annotation", newAnnotation, sep = "_")
+  seurat_obj@meta.data[[newAnnot]] <- as.character(seurat_obj@meta.data[[oldAnnot]])
+  dictSub <- dict_20220619[names(dict_20220619) %in% unique(seurat_obj@meta.data[[oldAnnot]])]
+  for (cellType in names(dictSub)) {
+    seurat_obj@meta.data[[newAnnot]][seurat_obj@meta.data[[newAnnot]] == cellType] <- dictSub[cellType]
+  }
+  seurat_obj
+}
