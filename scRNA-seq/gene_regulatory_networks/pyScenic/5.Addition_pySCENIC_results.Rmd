@@ -1,0 +1,112 @@
+---
+title: "Addition of pySCENIC results to a given Seurat Object"
+author: "Sergio Aguilar Fernández"
+date: "7/23/2021"
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      out.width = "100%", 
+                      fig.align='center',
+                      fig.path="figures_compiled_html/",
+                      message=FALSE, 
+                      warning = FALSE)
+```
+
+
+## Introduction
+In this Rmarkdown document we are going to add the regulon activity results in a given seurat object and obtain the list of targets in each computed regulon.
+
+
+## Setting up 
+
+### Libraries 
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+```
+
+
+### Parameters 
+
+```{r}
+cell_type <- "name_of_the_cell_type"
+project_name <- "name_of_the_project"
+
+#Folder structure
+base_folder <- paste0("{path_to_cell_type}", cell_type)
+data_folder <- paste0(base_folder, "/data/")
+pyscenic_folder <-paste0("{path_to_cell_type}", project_name)
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+## Load data 
+```{r load data}
+initial_seurat_object <- readRDS(paste0(data_folder, cell_type, "_seu_obj_level_5_eta.rds"))
+auc_mtx <- read.csv(paste(pyscenic_folder, "results/pyscenic_output/", project_name, "_auc.csv", sep=""), row.names = 1, check.names=FALSE)
+```
+
+
+## Include pySCENIC results 
+
+### Subset 3P cells
+```{r}
+Idents(initial_seurat_object) <- "assay"
+seurat_object <- subset(
+  initial_seurat_object,
+  cells = colnames(initial_seurat_object)[Idents(initial_seurat_object) == "3P"]
+)
+table(seurat_object$assay)
+```
+
+```{r}
+# Subset the complet auc_mtx to cell_type specific 3P cells
+auc_mtx_s <- auc_mtx[colnames(seurat_object),]
+```
+
+### include pySCENIC results
+```{r}
+scenic_assay <- CreateAssayObject(counts = t(auc_mtx_s))
+# add this assay to the previously created Seurat object
+seurat_object[["pySCENIC"]] <- scenic_assay
+# Validate that the object now contains multiple assays
+Assays(seurat_object)
+```
+
+```{r}
+PC_level5 <- readRDS(paste0(data_folder, cell_type, "_seu_obj_level_5_eta_3P_withpyscenic.rds"))
+```
+
+## Save target list 
+```{r}
+regulons_mtx <- read.csv(paste0(pyscenic_folder, "results/pyscenic_output/", project_name, "_regulons.csv"), row.names = 1, check.names=FALSE) 
+
+list_of_regs <- list()
+i <- 1
+while( i <= length(colnames(regulons_mtx))) {
+        
+  for (TF_int in colnames(regulons_mtx)){
+            genes_in_regulon <- rownames(regulons_mtx)[which(regulons_mtx[,TF_int] == 1)]
+            
+            list_of_regs[[i]] <- genes_in_regulon
+            i <- i + 1
+  }
+  
+}
+    
+names(list_of_regs) <- gsub('.{3}$', '', colnames(regulons_mtx))
+saveRDS(list_of_regs, paste0(pyscenic_folder, "results/pyscenic_output/", project_name, "_regulons_and_targets.rds"))
+```
+
