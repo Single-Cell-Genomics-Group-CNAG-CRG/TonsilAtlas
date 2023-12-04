@@ -1,11 +1,18 @@
-donor_id,hospital,sex,age,age_group
-BCLL-2-T,Clinic,male,65,old_adult
-BCLL-6-T,Clinic,male,35,young_adult
-BCLL-8-T,CIMA,male,4,kid
-BCLL-9-T,CIMA,male,5,kid
-BCLL-10-T,CIMA,male,3,kid
-BCLL-11-T,CIMA,female,5,kid
-BCLL-12-T,CIMA,female,3,kid
-BCLL-13-T,CIMA,female,5,kid
-BCLL-14-T,CIMA,male,26,young_adult
-BCLL-15-T,CIMA,male,33,young_adult
+donor_id,hospital,sex,age,age_group,cause_for_tonsillectomy,cohort_type,comments
+BCLL-2-T,Clinic,male,65,old_adult,tonsil removed during surgery for benign squamous pharyngeal papillomatosis,discovery,NA
+BCLL-6-T,Clinic,male,35,young_adult,sleep apnea,discovery,NA
+BCLL-8-T,CIMA,male,4,child,tonsillitis,discovery,NA
+BCLL-9-T,CIMA,male,5,child,tonsillitis,discovery,NA
+BCLL-10-T,CIMA,male,3,child,tonsillitis,discovery,NA
+BCLL-11-T,CIMA,female,5,child,tonsillitis,discovery,NA
+BCLL-12-T,CIMA,female,3,child,tonsillitis,discovery,NA
+BCLL-13-T,CIMA,female,5,child,tonsillitis,discovery,NA
+BCLL-14-T,CIMA,male,26,young_adult,sleep apnea,discovery,NA
+BCLL-15-T,CIMA,male,33,young_adult,sleep apnea,discovery,NA
+BCLL-20-T,Newcastle,male,23,young_adult,tonsillitis,validation,original id: TIP01
+BCLL-21-T,Newcastle,female,19,young_adult,tonsillitis,validation,original id: TIP02
+BCLL-22-T,Newcastle,female,22,young_adult,tonsillitis,validation,original id: TIP03
+BCLL-24-T,Clinic,male,63,old_adult,tonsil removed during surgery for superficial squamous carcinoma of the laryngeal vocal cord,validation,NA
+BCLL-25-T,Clinic,female,25,young_adult,tonsillitis,validation,NA
+BCLL-26-T,Clinic,male,56,old_adult,sleep apnea,validation,NA
+BCLL-28-T,Newcastle,male,28,young_adult,tonsillitis,validation,original id: TIP04
