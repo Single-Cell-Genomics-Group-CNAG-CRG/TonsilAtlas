@@ -1,0 +1,218 @@
+---
+title: 'Integrate discovery and validation cohorts'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aim of this notebook is to integrate the both discovery and validation cohorts. We will classify cells from validation cohort into one of the 9 compartments of annotation_level_1. Subsequently, we will subset to each of those compartments, so that in subsequent notebooks we can classify them at a deep level.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(caret)
+library(class)
+library(harmony)
+library(here)
+library(glue)
+library(DT)
+```
+
+
+## Define parameters
+
+```{r}
+path_to_discovery <- here("scRNA-seq/results/R_objects/final_clusters/20220215/20220215_tonsil_atlas_rna_seurat_obj.rds")
+path_to_validation <- here("scRNA-seq/results/R_objects/seurat_objects_revision/2.1-seurat_object_barcelona_newcastle_multiome_merged.rds")
+
+
+# Misc
+label_var <- "annotation_level_1"
+batch_var <- "type"
+
+# Source key functions and variables
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/SLOcatoR_functions.R"))
+```
+
+
+## Read data
+
+```{r}
+reference <- readRDS(path_to_discovery)
+query <- readRDS(path_to_validation)
+sequencing_metadata_multiome <- read_csv(here("multiome/1-cellranger_mapping/data/tonsil_atlas_metadata_multiome.csv"))
+```
+
+
+# Merge
+
+```{r}
+# Define new variables for label transfer
+reference$type <- ifelse(
+  reference$assay == "3P",
+  "discovery_scRNA",
+  "discovery_multiome"
+)
+query$assay <- ifelse(
+  query$gem_id %in% sequencing_metadata_multiome$gem_id,
+  "multiome",
+  "3P"
+)
+query$type <- ifelse(
+  query$assay == "3P",
+  "validation_scRNA",
+  "validation_multiome"
+)
+reference$batch <- reference@meta.data[[batch_var]]
+reference$label <- reference@meta.data[[label_var]]
+reference$annotation_probability <- NA
+reference$UMAP1 <- reference$UMAP_1_level_1
+reference$UMAP2 <- reference$UMAP_2_level_1
+query$label <- NA
+query$annotation_probability <- NA
+query$batch <- query$type
+query$UMAP1 <- NA
+query$UMAP2 <- NA
+
+
+# Find common columns and subset
+metadata_reference <- reference@meta.data
+metadata_query <- query@meta.data
+saveRDS(metadata_reference, here("scRNA-seq/results/R_objects/seurat_objects_revision/cell_metadata_discovery_cohort.rds"))
+saveRDS(metadata_query, here("scRNA-seq/results/R_objects/seurat_objects_revision/cell_metadata_validation_cohort.rds"))
+common_cols <- intersect(
+  colnames(reference@meta.data),
+  colnames(query@meta.data)
+)
+reference@meta.data <- reference@meta.data[, common_cols]
+query@meta.data <- query@meta.data[, common_cols]
+
+
+# Merge
+merged <- merge(x = reference, y = query)
+rm(reference)
+gc()
+```
+
+
+## Integrate
+
+Let us start by finding the batch-specific highly variable features (HVG):
+
+```{r}
+shared_features <- find_assay_specific_features(merged, assay_var = "type")
+```
+
+Integrate with Harmony:
+
+```{r}
+# Integrate
+merged <- integrate_assays(
+  merged,
+  assay_specific = TRUE,
+  assay_var = "type",
+  shared_hvg = shared_features,
+  n_dim = 30
+)
+merged <- RunUMAP(merged, dims = 1:30, reduction = "harmony")
+DimPlot(merged, group.by = "batch", split.by = "batch")
+```
+
+
+
+# Transfer labels
+
+```{r}
+# Define training and test sets
+merged$type2 <- ifelse(
+  str_detect(merged$type, "discovery"),
+  "reference",
+  "query"
+)
+data_sets <- split_training_and_test_sets(
+  merged,
+  split_var = "type2",
+  referece_label = "reference",
+  query_label = "query",
+  reduction = "harmony",
+  n_dims = 30
+)
+
+
+# Transfer label
+annotation_query_df <- transfer_label(
+  seurat_obj = merged,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  k = 10,
+  response_var = "label"
+)
+
+# Transfer UMAP coords
+umap_test_df <- transfer_umap_coords(
+  seurat_obj = merged,
+  training_set = data_sets$training_set,
+  test_set = data_sets$test_set,
+  umap1_var = "UMAP1",
+  umap2_var = "UMAP2",
+  k = 10
+)
+```
+
+
+
+# Include annotations and plot
+
+```{r}
+if (all(names(merged$label[merged$type2 == "query"]) == annotation_query_df$query_cells)) {
+  merged$label[merged$type2 == "query"] <- annotation_query_df$annotation
+  merged$annotation_probability[merged$type2 == "query"] <- annotation_query_df$annotation_prob
+}
+if (all(names(merged$UMAP1[merged$type2 == "query"]) == umap_test_df$query_cells)) {
+  merged$UMAP1[merged$type2 == "query"] <- umap_test_df$UMAP1
+  merged$UMAP2[merged$type2 == "query"] <- umap_test_df$UMAP2
+}
+DimPlot(query, group.by = "annotation_level_1")
+FeaturePlot(query, "annotation_probability") &
+  scale_color_viridis_c(option = "magma")
+# selected_cells <- 
+#   query$annotation_level_1 == "myeloid" &
+#   query$annotation_probability >= 0.9
+# query <- query[, selected_cells]
+```
+
+
+# Save
+
+```{r}
+saveRDS(merged, here("scRNA-seq/results/R_objects/seurat_objects_revision/3.1-seurat_object_discovery_validation_cohorts_integrated.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+

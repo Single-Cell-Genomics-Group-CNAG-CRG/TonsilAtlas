@@ -1,0 +1,189 @@
+---
+title: "Cellranger Mapping QC: additional cases Clinic"
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+# Introduction
+
+The objective of this notebook is to perform a basic quality control (QC) analysis of the mapping performed with [cellranger](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger). We will do a joint analysis of all the metrics_summary.csv obtained for each library. For more information, we refer to the [cellranger documentation](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/output/overview) and the associated [technical note](https://assets.ctfassets.net/an68im79xiti/163qWiQBTVi2YLbskJphQX/e90bb82151b1cdab6d7e9b6c845e6130/CG000329_TechnicalNote_InterpretingCellRangerWebSummaryFiles_RevA.pdf).
+
+
+Here, we will focus on the new samples added in the revision of the manuscript (subprojects BCLLATLAS_54, BCLLATLAS_57, and BCLLATLAS_131)
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(ggpubr)
+library(ggrepel)
+library(DT)
+library(plotly)
+library(tidyverse)
+library(here)
+library(glue)
+```
+
+
+## Parameters
+
+```{r}
+# Paths
+path_to_donor_metadata <- here("data/tonsil_atlas_donor_metadata.csv")
+path_to_proj_metadata <- here("scRNA-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv")
+
+
+# Functions
+source(here::here("scRNA-seq/bin/utils.R"))
+```
+
+
+## Load data
+
+
+```{r}
+# Load
+donor_metadata <- read_csv(path_to_donor_metadata, col_names = TRUE)
+tonsil_metadata <- read_csv(path_to_proj_metadata, col_names = TRUE)
+subprojects <- c("BCLLATLAS_54", "BCLLATLAS_57", "BCLLATLAS_131")
+tonsil_metadata <- tonsil_metadata[tonsil_metadata$subproject %in% subprojects, ]
+datatable(tonsil_metadata)
+tmp <- tonsil_metadata %>%
+  select("subproject", "gem_id") %>%
+  filter(!duplicated(gem_id))
+paths_metrics <- here(glue("scRNA-seq/1-cellranger_mapping/projects/{tmp$subproject}/jobs/{tmp$gem_id}/{tmp$gem_id}/outs/metrics_summary.csv"))
+names(paths_metrics) <- tmp$gem_id
+metrics_df <- map_df(paths_metrics, read_csv, .id = "gem_id")
+
+
+# Clean
+colnames(metrics_df) <- str_replace_all(colnames(metrics_df), " ", "_")
+qc <- as.data.frame(metrics_df)
+for (col in colnames(qc)) {
+  if (any(str_detect(qc[, col], "%"))) {
+    qc[, col] <- as.double(str_remove(qc[, col], "%"))
+  }
+}
+print("QC summary table")
+DT::datatable(qc)
+print("Donor metadata")
+DT::datatable(donor_metadata)
+```
+
+
+# Overall statistics
+
+## Estimated Number of Cells
+
+Let us start by plotting the estimated number of cells per library. Note that this number will differ a lot from the final number of cells after applying future QC filters:
+
+```{r}
+num_cells_gg <- qc %>%
+  horizontal_barplot(
+    categorical_var = "gem_id",
+    continuous_var = "Estimated_Number_of_Cells",
+    ylab = "Estimated Number of Cells"
+  )
+print("Estimated number of cells")
+num_cells_gg
+```
+
+
+## Median genes per cell
+
+```{r}
+median_genes_gg <- qc %>%
+  horizontal_barplot(
+    categorical_var = "gem_id",
+    continuous_var = "Median_Genes_per_Cell",
+    ylab = "Median genes per cell"
+  )
+print("Median genes per cell:")
+median_genes_gg
+```
+
+
+# Sequencing
+
+Our first objective is to quantify the quality of our sequenced libraries prior to mapping. We will leverage the "Q30" variables in our dataset. According to 10X, these report the fraction of bases with a Q-score of at least 30 for different sequences: cell barcode, RNA reads, Unique Molecular Identifiers (UMI). Q-score is calculated as follows:
+
+$$Q = -10\log10(p)$$
+Where p is the probability of the base being wrongly called. Thus, bases with a high Q are highly reliable.
+
+```{r fig.height=18}
+q30_vars <- str_subset(colnames(qc), "Q3")
+datatable(qc[, q30_vars])
+```
+
+
+# Mapping
+
+Secondly, we will assess the quality of cellranger's mapping by comparing the percentage of reads mapping to the genome, intergenic regions, intronic and exonic regions across libraries. Reads mapping to intergenic regions suggest contamination of ambient DNA, while reads mapping to intronic regions may come from pre-mRNAs or mature splice isoforms that retain the introns:
+
+```{r fig.wide=TRUE, fig.height=12}
+# Reads mapped to genome and transcriptome
+mapping_qc_vars <- c(
+  "Reads_Mapped_Confidently_to_Genome",
+  "Reads_Mapped_Confidently_to_Intergenic_Regions",
+  "Reads_Mapped_Confidently_to_Intronic_Regions",
+  "Reads_Mapped_Confidently_to_Exonic_Regions"
+)
+datatable(qc[, mapping_qc_vars])
+```
+
+
+# Sequencing Saturation
+
+Thirdly, we will plot the number of detected genes per library as a function of the total reads sequenced. We know that this function reaches a plateau, whereby more sequenced reads does not result in more detected genes. In those scenarios, we say that we have sequenced until saturation:
+
+```{r fig.width = 8, fig.height = 6}
+# selected_qc <- qc[qc$Total_Genes_Detected < 20000, ]
+num_genes_vs_total_reads <- qc %>%
+  ggplot(aes(Number_of_Reads, Total_Genes_Detected)) +
+    geom_point() +
+    geom_text_repel(aes(label = gem_id), color = "black") +
+    scale_color_manual("", values = cols) +
+    labs(x = "Number of Reads", y = "Total Genes Detected", color = "") +
+    theme_classic() +
+    theme(axis.title = element_text(size = 13, color = "black"),
+          axis.text = element_text(size = 12, color = "black"),
+          legend.text = element_text(size = 12, color = "black"))
+num_genes_vs_total_reads
+```
+
+
+# Cell Hashing
+
+Finally, we aim to get a sense of the depth of the HTO libraries:
+
+```{r}
+colnames(qc) <- str_remove(colnames(qc), ":")
+lib_size_hto_gg <- qc %>%
+  horizontal_barplot(
+    categorical_var = "gem_id",
+    continuous_var = "Antibody_Number_of_Reads",
+    ylab = "Library size HTO"
+  )
+lib_size_hto_gg
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

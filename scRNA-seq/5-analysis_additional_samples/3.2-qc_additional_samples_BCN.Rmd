@@ -1,0 +1,288 @@
+---
+title: 'Quality control additional samples BCN'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+Here we will perform a quality control (QC) of the samples obtained from Barcelona
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(scDblFinder)
+library(tidyverse)
+library(readxl)
+library(ggpubr)
+library(here)
+library(glue)
+library(DT)
+library(harmony)
+```
+
+
+## Parameters
+
+```{r}
+# Functions
+source(here("scRNA-seq/bin/utils.R"))
+
+
+# Thresholds
+min_lib <- 1000
+min_n_genes <- 450
+max_pct_mt <- 17.5
+min_cells <- 5
+```
+
+
+
+## Read data
+
+```{r}
+# Read demultiplexed Seurat objects
+donor_metadata <- read_csv(here("data/tonsil_atlas_donor_metadata.csv"))
+sequencing_metadata <- read_csv(here("scRNA-seq/1-cellranger_mapping/data/tonsil_atlas_metadata.csv"))
+DT::datatable(donor_metadata)
+DT::datatable(sequencing_metadata)
+paths_to_objs <- list.files(here("scRNA-seq/results/R_objects/demultiplexed_objects_new_cases_BCN"), full.names = TRUE)
+files <- list.files(here("scRNA-seq/results/R_objects/demultiplexed_objects_new_cases_BCN"))
+gem_ids <- files %>%
+  str_remove("seurat_") %>%
+  str_remove("_demultiplexed.rds")
+seurat_list <- map(paths_to_objs, readRDS)
+names(seurat_list) <- gem_ids
+seurat_list <- map2(seurat_list, names(seurat_list), \(seurat_obj, x) {
+  seurat_obj$gem_id <- x
+  seurat_obj
+})
+
+
+# Merge and add metadata
+seurat <- Reduce(merge, seurat_list)
+sequencing_metadata <- sequencing_metadata[sequencing_metadata$gem_id %in% gem_ids, ]
+sequencing_metadata <- sequencing_metadata[sequencing_metadata$type == "hashed_cdna", ]
+seurat$barcode <- colnames(seurat)
+new_metadata <- left_join(seurat@meta.data, sequencing_metadata, by = "gem_id")
+new_metadata <- as.data.frame(new_metadata)
+rownames(new_metadata) <- new_metadata$barcode
+new_metadata2 <- left_join(new_metadata, donor_metadata, by = "donor_id")
+rownames(new_metadata2) <- new_metadata2$barcode
+seurat@meta.data <- new_metadata2
+seurat@assays$HTO <- NULL
+rm(seurat_list)
+gc()
+```
+
+
+# Distribution of QC metrics across samples
+
+```{r}
+# Number of detected genes
+seurat@meta.data %>%
+  ggplot(aes(gem_id, nFeature_RNA)) +
+    geom_boxplot(outlier.size = 0.1) +
+    scale_y_continuous(
+      limits = c(0, 8000),
+      breaks = c(0, 1000, 2000, 3000, 5000, 6000, 7000, 8000)
+    ) +
+    ylab("Number of detected genes") +
+    theme_classic() +
+    theme(
+      legend.title = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+
+# Percentage of mitochondrial expression
+seurat$pct_mt <- PercentageFeatureSet(seurat, pattern = "^MT-")
+seurat@meta.data %>%
+  ggplot(aes(gem_id, pct_mt)) +
+    geom_boxplot(outlier.size = 0.1) +
+    scale_y_continuous(limits = c(0, 100)) +
+    ylab("% of mitochondrial expression") +
+    theme_classic() +
+    theme(
+      legend.title = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+# Filter cells
+
+Library size:
+
+```{r}
+lib_size_hist <- seurat@meta.data %>%
+  plot_histogram_qc(x = "nCount_RNA", x_lab = "Library Size (log10(total UMI))") +
+  geom_vline(xintercept = min_lib, linetype = "dashed", color = "red")
+lib_size_hist1 <- lib_size_hist +
+    scale_x_log10()
+lib_size_hist2 <- lib_size_hist +
+    scale_x_continuous(limits = c(0, 4000)) +
+    xlab("Library Size (total UMI)") +
+    theme_pubr()
+(lib_size_arranged <- lib_size_hist1 + lib_size_hist2)
+```
+
+
+Number of detected genes:
+
+```{r}
+n_genes_hist1 <- seurat@meta.data %>%
+  plot_histogram_qc(x = "nFeature_RNA", x_lab = "Number of Detected Genes") +
+    geom_vline(xintercept = min_n_genes, linetype = "dashed", color = "red")
+n_genes_hist2 <- n_genes_hist1 +
+  scale_x_continuous(limits = c(0, 2000)) 
+(n_genes_hist_arranged <- n_genes_hist1 + n_genes_hist2)
+```
+
+
+Percentage of mitochondrial expression:
+
+```{r}
+pct_mt_hist <- seurat@meta.data %>%
+  plot_histogram_qc(x = "pct_mt", x_lab = "% Mitochondrial Expression") +
+  geom_vline(xintercept = max_pct_mt, linetype = "dashed", color = "red") +
+  scale_x_continuous(limits = c(0, 100))
+pct_mt_hist
+```
+
+Joint QC metrics:
+
+```{r}
+seurat$orig.ident <- "BCLLATLAS"
+Idents(seurat) <- "orig.ident"
+pct_mt_vs_lib_size <- seurat@meta.data %>%
+  ggplot(aes(nCount_RNA, pct_mt)) +
+    geom_point(size = 0.25) +
+    geom_vline(xintercept = min_lib, linetype = "dashed", color = "red") +
+    geom_hline(yintercept = max_pct_mt, linetype = "dashed", color = "red") +
+    labs(x = "Library Size (total UMI)", y = "% Mitochondrial Expression") +
+    theme_classic()
+pct_mt_vs_lib_size
+```
+
+
+Subset cells:
+
+```{r}
+is_low_quality <- with(seurat@meta.data,
+  nCount_RNA < min_lib |
+  nFeature_RNA < min_n_genes |
+  pct_mt > max_pct_mt
+)
+table(is_low_quality)
+seurat <- seurat[, !is_low_quality]
+gc()
+```
+
+
+# Filter out genes
+
+According to [Luecken MD et al.](https://www.embopress.org/doi/10.15252/msb.20188746): "A guideline to setting this threshold is to use the minimum cell cluster size that is of interest and leaving some leeway for dropout effects. For example, filtering out genes expressed in fewer than 20 cells may make it difficult to detect cell clusters with fewer than 20 cells. For datasets with high dropout rates, this threshold may also complicate the detection of larger clusters. The choice of threshold should scale with the number of cells in the dataset and the intended downstream analysis."
+
+Since we want to detect rare cell types in the tonsil, we will be very permissive and retain genes that are expressed in at least `r min_cells` cells.
+
+
+## Set threshold
+
+```{r fig.wide=TRUE}
+n_cells <- Matrix::rowSums(seurat[["RNA"]]@counts > 0)
+gene_qc <- n_cells %>% 
+  as.data.frame() %>% 
+  ggplot(aes(n_cells)) + 
+    geom_histogram(bins = 100, alpha = 0.75) +
+    scale_x_log10("Number of cells") +
+    theme_bw() 
+gene_qc +
+  geom_vline(xintercept = min_cells, linetype = "dashed", color = "red")
+```
+
+
+## Plot genes with highest expression
+
+```{r fig.height=10}
+top_50_genes <- sort(n_cells, decreasing = TRUE)[1:50]
+top_50_genes_df <- data.frame(
+  gene = names(top_50_genes),
+  n_cells = top_50_genes
+)
+top_50_genes_df %>%
+  ggplot(aes(fct_reorder(gene, n_cells), n_cells)) +
+    geom_point() +
+    labs(x = "", y = "Number of expressing cells") +
+    coord_flip()
+```
+
+
+## Subset genes
+
+```{r}
+selected_genes <- names(n_cells)[n_cells > min_cells]
+length(selected_genes)
+seurat <- subset(seurat, features = selected_genes)
+seurat
+```
+
+
+# Doublet detection
+
+# Doublets
+
+We use [scDblFinder](http://bioconductor.org/books/3.15/OSCA.advanced/doublet-detection.html#computing-doublet-densities):
+
+```{r}
+seurat <- NormalizeData(seurat)
+seurat <- FindVariableFeatures(seurat)
+sce <- as.SingleCellExperiment(seurat)
+dbl_densities <- computeDoubletDensity(
+  sce,
+  dims = 30,
+  subset.row = VariableFeatures(seurat)
+)
+summary(dbl_densities)
+seurat$doublet_score <- dbl_densities
+seurat@meta.data %>%
+  ggplot(aes(doublet_score)) +
+    geom_histogram(bins = 100) +
+    theme_pubr()
+seurat$is_doublet <- seurat$doublet_score > 5
+(seurat <- seurat[, !seurat$is_doublet])
+```
+
+
+# Save
+
+```{r}
+dir.create(here("scRNA-seq/results/R_objects/seurat_objects_revision"))
+saveRDS(seurat, here("scRNA-seq/results/R_objects/seurat_objects_revision/1-seurat_object_barcelona_filtered.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
+
