@@ -1,0 +1,538 @@
+---
+title: 'Transfer labels based on gene activity matrix (CD4 T)'
+author: "Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+In this notebook, we will answer the following comment from reviewer 1:
+
+*"Why do the authors refrain from using gene activity scores derived from scATAC-seq data to transfer labels from scRNA-seq data? It would be more convincing if the authors compared the KNN derived labels based on the snATAC-seq (multiome) annotations with the labels transferred from scRNA-seq data using gene activity scores as a common feature space between the two modalities"*.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(Signac)
+library(harmony)
+library(pheatmap)
+library(ComplexHeatmap)
+library(tidyverse)
+library(harmony)
+library(here)
+library(glue)
+library(future)
+library(ggrastr)
+library(ggpubr)
+library(caret)
+library(GenomicRanges)
+library(ChIPseeker)
+library(EnsDb.Hsapiens.v86)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(org.Hs.eg.db)
+```
+
+
+## Define parameters
+
+```{r}
+# Source paths and functions
+source(here("scRNA-seq/bin/utils.R"))
+source(here("scRNA-seq/bin/utils_final_clusters.R"))
+source(here("scRNA-seq/bin/utils_figure2.R"))
+ncores <- 20
+levels_annot_20220619 <- c("Naive", "CM Pre-non-Tfh", "CM PreTfh",
+                           "Tfh T:B border", "Tfh-LZ-GC", "GC-Tfh-SAP",
+                           "GC-Tfh-OX40", "Tfh-Mem", "T-Trans-Mem",
+                           "T-Eff-Mem", "T-helper", "Eff-Tregs",
+                           "Eff-Tregs-IL32", "Tfr" )
+txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene
+```
+
+
+## Load data
+
+```{r}
+atac_cd4 <- readRDS(path_to_save_atac_cd4)
+rna_cd4 <- readRDS(path_to_save_cd4)
+```
+
+
+# Calculate gene activity matrix
+
+First, we will update the cell type annotation to the latest version for both the ATAC and the RNA datasets:
+
+```{r}
+rna_cd4 <- updateAnnotation(seurat_obj = rna_cd4)
+atac_cd4 <- updateAnnotation(seurat_obj = atac_cd4)
+rna_cd4$annotation_20220619 <- factor(
+  rna_cd4$annotation_20220619,
+  levels_annot_20220619
+)
+atac_cd4$annotation_20220619 <- factor(
+  atac_cd4$annotation_20220619,
+  levels_annot_20220619
+)
+```
+
+In our original approach (harmony integration + KNN classification), we used multiome as a training dataset and scATAC-seq as a test dataset. To ensure that the results of both approaches are comparable, we will also use the same split. In particular, we will follow these steps:
+
+1. Calculate the gene activity matrix for scATAC-seq data.
+2. We will run canonical correlation analysis (CCA) to integrate Multiome (RNA, reference) and scATAC-seq (gene activity scores, query).
+3. We will transfer the label from Multiome to scATAC-seq.
+
+Let us start by subsetting both Seurat objects to Multiome (RNA) or scATAC-seq:
+
+```{r}
+rna_cd4 <- rna_cd4[, rna_cd4$assay == "multiome"]
+atac_cd4 <- atac_cd4[, atac_cd4$assay == "scATAC"]
+```
+
+We could reason that, because age groups have an important influence in cell type proportions, we should balance the training and test sets. However, we aim to follow the same approach as we did initially for the harmony + KNN classifier, which includes all age groups at the same time. In addition, some cell types are rare, so by subsetting to specific age groups we lose power to detect and classify these rare cell types.
+
+Let us perform dimensionality reduction for the scATAC-seq dataset:
+
+```{r}
+selected_features <- rownames(atac_cd4)[rowSums(atac_cd4[["peaks_level_5"]]@data) > 0]
+atac_cd4 <- subset(atac_cd4, features = selected_features)
+atac_cd4 <- atac_cd4 %>%
+  RunTFIDF() %>%
+  FindTopFeatures() %>%
+  RunSVD() %>%
+  RunUMAP(reduction = "lsi", dims = 2:30)
+dir.create(here("scATAC-seq/8-revision/tmp"))
+saveRDS(atac_cd4, here("scATAC-seq/8-revision/tmp/seurat_atac_cd4_pre_gene_actiivty.rds"))
+DepthCor(atac_cd4)
+DimPlot(atac_cd4, group.by = "annotation_20220619")
+DimPlot(atac_cd4, group.by = "age_group")
+```
+
+
+Now we proceed to calculate the gene activity matrix:
+
+```{r}
+# Change path fragments files
+atac_cd4@assays$peaks_level_5@fragments$`scATAC-seq`@path <-
+  here("data/raw_data_figures/scATAC_CD4_T/fragments/scATAC_fragments.tsv.gz")
+fragments_ids <- names(atac_cd4@assays$peaks_level_5@fragments)
+fragments_ids <- fragments_ids[fragments_ids != "scATAC-seq"]
+for (id in fragments_ids) {
+  atac_cd4@assays$peaks_level_5@fragments[[id]]@path <-
+    glue(here("data/raw_data_figures/scATAC_CD4_T/fragments/{id}_atac_fragments_renamed_cells.tsv.gz"))
+}
+plan("multicore", workers = ncores)
+options(future.globals.maxSize = 50 * 1024 ^ 3)
+gene_activities <- GeneActivity(atac_cd4)
+saveRDS(
+  gene_activities,
+  here("scATAC-seq/results/R_objects/gene_activities3.rds")
+)
+
+
+# Add gene activity matrix to existing Seurat object
+atac_cd4[["RNA"]] <- CreateAssayObject(counts = gene_activities)
+atac_cd4 <- NormalizeData(
+  object = atac_cd4,
+  assay = "RNA",
+  normalization.method = "LogNormalize",
+  scale.factor = 10000
+)
+```
+
+
+# Integrate ATAC and RNA using gene activity matrix
+
+We follow the default [integration pipeline](https://stuartlab.org/signac/articles/mouse_brain_vignette.html`) from Signac.
+
+```{r}
+# Integration scATAC-seq
+rna_cd4 <- FindVariableFeatures(
+  object = rna_cd4,
+  nfeatures = 3000
+)
+DefaultAssay(atac_cd4) <- "RNA"
+anchors <- FindTransferAnchors(
+  reference = rna_cd4,
+  query = atac_cd4,
+  reduction = "cca"
+)
+transfer_df <- TransferData(
+  anchorset = anchors,
+  refdata = rna_cd4$annotation_20220619,
+  weight.reduction = atac_cd4[["lsi"]],
+  dims = 2:30
+)
+atac_cd4 <- AddMetaData(atac_cd4, metadata = transfer_df)
+saveRDS(
+  atac_cd4,
+  here("scATAC-seq/results/R_objects/seurat_obj_atac_CD4_T_gene_activity3.rds")
+)
+
+
+# Plot
+atac_cd4 <- atac_cd4[, atac_cd4$prediction.score.max > 0.2]
+atac_cd4$predicted_label_gene_activity <- factor(
+  atac_cd4$predicted.id,
+  levels = levels_annot_20220619
+)
+atac_cd4@reductions$umap@cell.embeddings[, 1] <- atac_cd4$UMAP_1_20220215
+atac_cd4@reductions$umap@cell.embeddings[, 2] <- atac_cd4$UMAP_2_20220215
+p1 <- DimPlot(
+  atac_cd4,
+  group.by = "annotation_20220619",
+  cols = colors_rna,
+  pt.size = 0.25
+)
+p2 <- DimPlot(
+  atac_cd4,
+  group.by = "predicted_label_gene_activity",
+  cols = colors_rna,
+  pt.size = 0.25
+)
+ps <- (p1 | p2)
+ps[[1]] <- ps[[1]] + NoLegend()
+ps <- ps &
+  theme(
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    legend.text = element_text(size = 7)
+  )
+ps[[1]] <- ps[[1]] +
+  ggtitle("Harmony integration + KNN classifier") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+ps[[2]] <- ps[[2]] +
+  ggtitle("Gene activity matrix + Seurat label transfer") +
+  theme(plot.title = element_text(size = 8, hjust = 0.5))
+ps[[1]] <- rasterise(ps[[1]], dpi = 600)
+ps[[2]] <- rasterise(ps[[2]], dpi = 600)
+ps
+confusion_matrix <- as.matrix(
+  table(
+    atac_cd4$annotation_20220619,
+    atac_cd4$predicted_label_gene_activity
+  )
+)
+confusion_matrix <- t(confusion_matrix / rowSums(confusion_matrix) * 100)
+colors_function <- colorRampPalette(colors = c("white", "red"))
+colors <- colors_function(100)
+anno_top <- HeatmapAnnotation(number_of_cells1 = anno_barplot(
+  as.matrix(table(atac_cd4$annotation_20220619)),
+  add_numbers = TRUE,
+  ylim = c(0, 2500),
+  border = FALSE
+))
+anno_row <- rowAnnotation(number_of_cells2 = anno_barplot(
+  as.matrix(table(atac_cd4$predicted_label_gene_activity)),
+  add_numbers = TRUE,
+  ylim = c(0, 2500),
+  border = FALSE
+))
+heatmap <- Heatmap(
+  confusion_matrix,
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
+  col = colors,
+  name = "% of overlap",
+  row_title = "Gene activity matrix + Seurat label transfer",
+  row_title_gp = gpar(fontsize = 8),
+  column_title = "Harmony integration + KNN classifier",
+  column_title_gp = gpar(fontsize = 8),
+  row_names_gp = gpar(fontsize = 6),
+  column_names_gp = gpar(fontsize = 6),
+  column_names_rot = 45,
+  top_annotation = anno_top,
+  right_annotation = anno_row,
+)
+results <- confusionMatrix(
+  atac_cd4$annotation_20220619,
+  atac_cd4$predicted_label_gene_activity
+)
+metrics <- round(results$overall[1:2], 3)
+metrics_df <- data.frame(metric = names(metrics), value = metrics)
+metrics_gg <- metrics_df %>%
+  ggplot(aes(metric, value)) +
+    geom_col() +
+    geom_text(aes(label = value), position = position_dodge(width = 1), vjust = -0.5, size = 2.5) +
+    ylab("Value") +
+    scale_y_continuous(limits = c(0, 1)) +
+    theme_classic() +
+    theme(
+      axis.title.x = element_blank(),
+      axis.text = element_text(size = 7),
+      axis.title.y = element_text(size = 7))
+metrics_gg
+
+
+# Proportions of cell types by age group and assay
+annotation_df_rna <- rna_cd4@meta.data[, c("assay", "age_group", "annotation_20220619")]
+annotation_df_atac <- atac_cd4@meta.data[, c("assay", "age_group", "annotation_20220619")]
+annotation_df_atac <- annotation_df_atac[annotation_df_atac$assay == "scATAC", ]
+annotation_df <- bind_rows(list(annotation_df_rna, annotation_df_atac))
+annotation_df %>%
+  group_by(assay, age_group, annotation_20220619) %>%
+  summarize(n_cells = n()) %>%
+  group_by(assay, age_group) %>%
+  mutate(
+    total_cells = sum(n_cells),
+    pct_cells = n_cells / total_cells * 100
+  ) %>%
+  ggplot(aes(assay, pct_cells, fill = annotation_20220619)) +
+    geom_col() +
+    facet_wrap(~ age_group) +
+    theme_classic()
+
+# DefaultAssay(atac_cd4) <- "RNA"
+# atac_copy <- atac_cd4
+# atac_copy[["peaks_level_5"]] <- NULL
+# seurat <- merge(x = rna_cd4, y = atac_cd4)
+# seurat <- seurat %>%
+#   FindVariableFeatures() %>%
+#   ScaleData() %>%
+#   RunPCA() %>%
+#   RunHarmony(group.by.vars = "assay") %>%
+#   RunUMAP(reduction = "pca", dims = c(2:30))
+# seurat <- RunUMAP(seurat, reduction = "harmony", dims = c(2:30))
+# DimPlot(seurat)
+```
+
+Plot the same heatmap as figure 2B, but using gene activity scores instead:
+
+```{r}
+DefaultAssay(atac_cd4) <- "RNA"
+goi_rna2 <- unlist(goi_rna)
+goi_rna2 <- goi_rna2[goi_rna2 %in% rownames(atac_cd4)]
+mycolors <- list(cell_type = colors_rna)
+annotation_col <- data.frame(cell_type = names(colors_rna)) 
+rownames(annotation_col) <- names(colors_rna)
+mat <- AverageExpression(
+  atac_cd4,
+  features = goi_rna2,
+  assays = "RNA",
+  return.seurat = FALSE,
+  group.by = "annotation_20220619",
+  slot = "data"
+)$RNA
+input_mat <- t(apply(mat, 1, function(x) (x - min(x)) / diff(range(x))))
+p <- pheatmap(
+  input_mat,
+  annotation_col = annotation_col,
+  annotation_colors = mycolors,
+  annotation_names_col = FALSE,
+  annotation_legend = FALSE,
+  show_rownames = TRUE,
+  show_colnames = FALSE, 
+  border_color = NA,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  gaps_col = c(1, 3, 8),
+  fontsize_row = 6
+)
+p
+```
+
+
+Find differentially accessible peaks per cluster:
+
+```{r}
+Idents(atac_cd4) <- "annotation_20220619"
+DefaultAssay(atac_cd4) <- "peaks_level_5"
+levels_daa <- levels(atac_cd4$annotation_20220619)[table(atac_cd4$annotation_20220619) > 70]
+markers_atac_cd4 <- map(levels_daa, \(x) {
+  df <- FindMarkers(
+    atac_cd4,
+    ident.1 = x,
+    only.pos = TRUE,
+    min.pct = 0.2,
+    test.use = "LR",
+    latent.vars = "nCount_ATAC"
+  )
+  df[1:100, ]
+})
+names(markers_atac_cd4) <- levels_daa
+saveRDS(markers_atac_cd4, here("scATAC-seq/results/R_objects/DAR_per_cluster.rds"))
+peak_anno_dfs <- map(levels_daa, \(x) {
+  print(x)
+  df <- markers_atac_cd4[[x]]
+  peaks <- rownames(df)
+  peaks <- str_subset(peaks, "^NA", negate = TRUE)
+  peaks_gr <- StringToGRanges(peaks)
+  print(length(peaks_gr))
+  peak_anno <- annotatePeak(
+    peaks_gr,
+    tssRegion = c(-2000, 0),
+    TxDb = txdb,
+    annoDb = "org.Hs.eg.db"
+  )
+  peak_anno_df <- peak_anno@annoStat
+  peak_anno_df$Frequency <- round(peak_anno_df$Frequency, 2)
+  peak_anno_df$cell_type <- x
+  peak_anno_df
+})
+peak_anno_combined <- bind_rows(peak_anno_dfs)
+cols_chrm_features <- c(
+  "Promoter (<=1kb)" = "#a6cee3",
+  "Promoter (1-2kb)" = "#1f78b4",
+  "5' UTR" = "#33a02c",
+  "3' UTR" = "#fb9a99",
+  "1st Exon" = "#e31a1c",
+  "Other Exon" = "#fdbf6f",
+  "1st Intron" = "#ff7f00",
+  "Other Intron" = "#cab2d6",
+  "Distal Intergenic" = "#ffff99"
+)
+peak_anno_combined_gg <- peak_anno_combined %>%
+  mutate(cell_type = factor(cell_type, levels = rev(levels(atac_cd4$annotation_20220619)))) %>% 
+  ggplot(aes(cell_type, Frequency, fill = Feature)) +
+  geom_col() +
+  labs(y = "Percentage of peaks (%)") +
+  scale_fill_manual(values = cols_chrm_features, breaks = names(cols_chrm_features)) +
+  coord_flip() +
+  theme_classic() +
+  theme(
+    axis.title.y = element_blank(),
+    legend.position = "top",
+    legend.title = element_text(size = 7),
+    legend.text = element_text(size = 6),
+    axis.title = element_text(size = 7),
+    axis.text = element_text(size = 6)
+  )
+peak_anno_combined_gg
+legend_peak_anno <- as_ggplot(get_legend(peak_anno_combined_gg))
+peak_anno_combined_gg <- peak_anno_combined_gg + theme(legend.position = "none")
+```
+
+
+Heatmap of accessibilty of distal intergenic peaks across clusters
+
+```{r}
+peaks_distal <- map(levels_daa, \(x) {
+  df <- markers_atac_cd4[[x]]
+  peaks <- rownames(df)
+  peaks <- str_subset(peaks, "^NA", negate = TRUE)
+  peaks_gr <- StringToGRanges(peaks)
+  print(length(peaks_gr))
+  peak_anno <- annotatePeak(
+    peaks_gr,
+    tssRegion = c(-2000, 0),
+    TxDb = txdb,
+    annoDb = "org.Hs.eg.db"
+  )
+  out <- peaks[peak_anno@detailGenomicAnnotation$distal_intergenic]
+  if (length(out) < 4) {
+    return(out)
+  } else {
+    return(out[1:4])
+  }
+})
+mat2 <- AverageExpression(
+  atac_cd4,
+  features = unlist(peaks_distal),
+  assays = "peaks_level_5",
+  return.seurat = FALSE,
+  group.by = "annotation_20220619",
+  slot = "data"
+)$peaks_level_5
+input_mat2 <- t(apply(mat2, 1, function(x) (x - min(x)) / diff(range(x))))
+annotation_row <- data.frame(feature = rep("Distal Intergenic", nrow(input_mat2)))
+rownames(annotation_row) <- rownames(input_mat2)
+mycolors$feature <- cols_chrm_features
+colfunc_atac <- colorRampPalette(c("#4575B4", "#FFFFBF", "darkgreen"))
+p2 <- pheatmap(
+  input_mat2,
+  annotation_col = annotation_col,
+  annotation_row = annotation_row,
+  annotation_colors = mycolors,
+  color = colfunc_atac(100),
+  annotation_names_col = FALSE,
+  annotation_legend = FALSE,
+  show_rownames = TRUE,
+  show_colnames = FALSE, 
+  border_color = NA,
+  cluster_rows = FALSE,
+  cluster_cols = FALSE,
+  gaps_col = c(1, 3, 8),
+  fontsize_row = 6,
+  legend = TRUE,
+  annotation_names_row = FALSE
+)
+p2
+```
+
+
+# Save
+
+```{r}
+ggsave(
+  filename = here("results/paper/figures/revision_gene_activity_matrix_umaps.pdf"),
+  plot = ps,
+  width = 19,
+  height = 8,
+  units = "cm"
+)
+in2mm <- 25.4
+path_save_heatmap <- here("results/paper/figures/revision_gene_activity_matrix_confusion_matrix.pdf")
+pdf(path_save_heatmap, width = (140 / in2mm), height = (100 / in2mm), paper = "special")
+heatmap
+dev.off()
+
+path_save_heatmap2 <- here("results/paper/figures/revision_gene_activity_matrix_rna_markers.pdf")
+pdf(path_save_heatmap2, width = (110 / in2mm), height = (105 / in2mm), paper = "special")
+p
+dev.off()
+
+path_save_heatmap3 <- here("results/paper/figures/revision_gene_activity_matrix_atac_markers.pdf")
+pdf(path_save_heatmap3, width = (100 / in2mm), height = (110 / in2mm), paper = "special")
+p2
+dev.off()
+
+ggsave(
+  filename = here("results/paper/figures/revision_gene_activity_matrix_metrics.pdf"),
+  plot = metrics_gg,
+  width = 5.5,
+  height = 4.5,
+  units = "cm"
+)
+ggsave(
+  filename = here("results/paper/figures/revision_gene_activity_location_DAR.pdf"),
+  plot = peak_anno_combined_gg,
+  width = 9,
+  height = 5.5,
+  units = "cm"
+)
+ggsave(
+  filename = here("results/paper/figures/revision_gene_activity_location_DAR_legend.pdf"),
+  plot = legend_peak_anno,
+  width = 18,
+  height = 4,
+  units = "cm"
+)
+```
+
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
