@@ -1,0 +1,2500 @@
+---
+title: "Plasma cells level 4 to level 5"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center',
+                      message=FALSE, warning = FALSE)
+```
+
+## Introduction
+
+In this Rmd we are going to clean the level 4 of the __*Plasma Cells (PC)*__ and include cells from GCBC and MBC to obtain the differentiation pathway upon first antigen (primary reaction) and antigen re-exposure (secondary reaction) respectively. 
+
+## Setting up 
+
+### Libraries 
+
+```{r message=FALSE}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+library(knitr)
+library(kableExtra)
+```
+
+
+### Parameters 
+```{r parameters, message=FALSE, warning=FALSE}
+level <- "level_4"
+cell_type <- "PC"
+
+base_folder <- here::here(paste0(level,"/",cell_type,"/"))
+  data_folder <- paste0(base_folder, "data/")
+  results_folder <- paste0(base_folder, "results/")
+  figures_folder <- paste0(results_folder, "figures/")
+
+level_5_folder = here::here(paste0("level_5/",cell_type,"/data/"))
+```
+
+### Palette and pt.size
+```{r}
+palette<-c('#e6194b', '#3cb44b', '#ffd8b1', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffe119', '#000075', '#808080', '#ffffff', '#000000')
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+### Load data 
+```{r load data}
+seurat_object_l4 <- readRDS(paste0(data_folder, cell_type, "_clustered_level_4.rds"))
+```
+
+
+## (0) Exploratory analysis of level 4
+
+### Explore the UMAP and different grouping variables 
+```{r fig.height = 12, fig.width = 16}
+#### LEVEL 3 CLUSTERS
+Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap",
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.7") 
+```
+
+```{r fig.height = 12, fig.width = 16}
+#### COMBINED EXPLORATORY DATA GROUPS ANALYSIS
+p1 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.7") 
+
+p2 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1"), 
+        group.by = "assay")
+
+p3 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "age_group")
+
+p4 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= c("tan", "royalblue1", "red"), 
+        group.by = "hospital")
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+```
+
+
+### Explore the UMAP and different data variables 
+```{r fig.height = 12, fig.width = 16}
+p1 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3)
+
+p3 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3)
+
+p4 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3)
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+```
+
+```{r fig.height = 12, fig.width = 16}
+p1 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90'
+                    )
+
+p2 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90'
+                    )
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+```
+
+
+```{r fig.height = 12, fig.width = 16}
+g1 <- ggplot(seurat_object_l4@meta.data, aes(x=RNA_snn_res.0.7, y=nFeature_RNA, fill=RNA_snn_res.0.7)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette)
+g2 <- ggplot(seurat_object_l4@meta.data, aes(x=RNA_snn_res.0.7, y=nCount_RNA, fill=RNA_snn_res.0.7)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette)
+patchwork::wrap_plots(g1, g2, ncol = 2)
+```
+
+
+
+## (1) Addition of LZ and MB cells
+```{r}
+NBC_MBC_seurat_object_l4 <- readRDS(paste0(level_4_folder,  "NBC_MBC/data/NBC_MBC_clustered_level_4.rds"))
+GCBC_seurat_object_l4 <- readRDS(paste0(level_4_folder,  "GCBC/data/GCBC_clustered_level_4.rds"))
+```
+
+
+To obtain the differentiation pathway from LZ and csMBC we select cells from NBC_MBC and GCBC objects. 
+
+### (1.1) Selection of csMBC 
+```{r}
+NBC_MBC_seurat_object_l4$level4_clusters <- NBC_MBC_seurat_object_l4$RNA_snn_res.0.46
+```
+
+Cluster 6 corresponds to csMBC, however we decided to subcluster it to restrict the region of interest to include 
+
+#### Subclustering of csMBC to restrict the region of interest
+```{r}
+Idents(NBC_MBC_seurat_object_l4) <- "level4_clusters"
+NBC_MBC_seurat_object_l4 <- FindSubCluster(
+  NBC_MBC_seurat_object_l4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+```
+
+```{r}
+csMBC_interesting_cells <- Cells(NBC_MBC_seurat_object_l4)[which(NBC_MBC_seurat_object_l4@meta.data[,subcluster_name] == "6_2")]
+csMBC_cells_to_include <- sample(csMBC_interesting_cells,
+                                 750,
+                                 replace=FALSE)
+```
+
+```{r}
+pdf(paste(figures_folder, "subsets_cell_types/csMBC_selected_cells_from_csMBC_cluster.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(NBC_MBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells.highlight= list("750 csMBC cells" = csMBC_cells_to_include),
+        cols.highlight = c("lightgrey", "gold"),
+        raster=FALSE)
+dev.off()
+```
+
+#### Include csMBC cells
+```{r}
+Idents(NBC_MBC_seurat_object_l4) <- subcluster_name
+csMBC_interesting_seu_obj <- subset(
+  NBC_MBC_seurat_object_l4,
+  cells = csMBC_cells_to_include
+)
+
+csMBC_interesting_seu_obj$pre_annotation_level_5 <- "csMBC"
+PC_seurat_object_l4_with_csMBC <- merge(PC_seurat_object_l4, y = csMBC_interesting_seu_obj, merge.data = TRUE)
+```
+
+
+### (1.2) Selection of LZ cells 
+
+```{r}
+GCBC_seurat_object_l4$level4_clusters <- GCBC_seurat_object_l4$RNA_snn_res.0.45
+```
+
+Clusters 11 and 3 correspond to the precursor PB and the previous state to the precursor PB. Therefore, we decided to include the whole cluster 11 and an specific region of the cluster 3. 
+
+#### 3 Subclustering
+```{r}
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+```
+
+```{r}
+### Find subcluster 
+Idents(GCBC_seurat_object_l4) <- "level4_clusters"
+GCBC_seurat_object_l4 <- FindSubCluster(
+  GCBC_seurat_object_l4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+cluster_cells1 <- Cells(GCBC_seurat_object_l4)[which(str_detect(GCBC_seurat_object_l4@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+cluster_cells2 <- Cells(GCBC_seurat_object_l4)[which(GCBC_seurat_object_l4$level4_clusters == "11")]
+cluster_cells <- c(cluster_cells1, cluster_cells2)
+```
+
+##### Visualization of first subclustering
+```{r}
+pdf(paste(figures_folder, "subsets_cell_types/precPB_subcluster_selection.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+```
+
+
+#### 3_2 and 3_3 Subclustering 
+```{r}
+Idents(GCBC_seurat_object_l4) <- subcluster_name
+
+### Find subcluster 
+cluster_name <- "3_2"
+sub_subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+
+GCBC_seurat_object_l4 <- FindSubCluster(
+  GCBC_seurat_object_l4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = sub_subcluster_name,
+  resolution = 0.5
+)
+```
+
+```{r}
+Idents(GCBC_seurat_object_l4) <- subcluster_name
+
+### Find subcluster 
+cluster_name <- "3_3"
+sub_subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+
+GCBC_seurat_object_l4 <- FindSubCluster(
+  GCBC_seurat_object_l4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = sub_subcluster_name,
+  resolution = 0.5
+)
+```
+
+
+
+##### Visualization of 3_2 and 3_3 subclustering
+
+```{r 3_2_subclust_visualization}
+pdf(paste(figures_folder, "subsets_cell_types/precPB_3_2_region_selection.pdf", sep=""),width=20,height=10,paper='special') 
+cluster_name <- "3_2"
+sub_subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = sub_subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+
+pdf(paste(figures_folder, "subsets_cell_types/precPB_3_2_expression_comprobation.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::FeaturePlot(GCBC_seurat_object_l4, 
+                        features = c("PRDM1", "XBP1", "IRF4"), 
+                        reduction="umap", 
+                        raster = FALSE, 
+                        cells=cluster_cells)
+
+Idents(GCBC_seurat_object_l4) <- sub_subcluster_name
+VlnPlot(object = GCBC_seurat_object_l4, 
+        features = c("PRDM1", "XBP1", "IRF4"), 
+        idents = c("11", "3_2_0", "3_2_1", "3_2_2", "3_2_3")
+        )
+dev.off()
+```
+
+```{r 3_3_subclust_visualization}
+pdf(paste(figures_folder, "subsets_cell_types/precPB_3_3_region_selection.pdf", sep=""),width=20,height=10,paper='special') 
+cluster_name <- "3_3"
+sub_subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+Seurat::DimPlot(GCBC_seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = sub_subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+
+pdf(paste(figures_folder, "subsets_cell_types/precPB_3_3_expression_comprobation.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::FeaturePlot(GCBC_seurat_object_l4, 
+                        features = c("PRDM1", "XBP1", "IRF4"), 
+                        reduction="umap", 
+                        raster = FALSE, 
+                        cells=cluster_cells)
+
+Idents(GCBC_seurat_object_l4) <- sub_subcluster_name
+VlnPlot(object = GCBC_seurat_object_l4, 
+        features = c("PRDM1", "XBP1", "IRF4"), 
+        idents = c("11", "3_3_0", "3_3_1", "3_3_2", "3_3_3")
+        )
+dev.off()
+```
+
+
+#### Selection of LZ cells to include
+After discussion with annotation team and analysis of all combinations, we decided to not include cluster 3:3 due to low expression of GC markers (CD83).
+```{r}
+cluster_name <- "3_2"
+sub_subcluster_name <- paste0("cluster",cluster_name, "_precPB_subcluster")
+prev_precPB_interesting_cells_down <- Cells(GCBC_seurat_object_l4)[which(GCBC_seurat_object_l4@meta.data[,sub_subcluster_name] %in% c("3_2_1", "3_2_2"))]
+```
+
+#### Include LZ cells
+```{r}
+## Selection cells from 3_2
+prev_precPB_cells_to_include <- prev_precPB_interesting_cells_down
+## Selection cells from 11
+precPB_to_include <- Cells(GCBC_seurat_object_l4)[which(GCBC_seurat_object_l4$level4_clusters == "11")]
+## Combine selected cells
+GC_cells_to_include <- c(prev_precPB_cells_to_include, precPB_to_include)
+```
+
+```{r}
+Idents(GCBC_seurat_object_l4) <- "level4_clusters"
+precPB_interesting_seu_obj <- subset(
+  GCBC_seurat_object_l4,
+  cells = GC_cells_to_include
+)
+precPB_interesting_seu_obj$pre_annotation_level_5[which(precPB_interesting_seu_obj$cluster3_precPB_subcluster == "11")] <- "precursor_plasmablasts"
+precPB_interesting_seu_obj$pre_annotation_level_5[which(precPB_interesting_seu_obj$cluster3_precPB_subcluster == "3_2")] <- "previous_state_precPB"
+
+PC_seurat_object_l4_with_csMBC_precPB_prevPrecPB <- merge(PC_seurat_object_l4_with_csMBC, y = precPB_interesting_seu_obj, merge.data = TRUE)
+```
+
+```{r}
+#saveRDS(PC_seurat_object_l4_with_csMBC_precPB_prevPrecPB, 
+#        paste0(level_4_folder,  "PC/data/PC_seurat_object_l4_with_csMBC_precPB_prevPrecPB3_2.rds"))
+```
+
+
+
+## (2) Processing of lev5_1 
+```{r}
+seurat_object_l5 <- PC_seurat_object_l4_with_csMBC_precPB_prevPrecPB
+```
+
+```{r}
+seurat_list <- SplitObject(seurat_object_l5, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(seurat_object_l5, reduction = "harmony")
+seurat_object_l5 <- seurat_object_l5 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.5, 0.75, 0.8, 0.9, 1, 1.05, 1.1, 1.25, 1.35, 1.42, 1.5)
+seurat_object_l5 <- seurat_object_l5 %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+
+saveRDS(seurat_object_l5, paste0(data_folder, cell_type, "_clustered_level_5.rds"))
+```
+
+
+### (2_1) Subprocessing according to annotation information 
+
+#### Cluster 2 
+
+Divide into two clusters: Up PRDM1, down IRF4, XBP1
+
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+### Find subcluster 
+cluster_name <- "2"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_analysis/cluster2.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+Seurat::FeaturePlot(seurat_object_l5, 
+                        features = c("PRDM1", "XBP1", "IRF4"), 
+                        reduction="umap", 
+                        raster = FALSE, 
+                        cells=cluster_cells)
+
+Idents(seurat_object_l5) <- subcluster_name
+VlnPlot(object = seurat_object_l5, 
+        features = c("PRDM1", "XBP1", "IRF4"), 
+        idents = clusters[which(str_detect(clusters, paste0(cluster_name,"_")))]
+        )
+dev.off()
+```
+
+#### Cluster 8
+
+Divide into three clusters
+
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+### Find subcluster 
+cluster_name <- "8"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster",cluster_name ,".pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+```
+
+
+#### Cluster 11
+
+Divide into 2 clusters
+
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+### Find subcluster 
+cluster_name <- "11"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster",cluster_name ,".pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+Seurat::FeaturePlot(seurat_object_l5, 
+                        features = c("IGHD", "IGHM"), 
+                        reduction="umap", 
+                        raster = FALSE, 
+                        cells=cluster_cells)
+
+Idents(seurat_object_l5) <- subcluster_name
+VlnPlot(object = seurat_object_l5, 
+        features = c("IGHD", "IGHM"), 
+        idents = clusters[which(str_detect(clusters, paste0(cluster_name,"_")))]
+        )
+
+
+dev.off()
+```
+
+#### Cluster 15
+
+Divide into 2 clusters
+
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+### Find subcluster 
+cluster_name <- "15"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster",cluster_name ,".pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+Seurat::FeaturePlot(seurat_object_l5, 
+                        features = c("IGHA1", "IGHG1"), 
+                        reduction="umap", 
+                        raster = FALSE, 
+                        cells=cluster_cells)
+
+Idents(seurat_object_l5) <- subcluster_name
+VlnPlot(object = seurat_object_l5, 
+        features = c("IGHA1", "IGHG1"), 
+        idents = clusters[which(str_detect(clusters, paste0(cluster_name,"_")))]
+        )
+
+
+dev.off()
+```
+
+#### Cluster 3
+
+Divide into 2 clusters
+
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+### Find subcluster 
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster",cluster_name ,".pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = 3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+```
+
+#### Cluster 14
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster14.pdf"),width=20,height=10,paper='special') 
+p1 <- Seurat::FeaturePlot(seurat_object_l5, 
+                      features = c("XIST"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      pt.size = pt_size/2)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l5, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/2)
+
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+### (2_2) Subclust Annotation
+
+#### 0.9 groups
+```{r}
+Idents(seurat_object_l5) <- "RNA_snn_res.0.9"
+
+new.cluster.ids <- c("GC Derived Precursor 2", 
+                     "GC Derived Precursor 3", 
+                     "Precursor Plasmablasts", 
+                     "Mature IgA", 
+                     "LZ", 
+                     "Mature IgG", 
+                     "Proliferative plasmablasts", 
+                     "class-switch MBC", 
+                     "pre-proliPB and prec-interm and GC_1", 
+                     "IgM", 
+                     "Mature_IgG_lowqual", 
+                     "IgD and IgM", 
+                     "MBC-derived PC precursor", 
+                     "early MBC-derived PC precursors", 
+                     "MBC-derived PC precursors_lowqual", 
+                     "Mature IGA and Mature IgG", 
+                     "GC Derived Precursor 3_similar", 
+                     "GC Derived Precursor 0", 
+                     "HighRB")
+
+names(new.cluster.ids) <- levels(seurat_object_l5)
+seurat_object_l5 <- RenameIdents(seurat_object_l5, new.cluster.ids)
+seurat_object_l5$annotation_level_5_draft <- seurat_object_l5@active.ident
+seurat_object_l5$annotation_level_5_draft <- as.character(seurat_object_l5$annotation_level_5_draft)
+```
+
+#### subclusters
+```{r}
+seurat_object_l5$annotation_level_5 <- as.character(seurat_object_l5$annotation_level_5_draft)
+
+## Cluster 2
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster2_subcluster == "2_0")] <- "PrecPB_0"
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster2_subcluster == "2_1")] <- "PrecPB_1"
+
+## Cluster 8
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster8_subcluster == "8_0")] <- "GC Derived Precursor 1"
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster8_subcluster == "8_1")] <- "pre-Proliferative plasmablasts"
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster8_subcluster == "8_2")] <- "intermediate precursors"
+
+## Cluster 11
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster11_subcluster == "11_0")] <- "IgD"
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster11_subcluster == "11_1")] <- "IgM_other"
+
+## Cluster 15
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster15_subcluster == "15_0")] <- "Mature IgA_15"
+seurat_object_l5$annotation_level_5[which(seurat_object_l5$cluster15_subcluster == "15_1")] <- "Mature IgG_15"
+```
+
+```{r}
+pdf(paste0(figures_folder, "annotation/annotation1/first_annotation2.pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_5")
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_5") + NoLegend()
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        label = TRUE,
+        group.by = "annotation_level_5") + NoLegend()
+
+dev.off()
+
+pdf(paste0(figures_folder, "annotation/annotation1/gene_expression.pdf"),width=20,height=10,paper='special') 
+Seurat::FeaturePlot(seurat_object_l5, 
+                      features = c("PRDM1", "XBP1", "IRF4"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      order = TRUE,
+                      pt.size = pt_size/2)
+dev.off()
+```
+
+```{r}
+seurat_object_l5 <- readRDS(paste0(data_folder, cell_type, "_clustered_level_5_anno5.rds"))
+```
+
+
+
+### (2_3) Re_subprocessing 
+
+#### Subclustering of Mature IgM
+Divide into 2 clusters
+
+```{r}
+Idents(seurat_object_l5) <- "annotation_level_5"
+### Find subcluster 
+cluster_name <- "IgM"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_0.5")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster",cluster_name ,"_res_0.5.pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name, 
+        label = TRUE) + NoLegend()
+
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells) 
+
+Seurat::FeaturePlot(seurat_object_l5, 
+                      features = c("IGHG2"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      pt.size = pt_size)
+
+
+dev.off()
+```
+
+```{r}
+Idents(seurat_object_l5) <- subcluster_name
+markers_df <- FindMarkers(
+  seurat_object_l5,
+  ident.1 = "IgM_1",
+  ident.2 = "IgM_0",
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers
+
+Idents(seurat_object_l5) <- subcluster_name
+markers_df <- FindMarkers(
+  seurat_object_l5,
+  ident.1 = "IgM_1",
+  ident.2 = "IgM_2",
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers
+
+Idents(seurat_object_l5) <- subcluster_name
+markers_df <- FindMarkers(
+  seurat_object_l5,
+  ident.1 = "IgM_1",
+  ident.2 = "IgM_3",
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% 
+  tibble::rownames_to_column(var = "gene")
+markers
+```
+
+
+```{r}
+pdf(paste0(figures_folder, "annotation/annotation1/annotation_with_IgMsubclusters.pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_5")
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = "annotation_level_5") + NoLegend()
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        label = TRUE,
+        group.by = "annotation_level_5") + NoLegend()
+
+dev.off()
+```
+
+
+#### Subclustering of Mature_IgG_lowqual
+
+```{r}
+Idents(seurat_object_l5) <- "annotation_level_5"
+### Find subcluster 
+cluster_name <- "Mature_IgG_lowqual"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_0.5")
+
+seurat_object_l5 <- FindSubCluster(
+  seurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(seurat_object_l5@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5@meta.data[,subcluster_name]))
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l5)[which(str_detect(seurat_object_l5@meta.data[,subcluster_name], paste0(cluster_name,"_")))]
+```
+
+```{r}
+pdf(paste0(figures_folder, "subclustering_analysis/cluster_",cluster_name ,"_res_0.5.pdf"),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name, 
+        label = TRUE) + NoLegend()
+
+
+Seurat::DimPlot(seurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells) 
+
+Seurat::FeaturePlot(seurat_object_l5, 
+                      features = c("XIST", "IGHA1", "IGHD", 
+                                   "IGHG1", "IGHE", "IGHM"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      pt.size = pt_size)
+
+
+dev.off()
+
+pdf(paste0(figures_folder, "subclustering_analysis/cluster_",cluster_name ,"_res_0.5_quality_analysis.pdf"),width=20,height=10,paper='special') 
+seurat_object <- seurat_object_l5
+group_variable_1 <- subcluster_name
+
+Idents(seurat_object) <- subcluster_name
+
+    p1 <- Seurat::DimPlot(seurat_object, 
+            reduction = "umap",
+            pt.size = pt_size/3,  
+            cols= c(palette, "black", "goldenrod2"), 
+            group.by = group_variable_1, 
+            raster = FALSE) 
+    
+    p2 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "pct_mt", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p3 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "XIST", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p4 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "MALAT1", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+     print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2) )
+
+df <- seurat_object@meta.data[cluster_cells,]
+     g1 <- ggplot(df, aes_string(x=group_variable_1, y="pct_mt", fill=group_variable_1)) + 
+        geom_boxplot() + 
+        theme(legend.position = "none") + 
+        scale_fill_manual(values=palette) + 
+        theme(axis.text.x = element_text(angle = 90))
+     
+     g2 <- Seurat::VlnPlot(seurat_object, 
+                        cols= c(palette, "black", "goldenrod2"), 
+                        idents = c("Mature_IgG_lowqual_0", "Mature_IgG_lowqual_1", "Mature_IgG_lowqual_2", "Mature_IgG_lowqual_3"),
+                        features = "MALAT1") 
+     g3 <- Seurat::VlnPlot(seurat_object, 
+                        cols= c(palette, "black", "goldenrod2"), 
+                        idents = c("Mature_IgG_lowqual_0", "Mature_IgG_lowqual_1", "Mature_IgG_lowqual_2", "Mature_IgG_lowqual_3"),
+                        features = "XIST") 
+     g4 <- Seurat::VlnPlot(seurat_object, 
+                        cols= c(palette, "black", "goldenrod2"), 
+                        idents = c("Mature_IgG_lowqual_0", "Mature_IgG_lowqual_1", "Mature_IgG_lowqual_2", "Mature_IgG_lowqual_3"),
+                        features = "IGHD") 
+     g5 <- Seurat::VlnPlot(seurat_object, 
+                        idents = c("Mature_IgG_lowqual_0", "Mature_IgG_lowqual_1", "Mature_IgG_lowqual_2", "Mature_IgG_lowqual_3"),
+                        cols= c(palette, "black", "goldenrod2"), 
+                        features = "IGHG1") 
+     g6 <- Seurat::VlnPlot(seurat_object, 
+                        idents = c("Mature_IgG_lowqual_0", "Mature_IgG_lowqual_1", "Mature_IgG_lowqual_2", "Mature_IgG_lowqual_3"),
+                        cols= c(palette, "black", "goldenrod2"), 
+                        features = "IGHM") 
+    
+      print(patchwork::wrap_plots(g1, g2, g3, g4, g5, g6, ncol = 3) )
+
+dev.off()
+
+```
+
+
+### (2.4) Annotation to clean
+```{r}
+seurat_object_l5$annotation_level_5_clean <- as.character(seurat_object_l5$clusterIgM_subcluster_0.5)
+
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$clusterMature_IgG_lowqual_subcluster_0.5 == "Mature_IgG_lowqual_1")] <- "Mature_IgG_remove"
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$annotation_level_5_clean == "Mature_IgG_lowqual")] <- "Mature_IgG_2"
+
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$annotation_level_5_clean == "HighRB")] <- "HighRB_remove"
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$annotation_level_5_clean == "MBC-derived PC precursors_lowqual")] <- "MBC-derived PC precursors_lowqual_remove"
+
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$annotation_level_5_clean == "Mature IgA_15")] <- "Mature IgA"
+seurat_object_l5$annotation_level_5_clean[which(seurat_object_l5$annotation_level_5_clean == "Mature IgG_15")] <- "Mature IgG"
+
+```
+
+
+
+## (3) Remove Low quality cells 
+
+
+### Remove cluster HighRB
+
+
+```{r remove HighRB}
+Idents(seurat_object_l5) <- "annotation_level_5_clean"
+seurat_object_l5_clean <- subset(
+  seurat_object_l5,
+  cells = colnames(seurat_object_l5)[Idents(seurat_object_l5) != "HighRB_remove"]
+)
+```
+
+### Remove MBC−derived PC precursors_lowqual
+```{r remove HighRB}
+Idents(seurat_object_l5_clean) <- "annotation_level_5_clean"
+seurat_object_l5_clean <- subset(
+  seurat_object_l5_clean,
+  cells = colnames(seurat_object_l5_clean)[Idents(seurat_object_l5_clean) != "MBC-derived PC precursors_lowqual_remove"]
+)
+```
+
+### Remove Tip low quality from Mature IgG low qual
+```{r remove HighRB}
+Idents(seurat_object_l5_clean) <- "annotation_level_5_clean"
+seurat_object_l5_clean <- subset(
+  seurat_object_l5_clean,
+  cells = colnames(seurat_object_l5_clean)[Idents(seurat_object_l5_clean) != "Mature_IgG_remove"]
+)
+```
+
+
+## (4) Reprocessing of lev_5_2
+```{r}
+seurat_list <- SplitObject(seurat_object_l5_clean, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(seurat_object_l5_clean, reduction = "harmony")
+seurat_object_l5_clean <- seurat_object_l5_clean %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.5, 0.75, 0.9, 1)
+seurat_object_l5_clean <- seurat_object_l5_clean %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+```
+
+
+
+
+```{r}
+pdf(paste(figures_folder, "cleaned_object/summary_resolutions.pdf", sep=""),width=20,height=10,paper='special') 
+list_plots <- list()
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.5, 0.75, 0.9, 1)
+
+for (index in 1:length(resolution_vector)) {
+  resolution <- resolution_vector[index]
+  resolution_wanted <- paste0("RNA_snn_res.", resolution)
+  Idents(seurat_object_l5_clean) <- resolution_wanted
+  p <- Seurat::DimPlot(seurat_object_l5_clean, 
+                       reduction = "umap",  
+                       pt.size = pt_size/3, 
+                       cols = c(palette, "black"),
+                       group.by = resolution_wanted ) + NoLegend()
+  list_plots[[index]] <- p
+  p <- Seurat::DimPlot(seurat_object_l5_clean, 
+                       reduction = "umap",  
+                       pt.size = pt_size, 
+                       cols = c(palette, "black"),
+                       group.by = resolution_wanted ) 
+  print(p)
+}
+print(patchwork::wrap_plots(list_plots))
+
+
+dev.off()
+```
+
+### (4.1) Subprocessing 
+
+#### 12 Subclustering of cluster 12
+```{r}
+Idents(seurat_object_l5_clean) <- "RNA_snn_res.1.5"
+### Find subcluster 
+cluster_name <- "12"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+
+#### 16 Subclustering of cluster 16
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster12_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "17"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 0 Subclustering of cluster 0
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster17_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "0"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 15 Subclustering of cluster 15
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster0_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "15"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 16 Subclustering of cluster 16
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster15_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "16"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        label = TRUE,
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 3 Subclustering of cluster 3
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster16_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        label = TRUE,
+        cols= c(palette, "black", "goldenrod2"), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 10 Subclustering of cluster 10
+```{r}
+Idents(seurat_object_l5_clean) <- "cluster3_subcluster_res.1"
+### Find subcluster 
+cluster_name <- "10"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster_res.1")
+
+seurat_object_l5_clean <- FindSubCluster(
+  seurat_object_l5_clean,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.75
+)
+table(seurat_object_l5_clean@meta.data[,subcluster_name])
+clusters <- names(table(seurat_object_l5_clean@meta.data[,subcluster_name]))
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        label = TRUE,
+        cols= c(palette, "black", "goldenrod2",palette), 
+        group.by = subcluster_name)
+
+Seurat::FeaturePlot(seurat_object_l5_clean, 
+                      features = c("IGHM"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+
+dev.off()
+```
+
+
+
+```{r}
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/Ig_expression.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::FeaturePlot(seurat_object_l5_clean, 
+                      features = c("IGHA1","IGHA2", "IGHM", "IGHG1", "IGHG3", "IGHD"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 3, 
+                      order = TRUE,
+                      pt.size = pt_size/3)
+dev.off()
+
+pdf(paste(figures_folder, "aid_and_newcsMBC/subclustering/age_groups.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l5_clean, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        label = TRUE,
+        cols= c(palette, "black", "goldenrod2",palette), 
+        group.by = "age_group")
+dev.off()
+```
+
+```{r}
+seurat_object_l5_clean$level_5_clean_clusters <- seurat_object_l5_clean$cluster10_subcluster_res.1
+```
+
+### (4.2) Subcluster Annotation
+```{r}
+seurat_object_l5_clean_with_AID_csMBC@meta.data <- seurat_object_l5_clean_with_AID_csMBC@meta.data %>% mutate(names_level_5_clusters =
+                                                  case_when(level_5_clean_clusters == "2" ~ "LZ-GC B cells",
+                                                            level_5_clean_clusters == "6" ~ "GZ-GC B cells",
+                                                            level_5_clean_clusters == "18" ~ "DZ-derived PC precursors",
+                                                            level_5_clean_clusters == "3_0" ~ "LZ-derived early PC precursors (PRDM1)",
+                                                            level_5_clean_clusters == "3_1" ~ "LZ-derived early PC precursors (PRDM1/XBP1)",
+                                                            level_5_clean_clusters == "16_0" ~ "LZ-derived early PC precursors (PRDM1/XBP1/IRF4)",     
+                                                            level_5_clean_clusters == "16_1" ~ "IgM+ Early PC precursors",
+                                                            level_5_clean_clusters == "15_0" ~ "Pre-post prolif. Plasmablasts 1",
+                                                            level_5_clean_clusters == "15_1" ~ "Pre-post prolif. Plasmablasts 2",
+                                                            level_5_clean_clusters == "5" ~ "Proliferative plasmablasts",
+                                                            level_5_clean_clusters == "8" ~ "LZ-derived IgG+ PC precursor 1",  
+                                                            level_5_clean_clusters == "14" ~ "IgD PC precursor",
+                                                            level_5_clean_clusters == "1" ~ "LZ-derived IgG+ PC precursor 2",
+                                                            level_5_clean_clusters == "0_0" ~ "LZ-derived IgG+ PC precursor 3",
+                                                            level_5_clean_clusters == "0_1" ~ "IGHV3-20/43 expressing PCs",
+                                                            level_5_clean_clusters == "10_2" ~ "IgM+ PC precursors 1",        
+                                                            level_5_clean_clusters == "10_4" ~ "IgM+ PC precursors 2",        
+                                                            level_5_clean_clusters == "10_3" ~ "IgM+ PC precursors 3",        
+                                                            level_5_clean_clusters == "10_1" ~ "IgM+ PC precursors 4",        
+                                                            level_5_clean_clusters == "10_0" ~ "Mature IgM+",        
+                                                            level_5_clean_clusters %in% c("4", "17_1") ~ "Mature IgG+ 1",        
+                                                            level_5_clean_clusters == "11" ~ "Mature IgG+ 2",    
+                                                            level_5_clean_clusters %in% c("9", "17_0") ~ "Mature IgA+ 1",        
+                                                            level_5_clean_clusters == "13" ~ "Mature IgA+ 2",        
+                                                            level_5_clean_clusters == "12_0" ~ "MBC-derived PC precursors",
+                                                            level_5_clean_clusters == "12_1" ~ "Early MBC-derived PC precursors",                                                                                                  level_5_clean_clusters == "12_2" ~ "csMBC",
+                                                            level_5_clean_clusters == "7" ~ "csMBC"
+                                                            ))
+```
+
+```{r}
+seurat_object_l5_clean_with_AID_csMBC$numbers_level_5_clusters <- seurat_object_l5_clean_with_AID_csMBC$level_5_clean_clusters
+```
+
+```{r}
+saveRDS(seurat_object_l5_clean_with_AID_csMBC, paste0(level_5_folder,  "PC/data/For_analysis/PC_level_5_seurat_object_clean_with_new_csMBC_and_aid_and_with_annotated_clusters.rds"))
+```
+
+
+
+## (5) Add new LZ (clean)
+
+### Load data
+```{r load data}
+GCBC_seurat_object_level_4 <- readRDS("/scratch/devel/saguilar/PhD/PROJECTS/tonsil_atlas/tonsil_atlas_annotation/level_4/GCBC/data/GCBC_clustered_clean_level_4_with_final_clusters.rds")
+PC_seurat_object_level_5 <-  readRDS('/scratch/devel/saguilar/PhD/PROJECTS/tonsil_atlas/tonsil_atlas_annotation/level_5/PC/data/For_analysis/PC_level_5_seurat_object_clean_with_new_csMBC_and_aid_and_with_annotated_clusters.rds')
+```
+
+### Check GCBC selected cells 
+
+```{r}
+GCBC_selectcells <- Cells(PC_seurat_object_level_5)[which(PC_seurat_object_level_5$annotation_level_1 == "GCBC")]
+```
+
+```{r}
+GCBC_cluster9 <- Cells(GCBC_seurat_object_level_4)[which(GCBC_seurat_object_level_4$cluster8_subcluster == "9")]
+GCBC_to_include <- c(GCBC_selectcells, GCBC_cluster9)
+GCBC_to_include <- unique(GCBC_to_include)
+
+GCBC_metadata <- GCBC_seurat_object_level_4@meta.data[,c("barcode", "cluster8_subcluster")]
+GCBC_metadata_s <- GCBC_metadata[GCBC_to_include,]
+table(GCBC_metadata_s$cluster8_subcluster)
+GCBC_metadata_s <- GCBC_metadata_s %>% 
+  filter(cluster8_subcluster %in% c("0", "2_0", "3_0", "3_1", "3_2", "9"))
+#  filter(cluster8_subcluster %in% c("0", "2_0", "3_0", "9"))
+  
+table(GCBC_metadata_s$cluster8_subcluster)
+```
+
+### Add new GCBC cells 
+```{r}
+Idents(GCBC_seurat_object_level_4) <- "cluster8_subcluster"
+GC_interesting_seu_obj <- subset(
+  GCBC_seurat_object_level_4,
+  cells = GCBC_metadata_s$barcode
+)
+previous_cells <- GCBC_selectcells[which(GCBC_selectcells %in% GCBC_metadata_s$barcode)]
+
+GC_interesting_seu_obj$names_level_5_clusters <- "not_included"
+GC_interesting_seu_obj@meta.data[previous_cells, "names_level_5_clusters"] <- PC_seurat_object_level_5@meta.data[previous_cells, "names_level_5_clusters"]
+table(GC_interesting_seu_obj$names_level_5_clusters)
+```
+
+```{r}
+Idents(PC_seurat_object_level_5) <- "annotation_level_1"
+PC_level5 <- subset(
+  PC_seurat_object_level_5,
+  cells = colnames(PC_seurat_object_level_5)[Idents(PC_seurat_object_level_5) != "GCBC"]
+)
+```
+
+
+```{r}
+PC_level5 <- merge(PC_level5, y = GC_interesting_seu_obj, merge.data = TRUE)
+```
+
+
+### Re-process object 
+```{r}
+seurat_list <- SplitObject(PC_level5, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(PC_level5, reduction = "harmony")
+PC_level5 <- PC_level5 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+manualcolors<-c('lightgrey','forestgreen', 'red2', 'orange', 'cornflowerblue', 
+                'magenta', 'darkolivegreen4', 'indianred1', 'tan4', 'darkblue', 
+                'mediumorchid1','firebrick4',  'yellowgreen', 'lightsalmon', 'tan3',
+                "tan1",'darkgray', 'wheat4', '#DDAD4B', 'chartreuse', 
+                'seagreen1', 'moccasin', 'mediumvioletred', 'seagreen','cadetblue1',
+                "darkolivegreen1" ,"tan2" ,   "tomato3" , "#7CE3D8","gainsboro")
+
+#PC_level5_all <- readRDS(paste0(data_folder, cell_type, "_level_5_newGCBC_cells.rds"))
+
+pdf(paste(figures_folder, "finalGCBC_clusters/names_level_5_clusters_2.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        label = TRUE,
+        cols= manualcolors, 
+        group.by = "names_level_5_clusters")
+dev.off()
+
+saveRDS(PC_level5_all, paste0(data_folder, cell_type, "_level_5_newGCBC_cells.rds"))
+
+```
+
+
+```{r}
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.7, 0.75, 0.9, 1)
+PC_level5 <- PC_level5 %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+
+saveRDS(PC_level5, paste0(data_folder, cell_type, "_level_5_newGCBC_cells.rds"))
+
+```
+
+## (6) BETA annotation 
+
+### (6.1) Subprocessing
+
+#### 3 Subclustering of cluster 3
+```{r}
+Idents(PCseurat_object_l5) <- "RNA_snn_res.1"
+### Find subcluster 
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+
+#### 12 Subclustering of cluster 12
+```{r}
+Idents(PCseurat_object_l5) <- "cluster3_subcluster"
+### Find subcluster 
+cluster_name <- "12"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+#### 4 Subclustering of cluster 4
+```{r}
+Idents(PCseurat_object_l5) <- "cluster12_subcluster"
+### Find subcluster 
+cluster_name <- "4"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Seurat::FeaturePlot(PCseurat_object_l5, 
+                      features = c("IGHM", "IGHG1", "IGHG2", "IGHG3"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 2, 
+                      order = TRUE,
+                      pt.size = pt_size)
+dev.off()
+```
+
+
+#### 14 Subclustering of cluster 14
+```{r}
+Idents(PCseurat_object_l5) <- "cluster4_subcluster"
+### Find subcluster 
+cluster_name <- "14"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 1 Subclustering of cluster 1
+```{r}
+Idents(PCseurat_object_l5) <- "cluster14_subcluster"
+### Find subcluster 
+cluster_name <- "1"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 15 Subclustering of cluster 15
+```{r}
+Idents(PCseurat_object_l5) <- "cluster1_subcluster"
+### Find subcluster 
+cluster_name <- "15"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 11 Subclustering of cluster 11
+```{r}
+Idents(PCseurat_object_l5) <- "cluster15_subcluster"
+### Find subcluster 
+cluster_name <- "11"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 7 Subclustering of cluster 7
+```{r}
+Idents(PCseurat_object_l5) <- "cluster11_subcluster"
+### Find subcluster 
+cluster_name <- "7"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 5 Subclustering of cluster 5
+```{r}
+Idents(PCseurat_object_l5) <- "cluster7_subcluster"
+### Find subcluster 
+cluster_name <- "5"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 6 Subclustering of cluster 6
+```{r}
+Idents(PCseurat_object_l5) <- "cluster5_subcluster"
+### Find subcluster 
+cluster_name <- "6"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PCseurat_object_l5 <- FindSubCluster(
+  PCseurat_object_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PCseurat_object_l5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+
+
+### (6.2) Subcluster annotation
+
+#### Cluster Numbers 
+```{r}
+PCseurat_object_l5$numbers_level_5_clusters_beta <- PCseurat_object_l5$cluster6_subcluster
+```
+
+```{r}
+pdf(paste(figures_folder, "cluster_visualization/cluster_numbers.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        label = TRUE,
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = "numbers_level_5_clusters_beta")
+dev.off()
+```
+
+#### Cluster Names (beta) 
+
+```{r}
+PCseurat_object_l5@meta.data <- PCseurat_object_l5@meta.data %>% mutate(names_level_5_clusters_beta =
+  case_when(numbers_level_5_clusters_beta == "2" ~ "GC-LZ Bcells",
+    numbers_level_5_clusters_beta == "10" ~ "GC-DZ Bcells",
+    numbers_level_5_clusters_beta == "16" ~ "DZ-PC precursors",
+    numbers_level_5_clusters_beta == "3_0" ~ "LZ-derived early PC precursors (PRDM1)", 
+    numbers_level_5_clusters_beta == "3_1" ~ "LZ-derived early PC precursors (PRDM1/XBP1)", 
+    numbers_level_5_clusters_beta == "12_0" ~ "LZ-derived early PC precursors (PRDM1/XBP1/IRF4)", 
+    numbers_level_5_clusters_beta == "12_1" ~ "IgM+ Early PC precursors", 
+    numbers_level_5_clusters_beta == "4_0" ~ "LZ-derived IgG+ PC precursor 1", 
+    numbers_level_5_clusters_beta == "4_3" ~ "LZ-derived IgG+ PC precursor 1_2", 
+    numbers_level_5_clusters_beta == "0" ~ "LZ-derived IgG+ PC precursor 2", 
+    numbers_level_5_clusters_beta == "1_0" ~ "LZ-derived IgG+ PC precursor 3", 
+    numbers_level_5_clusters_beta == "1_1" ~ "GHV3-20/43 expressing PCs", 
+    numbers_level_5_clusters_beta == "4_1" ~ "IgD PC precursor", 
+    numbers_level_5_clusters_beta == "4_2" ~ "Pre-post prolif. Plasmablasts 1", 
+    numbers_level_5_clusters_beta == "14_0" ~ "Pre-post prolif. Plasmablasts 2", 
+    numbers_level_5_clusters_beta == "14_1" ~ "Pre-post-related new_cluster", 
+    numbers_level_5_clusters_beta == "8" ~ "Proliferative plasmablasts", 
+    numbers_level_5_clusters_beta == "11_1" ~ "IgM+ PC precursor_1", 
+    numbers_level_5_clusters_beta == "11_0" ~ "IgM+ PC precursor_2", 
+    numbers_level_5_clusters_beta == "5_1" ~ "IgM+ PC precursor_3", 
+    numbers_level_5_clusters_beta == "5_2" ~ "PC Mature IgA+_1", 
+    numbers_level_5_clusters_beta == "5_0" ~ "PC Mature IgA+_2", 
+    numbers_level_5_clusters_beta == "7_1" ~ "PC Mature IgA+_3", 
+    numbers_level_5_clusters_beta == "7_0" ~ "PC Mature IgG+_1", 
+    numbers_level_5_clusters_beta == "7_2" ~ "PC Mature IgG+_2", 
+    numbers_level_5_clusters_beta == "9" ~ "PC Mature IgG+_3", 
+    numbers_level_5_clusters_beta == "15_0" ~ "PC Mature IgA+_4", 
+    numbers_level_5_clusters_beta == "15_1" ~ "PC Mature IgG+_4", 
+    numbers_level_5_clusters_beta == "13" ~ "MBC-derived PC precursors", 
+    numbers_level_5_clusters_beta == "6_1" ~ "Early MBC-derived PC precursors", 
+    numbers_level_5_clusters_beta == "6_0" ~ "csMBC", 
+            ))
+```
+
+```{r}
+pdf(paste(figures_folder, "cluster_visualization/cluster_names.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        label = TRUE,
+        group.by = "names_level_5_clusters_beta") + NoLegend()
+
+Seurat::DimPlot(PCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = "names_level_5_clusters_beta") 
+dev.off()
+```
+
+```{r}
+saveRDS(PCseurat_object_l5, paste0(data_folder, cell_type, "_seu_obj_level_5_beta.rds"))
+```
+
+
+
+## (7) Cleaning of GCBC cells included
+```{r}
+Idents(PCseurat_object_l5) <- "names_level_5_clusters_beta"
+PCseurat_object_l5$GCBC_clusters <- PCseurat_object_l5$cluster8_subcluster
+PCseurat_object_l5$GCBC_clusters[is.na(PCseurat_object_l5$GCBC_clusters)] <- "PC"
+PCseurat_object_l5$GCBC_clusters[PCseurat_object_l5$annotation_level_1 == "NBC_MBC"] <- "NBC_MBC"
+```
+
+
+```{r}
+table(PCseurat_object_l5$GCBC_clusters)
+
+PC_level5 <- subset(
+  PCseurat_object_l5,
+  cells = colnames(PCseurat_object_l5)[Idents(PCseurat_object_l5) != "Pre-post-related new_cluster"]
+)
+
+Idents(PC_level5) <- "GCBC_clusters"
+PC_level5 <- subset(
+  PC_level5,
+  cells = colnames(PC_level5)[Idents(PC_level5) != "3_1"]
+)
+
+Idents(PC_level5) <- "GCBC_clusters"
+PC_level5 <- subset(
+  PC_level5,
+  cells = colnames(PC_level5)[Idents(PC_level5) != "3_2"]
+)
+
+table(PC_level5$GCBC_clusters)
+```
+
+### (7.1) Reprocessing
+
+```{r}
+seurat_list <- SplitObject(PC_level5, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(PC_level5, reduction = "harmony")
+PC_level5 <- PC_level5 %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.25, 0.5, 0.75, 0.9, 1, 1.1, 1.2, 1.3)
+PC_level5 <- PC_level5 %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+
+```
+
+### (7.2) Subprocessing
+
+#### 4 Subclustering of cluster 4
+```{r}
+Idents(PC_level5) <- "RNA_snn_res.1"
+### Find subcluster 
+cluster_name <- "4"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.35
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+
+#### 12 Subclustering of cluster 12
+```{r}
+Idents(PC_level5) <- "cluster4_subcluster"
+### Find subcluster 
+cluster_name <- "12"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+#### 7 Subclustering of cluster 7
+```{r}
+Idents(PC_level5) <- "cluster12_subcluster"
+### Find subcluster 
+cluster_name <- "7"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.4
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHM", "IGHG1", "IGHD", "IGHA1"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 2, 
+                      order = TRUE,
+                      pt.size = pt_size)
+dev.off()
+```
+#### 0 Subclustering of cluster 0
+```{r}
+Idents(PC_level5) <- "cluster7_subcluster"
+### Find subcluster 
+cluster_name <- "0"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.3
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHM", "IGHG1", "IGHD", "IGHA1"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 2, 
+                      order = TRUE,
+                      pt.size = pt_size)
+dev.off()
+```
+
+#### 11 Subclustering of cluster 11
+```{r}
+Idents(PC_level5) <- "cluster0_subcluster"
+### Find subcluster 
+cluster_name <- "11"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.35
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 1 Subclustering of cluster 1
+```{r}
+Idents(PC_level5) <- "cluster11_subcluster"
+### Find subcluster 
+cluster_name <- "1"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 14 Subclustering of cluster 14
+```{r}
+Idents(PC_level5) <- "cluster1_subcluster"
+### Find subcluster 
+cluster_name <- "14"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+#### 6 Subclustering of cluster 6
+```{r}
+Idents(PC_level5) <- "cluster14_subcluster"
+### Find subcluster 
+cluster_name <- "6"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHM", "IGHG1", "IGHD", "IGHA1"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 2, 
+                      order = TRUE,
+                      pt.size = pt_size)
+dev.off()
+```
+
+
+##### 6_1 Sublcluster cluster 6_1
+
+```{r}
+Idents(PC_level5) <- "cluster6_subcluster"
+### Find subcluster 
+cluster_name <- "6_1"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Idents(PC_level5) <- "cluster6_1_subcluster"
+p1 
+
+p2 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHM"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+
+p3 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHA1"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+
+p4 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHD"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2))
+
+dev.off()
+```
+
+
+#### 3 Subclustering of cluster 3
+```{r}
+Idents(PC_level5) <- "cluster6_1_subcluster"
+### Find subcluster 
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+
+Idents(PC_level5) <- "cluster3_subcluster"
+Seurat::VlnPlot(PC_level5, 
+                      features = c("IGHM", "IGHA1", "IGHD", "IGHG1"), 
+                      pt.size = 0.01,
+                      ncol = 2,
+                      idents = c("3_0", "3_1", "3_2", "3_3", "3_4", "3_5"))
+
+
+p2 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHM"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+
+p3 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHA1"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+
+p4 <- Seurat::FeaturePlot(PC_level5, 
+                      features = c("IGHD"), 
+                      reduction="umap", 
+                      raster = FALSE, 
+                      ncol = 1, 
+                      order = TRUE,
+                      pt.size = pt_size)
+print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2))
+
+dev.off()
+```
+
+#### 5 Subclustering of cluster 5
+```{r}
+Idents(PC_level5) <- "cluster3_subcluster"
+### Find subcluster 
+cluster_name <- "5"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+
+PC_level5 <- FindSubCluster(
+  PC_level5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(PC_level5@meta.data[,subcluster_name])
+
+pdf(paste(figures_folder, "subclustering/",subcluster_name,".pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = subcluster_name)
+dev.off()
+```
+
+### (7.3) Subcluster annotation
+
+#### Cluster Numbers
+```{r}
+PC_level5$numbers_level_5_clusters_delta <- PC_level5$cluster5_subcluster
+```
+
+```{r}
+pdf(paste(figures_folder, "cluster_visualization/cluster_numbers.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        label = TRUE,
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = "numbers_level_5_clusters_delta")
+dev.off()
+```
+#### Cluster Names
+```{r}
+PC_level5@meta.data <- PC_level5@meta.data %>% mutate(names_level_5_clusters_delta =
+  case_when(numbers_level_5_clusters_delta == "2" ~ "GC-LZ Bcells",
+    numbers_level_5_clusters_delta == "9" ~ "GC-DZ Bcells",
+    numbers_level_5_clusters_delta == "15" ~ "DZ migratory PC precursors",
+    numbers_level_5_clusters_delta == "4_1" ~ "LZ-derived early PC precursors (PRDM1)", 
+    numbers_level_5_clusters_delta == "4_0" ~ "LZ-derived early PC precursors (PRDM1/XBP1)", 
+    numbers_level_5_clusters_delta == "12_0" ~ "LZ-derived early PC precursors (PRDM1/XBP1/IRF4)", 
+    numbers_level_5_clusters_delta == "12_1" ~ "IgM+ Early PC precursors", 
+    numbers_level_5_clusters_delta == "7_0" ~ "LZ-derived IgG+ PC precursor 1", 
+    numbers_level_5_clusters_delta == "0_0" ~ "LZ-derived IgG+ PC precursor 2", 
+    numbers_level_5_clusters_delta == "0_1" ~ "LZ-derived IgG+ PC precursor 2", 
+    numbers_level_5_clusters_delta == "0_2" ~ "LZ-derived IgG+ PC precursor 2", 
+    numbers_level_5_clusters_delta == "1_0" ~ "LZ-derived IgG+ PC precursor 3", 
+    numbers_level_5_clusters_delta == "1_1" ~ "IGHV3-20/43 expressing PCs", 
+    numbers_level_5_clusters_delta == "7_1" ~ "IgD PC precursor", 
+    numbers_level_5_clusters_delta == "7_2" ~ "Proliferation-tagged PC precursors", 
+    numbers_level_5_clusters_delta == "7_3" ~ "Pre-post prolif. Plasmablasts", 
+    numbers_level_5_clusters_delta == "8" ~ "Proliferative plasmablasts", 
+    numbers_level_5_clusters_delta == "11_2" ~ "Short lived IgM PCs", 
+    numbers_level_5_clusters_delta == "11_1" ~ "IgM+ PC precursor", 
+    numbers_level_5_clusters_delta == "11_0" ~ "Pre-mature IgM+ PCs", 
+    numbers_level_5_clusters_delta == "3_2" ~ "Mature IgM+ PCs", 
+    numbers_level_5_clusters_delta == "3_1" ~ "MBC-derived IgA+", 
+    numbers_level_5_clusters_delta == "6_1_0" ~ "MBC-derived IgA+", 
+    numbers_level_5_clusters_delta == "3_0" ~ "PC Mature IgA+", 
+    numbers_level_5_clusters_delta == "14_1" ~ "PC Mature IgA+", 
+    numbers_level_5_clusters_delta == "6_0" ~ "MBC-derived IgG+", 
+    numbers_level_5_clusters_delta == "6_1_1" ~ "MBC-derived IgG+", 
+    numbers_level_5_clusters_delta == "10" ~ "PC Mature IgG+", 
+    numbers_level_5_clusters_delta == "14_0" ~ "PC Mature IgG+", 
+    numbers_level_5_clusters_delta == "13" ~ "MBC-derived PC precursors", 
+    numbers_level_5_clusters_delta == "5_1" ~ "Early MBC-derived PC precursors", 
+    numbers_level_5_clusters_delta == "5_0" ~ "csMBC", 
+    numbers_level_5_clusters_delta == "5_2" ~ "csMBC", 
+            ))
+```
+
+
+```{r}
+pdf(paste(figures_folder, "cluster_visualization/delta_names.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        label = TRUE,
+        group.by = "names_level_5_clusters_delta") + NoLegend()
+
+Seurat::DimPlot(PC_level5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        label = TRUE,
+        group.by = "numbers_level_5_clusters_delta") + NoLegend()
+dev.off()
+```
+
+
+```{r}
+saveRDS(PC_level5, paste0(data_folder, cell_type, "_seu_obj_level_5_delta.rds"))
+```
+
+
+### (7.4) OMEGA ANNOTATION
+```{r}
+PC_level5 <- paste0(data_folder, cell_type, "_seu_obj_level_5_delta.rds")
+```
+
+```{r}
+PC_level5$names_level_5_clusters_omega <- ifelse(PC_level5$names_level_5_clusters_delta %in% c("LZ-derived early PC precursors (PRDM1)", "LZ-derived early PC precursors (PRDM1/XBP1)"), "LZ-derived PC committed cells", 
+                                      ifelse(PC_level5$names_level_5_clusters_delta == "LZ-derived early PC precursors (PRDM1/XBP1/IRF4)", "LZ-derived early PC precursors", PC_level5$names_level_5_clusters_delta)
+                                     )
+```
+
+```{r}
+Seurat::DimPlot(PC_level5, 
+                       reduction = "umap",  
+                       pt.size = pt_size/3, 
+                       cols = c(palette, "black"),
+                       group.by = "names_level_5_clusters_omega" )
+```
+
+### (7.5) EPSILON ANNOTATION
+```{r}
+PC_level5@meta.data <- PC_level5@meta.data %>% mutate(names_level_5_clusters_epsilon =
+  case_when(names_level_5_clusters_omega == "GC-LZ Bcells" ~ "GC-LZ Bcell",
+    names_level_5_clusters_omega == "GC-DZ Bcells" ~ "GC-DZ Bcell",
+    names_level_5_clusters_omega == "DZ migratory PC precursors" ~ "DZ migratory PC precursor",
+    
+    names_level_5_clusters_omega == "LZ-derived PC committed cells" ~ "LZ-derived PC committed", 
+    names_level_5_clusters_omega == "LZ-derived early PC precursors" ~ "LZ-derived early PC precursor", 
+    names_level_5_clusters_omega %in% c("LZ-derived IgG+ PC precursor 1", "LZ-derived IgG+ PC precursor 2") ~ "LZ-derived IgG+ PC precursor", 
+    names_level_5_clusters_omega %in% c("LZ-derived IgG+ PC precursor 3", "IGHV3-20/43 expressing PCs") ~ "pre-Mature IgG+ PC", 
+    
+    names_level_5_clusters_omega == "IgD PC precursor" ~ "IgD PC precursor", 
+    
+    names_level_5_clusters_omega == "Proliferation-tagged PC precursors" ~ "Proliferation-tagged PC precursor", 
+    names_level_5_clusters_omega == "Pre-post prolif. Plasmablasts" ~ "Pre-post proliferative plasmablast", 
+    names_level_5_clusters_omega == "Proliferative plasmablasts" ~ "Proliferative plasmablast", 
+
+    names_level_5_clusters_omega == "IgM+ Early PC precursors" ~ "IgM+ early PC precursor", 
+    names_level_5_clusters_omega == "Short lived IgM PCs" ~ "Short lived IgM+ PC", 
+    names_level_5_clusters_omega == "IgM+ PC precursor" ~ "IgM+ PC precursor", 
+    names_level_5_clusters_omega == "Pre-mature IgM+ PCs" ~ "pre-Mature IgM+ PC", 
+    names_level_5_clusters_omega == "Mature IgM+ PCs" ~ "Mature IgM+ PC", 
+    
+    names_level_5_clusters_omega == "MBC-derived IgA+" ~ "MBC-derived IgA+ PC", 
+    names_level_5_clusters_omega == "PC Mature IgA+" ~ "Mature IgA+ PC", 
+    names_level_5_clusters_omega == "MBC-derived IgG+" ~ "MBC-derived IgG+ PC", 
+    names_level_5_clusters_omega == "PC Mature IgG+" ~ "Mature IgG+ PC", 
+    names_level_5_clusters_omega == "MBC-derived PC precursors" ~ "MBC-derived PC precursor", 
+    names_level_5_clusters_omega == "Early MBC-derived PC precursors" ~ "MBC-derived early PC precursor", 
+    names_level_5_clusters_omega == "csMBC" ~ "csMBC", 
+            ))
+```
+
+### (7.5) ETA and FINAL ANNOTATION
+```{r}
+PC_level5 <- readRDS(paste0(data_folder, cell_type, "_seu_obj_level_5_epsilon.rds"))
+```
+
+```{r}
+PC_level5@meta.data <- PC_level5@meta.data %>% mutate(names_level_5_clusters_eta =
+  case_when(names_level_5_clusters_omega == "GC-LZ Bcells" ~ "Light Zone GCBC",
+    names_level_5_clusters_omega == "GC-DZ Bcells" ~ "Dark Zone GCBC",
+    names_level_5_clusters_omega == "DZ migratory PC precursors" ~ "DZ migratory PC precursor",
+    
+    names_level_5_clusters_omega == "LZ-derived PC committed cells" ~ "PC committed Light Zone GCBC", 
+    names_level_5_clusters_omega == "LZ-derived early PC precursors" ~ "Early PC precursor", 
+    names_level_5_clusters_omega %in% c("LZ-derived IgG+ PC precursor 1", "LZ-derived IgG+ PC precursor 2") ~ "IgG+ PC precursor", 
+    names_level_5_clusters_omega %in% c("LZ-derived IgG+ PC precursor 3", "IGHV3-20/43 expressing PCs") ~ "preMature IgG+ PC", 
+    
+    names_level_5_clusters_omega == "IgD PC precursor" ~ "IgD PC precursor", 
+    
+    names_level_5_clusters_omega == "Proliferation-tagged PC precursors" ~ "PB committed early PC precursor", 
+    names_level_5_clusters_omega == "Pre-post prolif. Plasmablasts" ~ "Transitional PB", 
+    names_level_5_clusters_omega == "Proliferative plasmablasts" ~ "PB", 
+
+    names_level_5_clusters_omega == "IgM+ Early PC precursors" ~ "IgM+ early PC precursor", 
+    names_level_5_clusters_omega == "Short lived IgM PCs" ~ "Short lived IgM+ PC", 
+    names_level_5_clusters_omega == "IgM+ PC precursor" ~ "IgM+ PC precursor", 
+    names_level_5_clusters_omega == "Pre-mature IgM+ PCs" ~ "preMature IgM+ PC", 
+    names_level_5_clusters_omega == "Mature IgM+ PCs" ~ "Mature IgM+ PC", 
+    
+    names_level_5_clusters_omega == "MBC-derived IgA+" ~ "MBC derived IgA+ PC", 
+    names_level_5_clusters_omega == "PC Mature IgA+" ~ "Mature IgA+ PC", 
+    names_level_5_clusters_omega == "MBC-derived IgG+" ~ "MBC derived IgG+ PC", 
+    names_level_5_clusters_omega == "PC Mature IgG+" ~ "Mature IgG+ PC", 
+    names_level_5_clusters_omega == "MBC-derived PC precursors" ~ "MBC derived PC precursor", 
+    names_level_5_clusters_omega == "Early MBC-derived PC precursors" ~ "MBC derived early PC precursor", 
+    names_level_5_clusters_omega == "csMBC" ~ "class switch MBC", 
+            ))
+
+```
+
+```{r}
+saveRDS(object, paste0(data_folder, cell_type, "_seu_obj_level_5_eta.rds"))
+```
+
+
+
+

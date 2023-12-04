@@ -1,0 +1,1207 @@
+---
+title: "Germinal Center B cells level 4 to level 5"
+author: "Sergio Aguilar Fernández"
+date: '`r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  BiocStyle::html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    number_sections: false
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      out.width = "100%", 
+                      fig.align='center',
+                      fig.path="figures_compiled_html/",
+                      message=FALSE, 
+                      warning = FALSE)
+```
+
+## Introduction
+
+In this Rmd we are going to clean the level 4 of the __*Germinal Center B Cells (GCBC)*__. Here, we will focus on removing potential doublets and low quality cells to provide a curated level 5 for the *GCBC*. 
+
+## Libraries 
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(harmony)
+
+```
+
+## Parameters 
+
+### Folder structure
+```{r}
+level <- "level_4"
+cell_type <- "GCBC"
+base_folder <- here::here(paste0(level,"/",cell_type,"/"))
+  data_folder <- paste0(base_folder, "data/")
+  results_folder <- paste0(base_folder, "results/")
+  figures_folder <- paste0(results_folder, "figures/")
+  markers_folder <- paste0(results_folder, "objects/markers/")
+
+level_5_folder = here::here(paste0("level_5/",cell_type,"/data/"))
+```
+
+### Palette and pt.size
+```{r}
+palette<-c('#e6194b', '#3cb44b', '#ffd8b1', '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', '#aaffc3', '#808000', '#ffe119', '#000075', '#808080', '#ffffff', '#000000')
+
+pt_sizes <- c(
+  NBC_MBC = 0.6,
+  GCBC = 0.8,
+  PC = 1.5
+)
+pt_size <- pt_sizes[cell_type]
+```
+
+
+## Load data 
+```{r}
+seurat_object_l4 <- readRDS(paste0(data_folder, cell_type, "_clustered_level_4.rds"))
+```
+## Functions
+
+## Visualization exploratory analysis of a given object 
+
+#### Data groups visualization
+```{r}
+data_groups_visualization <- function(seurat_object, group_variable_1, group_variable_2 = NULL, pt_size) {
+        print(Seurat::DimPlot(seurat_object, 
+                reduction = "umap",
+                pt.size = pt_size,  
+                cols= palette, 
+                group.by = group_variable_1, 
+                raster = FALSE) 
+        )
+        
+        print(Seurat::DimPlot(seurat_object, 
+                reduction = "umap",
+                pt.size = pt_size,  
+                cols= palette, 
+                group.by = group_variable_1, 
+                raster = FALSE, 
+                label = TRUE)
+        )
+        
+        if (!is.null(group_variable_2)) {
+            print(Seurat::DimPlot(seurat_object, 
+                reduction = "umap",
+                pt.size = pt_size,  
+                cols= palette, 
+                group.by = group_variable_2, 
+                raster = FALSE) 
+            )
+        }
+        
+
+        
+        #### COMBINED EXPLORATORY DATA GROUPS ANALYSIS
+        p1 <- Seurat::DimPlot(seurat_object, 
+                reduction = "umap",
+                pt.size = pt_size/3,  
+                cols= palette, 
+                group.by = group_variable_1, 
+                raster = FALSE) 
+        
+        p2 <- Seurat::DimPlot(seurat_object, 
+                reduction = "umap", 
+                pt.size = pt_size/3,  
+                cols= c("tan", "royalblue1", "red"), 
+                group.by = "assay", 
+                raster = FALSE) 
+        
+        p3 <- Seurat::DimPlot(seurat_object, 
+                reduction = "umap", 
+                pt.size = pt_size/3,  
+                cols= palette, 
+                group.by = "age", 
+                raster = FALSE) 
+        
+        p4 <- Seurat::DimPlot(seurat_object, 
+                reduction = "umap", 
+                pt.size = pt_size/3,  
+                cols= c("tan", "royalblue1", "red"), 
+                group.by = "hospital", 
+                raster = FALSE) 
+        
+        
+        print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2) )
+}
+```
+
+#### Data features Visualization
+```{r}
+data_features_visualization <- function(seurat_object, group_variable_1, pt_size) {
+
+    p1 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nCount_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p2 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nFeature_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p3 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "pct_mt", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p4 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "pct_ribosomal", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    
+      print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2) )
+
+    p1 <- Seurat::DimPlot(seurat_object, 
+            reduction = "umap",
+            pt.size = pt_size/3,  
+            cols= palette, 
+            group.by = group_variable_1, 
+            raster = FALSE) 
+    
+    p2 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "pct_mt", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p3 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nCount_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+    p4 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nFeature_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        raster = FALSE) 
+    
+     print(patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2) )
+    
+    
+    p1 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nCount_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        min.cutoff = 'q10',
+                        max.cutoff = 'q90', 
+                        raster = FALSE) 
+                        
+    
+    p2 <- Seurat::FeaturePlot(seurat_object, 
+                        features = "nFeature_RNA", 
+                        reduction="umap", 
+                        pt.size = pt_size/3, 
+                        min.cutoff = 'q10',
+                        max.cutoff = 'q90', 
+                        raster = FALSE) 
+                        
+    
+      print(patchwork::wrap_plots(p1, p2, ncol = 2) )
+      
+    g1 <- ggplot(seurat_object@meta.data, aes_string(x=group_variable_1, y="nFeature_RNA", fill=group_variable_1)) + 
+        geom_boxplot() + 
+        theme(legend.position = "none") + 
+        scale_fill_manual(values=palette) + 
+        theme(axis.text.x = element_text(angle = 90))
+    g2 <- ggplot(seurat_object@meta.data, aes_string(x=group_variable_1, y="nCount_RNA", fill=group_variable_1)) + 
+        geom_boxplot() + 
+        scale_fill_manual(values=palette) + 
+        theme(axis.text.x = element_text(angle = 90))
+    
+      print(patchwork::wrap_plots(g1, g2, ncol = 2) )
+
+}
+```
+
+## Exploratory analysis of level 4 
+
+### Explore the UMAP and different grouping variables 
+```{r level4_exploratory_analysis_group_variables, fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "exploratory_analysis/level4_exploratory_analysis_data_groups.pdf", sep=""),width=20,height=10,paper='special') 
+data_groups_visualization(seurat_object = seurat_object_l4, 
+                          group_variable_1 = "annotation_level_3",
+                          pt_size = pt_size) 
+dev.off()
+```
+
+
+### Explore the UMAP and different data variables 
+
+```{r level4_exploratory_analysis_data_variables, fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "exploratory_analysis/level4_exploratory_analysis_data_variables.pdf", sep=""),width=20,height=10,paper='special') 
+data_features_visualization(seurat_object = seurat_object_l4, 
+                            group_variable_1 = "annotation_level_3",  
+                            pt_size = pt_size) 
+dev.off()
+```
+
+
+### Selection of the resolution 
+
+#### Clusters 
+```{r fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "exploratory_analysis/clusters_different_resolutions_all.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+print(p1)
+
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.4, 0.45, 0.5, 0.75, 0.9, 1)
+#resolution_vector <- c(0.35, 0.4, 0.45, 0.5)
+
+list_plots <- list()
+for (index in 1:length(resolution_vector)) {
+  resolution <- resolution_vector[index]
+  resolution_wanted <- paste0("RNA_snn_res.", resolution)
+  Idents(seurat_object_l4) <- resolution_wanted
+  p <- Seurat::DimPlot(seurat_object_l4, reduction = "umap",  pt.size = pt_size/3, cols = c(palette, "black"), raster = FALSE, group.by = resolution_wanted)
+  list_plots[[index]] <- p
+}
+print(patchwork::wrap_plots(list_plots))
+
+dev.off()
+```
+
+```{r}
+pdf(paste(figures_folder, "selected_resolution/selected_resolution.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+print(p1)
+
+p2 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.45", 
+        raster = FALSE) 
+print(p2)
+
+print(patchwork::wrap_plots(p1, p2, ncol = 2))
+
+dev.off()
+
+pdf(paste(figures_folder, "selected_resolution/quality_analysis.pdf", sep=""),width=20,height=10,paper='special') 
+data_features_visualization(seurat_object = seurat_object_l4, 
+                            group_variable_1 = "RNA_snn_res.0.45",  
+                            pt_size = pt_size) 
+dev.off()
+
+```
+
+```{r}
+pdf(paste(figures_folder, "selected_resolution/comparison_with_annotation_level_3.pdf", sep=""),width=20,height=10,paper='special') 
+cell_type_pcts_df <- seurat_object_l4@meta.data %>%
+  group_by(RNA_snn_res.0.45, annotation_level_3) %>%
+  summarise(n_cells_cell_type = n()) %>% 
+  group_by(RNA_snn_res.0.45) %>%
+  mutate(
+    total_cells = sum(n_cells_cell_type),
+    pct_cells = n_cells_cell_type / total_cells * 100
+  )
+
+cell_type_pcts_gg <- cell_type_pcts_df %>%
+  ggplot(aes(RNA_snn_res.0.45, pct_cells, fill = annotation_level_3)) +
+    geom_col() +
+    labs(x = "Cluster", y = "Percentage of cells (%)", fill = "") +
+    scale_fill_manual(values = palette) +
+    theme_classic()
+
+print(cell_type_pcts_gg)
+dev.off()
+```
+
+
+```{r}
+pdf(paste(figures_folder, "selected_resolution/level4_exploratory_analysis_data_groups.pdf", sep=""),width=20,height=10,paper='special') 
+data_groups_visualization(seurat_object = seurat_object_l4, 
+                          group_variable_1 = "RNA_snn_res.0.45",
+                          pt_size = pt_size) 
+dev.off()
+
+```
+
+
+## Analysis of selected resolution clusters 
+```{r}
+seurat_object_l4$level4_clusters <- seurat_object_l4$RNA_snn_res.0.45
+```
+
+### Analysis of low_region of cluster 9 
+
+#### Cluster 9 cells
+
+```{r}
+cluster_name <- "9"
+subcluster_name <- paste0("cluster", cluster_name, "_subcluster")
+```
+
+##### Subclustering 
+
+```{r}
+### Find subcluster 
+Idents(seurat_object_l4) <- "level4_clusters"
+seurat_object_l4 <- FindSubCluster(
+  seurat_object_l4,
+  cluster = "9",
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+```
+
+```{r}
+cluster_cells <- Cells(seurat_object_l4)[which(seurat_object_l4$level4_clusters == cluster_name)]
+```
+
+##### Visualization analysis
+
+```{r}
+pdf(paste(figures_folder, "subtype_analysis/cluster9_subclusters.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+dev.off()
+```
+
+
+```{r}
+pdf(paste(figures_folder, "subtype_analysis/cluster9_lowquality_region_selection.pdf", sep=""),width=20,height=10,paper='special') 
+## INSPECT SUBCLUSTERS
+Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        raster = FALSE) 
+
+Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+## INSPECT GENERAL QUALITY 
+p1 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90',                    
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+p2 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+
+p3 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p4 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "pct_ribosomal", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+## INSPECT THE RELATIONSHIP BETWEEN QUALITY AND SUBCLUSTERS
+
+### Combined plot
+p1 <- Seurat::DimPlot(seurat_object_l4, 
+        reduction = "umap", 
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = subcluster_name, 
+        cells=cluster_cells)
+
+p2 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "pct_mt", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    cells=cluster_cells ) 
+
+p3 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nCount_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+                    
+
+p4 <- Seurat::FeaturePlot(seurat_object_l4, 
+                    features = "nFeature_RNA", 
+                    reduction="umap", 
+                    pt.size = pt_size/3, 
+                    min.cutoff = 'q10',
+                    max.cutoff = 'q90', 
+                    cells=cluster_cells ) 
+
+patchwork::wrap_plots(p1, p2, p3, p4, ncol = 2)
+
+### Boxplot
+df <- seurat_object_l4@meta.data[cluster_cells,]
+
+g1 <- ggplot(df, aes_string(x=subcluster_name, y="nFeature_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    theme(legend.position = "none") + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+g2 <- ggplot(df, aes_string(x=subcluster_name, y="nCount_RNA", fill=subcluster_name)) + 
+    geom_boxplot() + 
+    scale_fill_manual(values=palette) + 
+    theme(axis.text.x = element_text(angle = 90))
+
+patchwork::wrap_plots(g1, g2, ncol = 2)
+
+dev.off()
+```
+
+```{r}
+Idents(seurat_object_l4) <- subcluster_name
+markers_df <- FindMarkers(
+  seurat_object_l4,
+  ident.1 = "9_3",
+  ident.2 = c("9_0","9_1","9_2"),
+  test.use = "wilcox",
+  only.pos = TRUE,
+  verbose = TRUE
+)
+markers <- markers_df %>%
+  dplyr::arrange(desc(abs(avg_log2FC))) %>% 
+  dplyr::filter(p_val_adj < 0.001 & avg_log2FC > 0.7) %>% # changed avg_log2FC > 0.9 after discussion with Ramon Massoni
+  tibble::rownames_to_column(var = "gene")
+
+markers
+```
+
+We see FTH1 and FTL as key marker gennes which were described as the most upregulated genes in cellular stress in "paper cold shock"
+
+##### Remove cluster 9_3: Low quality
+```{r}
+Idents(seurat_object_l4) <- subcluster_name
+seurat_object_l4_clean <- subset(
+  seurat_object_l4,
+  cells = colnames(seurat_object_l4)[Idents(seurat_object_l4) != "9_3"]
+)
+```
+
+
+### Remove cluster 10: multiome specific
+```{r}
+table(seurat_object_l4_clean$level4_clusters, seurat_object_l4_clean$assay)
+```
+
+
+```{r}
+Idents(seurat_object_l4_clean) <- "level4_clusters"
+seurat_object_l4_clean <- subset(
+  seurat_object_l4_clean,
+  cells = colnames(seurat_object_l4_clean)[Idents(seurat_object_l4_clean) != "10"]
+)
+```
+
+
+### Remove selected cells from level 2
+
+```{r}
+table(duplicated(colnames(seurat_object_l4_clean)))
+table(duplicated(seurat_object_l4_clean$barcode))
+seurat_object_l4_clean$barcode <- colnames(seurat_object_l4_clean)
+```
+
+
+
+
+
+## Reprocessing without low quality cells 
+```{r}
+seurat_list <- SplitObject(seurat_object_l4_clean, split.by = "assay")
+seurat_list <- seurat_list[c("3P", "multiome")]
+seurat_list <- purrr::map(
+  seurat_list,
+  FindVariableFeatures,
+  nfeatures = 5000
+)
+hvg <- purrr::map(seurat_list, VariableFeatures)
+shared_hvg <- intersect(hvg$`3P`, hvg$multiome)
+# ElbowPlot(seurat_object_l4_clean, reduction = "harmony")
+seurat_object_l4_clean <- seurat_object_l4_clean %>%
+  ScaleData(features = shared_hvg) %>%
+  RunPCA(features = shared_hvg) %>%
+  RunHarmony(group.by.vars = "assay", reduction ="pca", dims = 1:30) %>%
+  RunUMAP(reduction = "harmony", dims = 1:30)
+
+resolution_vector <- c(0.01, 0.05, 0.1, 0.25, 0.35, 0.4, 0.45, 0.5, 0.75, 0.9, 1)
+seurat_object_l4_clean <- seurat_object_l4_clean %>%
+  FindNeighbors(dims = 1:30, reduction = "harmony")  %>%
+  FindClusters(resolution = resolution_vector)
+```
+
+## Exploratory analysis of level 4 without low quality cells 
+
+```{r}
+seurat_object_l4_clean <- readRDS(paste0(data_folder, cell_type, "_clustered_clean_level_4_new.rds"))
+```
+
+
+### Data groups and features visualization
+
+#### Data groups
+
+```{r fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "cleaned_level4/level4_cleaned_exploratory_analysis_data_groups.pdf", sep=""),width=20,height=10,paper='special') 
+data_groups_visualization(seurat_object = seurat_object_l4_clean, 
+                          group_variable_1 = "level4_clusters",
+                          pt_size = pt_size) 
+dev.off()
+```
+
+
+#### Data features
+
+```{r fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "cleaned_level4/level4_cleaned_exploratory_analysis_data_variables.pdf", sep=""),width=20,height=10,paper='special') 
+data_features_visualization(seurat_object = seurat_object_l4_clean, 
+                            group_variable_1 = "level4_clusters",  
+                            pt_size = pt_size) 
+dev.off()
+```
+
+### Selection of the resolution 
+
+#### Clusters 
+```{r fig.height = 12, fig.width = 16}
+pdf(paste(figures_folder, "cleaned_level4/clusters_different_resolutions_all.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(seurat_object_l4_clean, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3") 
+print(p1)
+
+list_plots <- list()
+for (index in 1:length(resolution_vector)) {
+  resolution <- resolution_vector[index]
+  resolution_wanted <- paste0("RNA_snn_res.", resolution)
+  Idents(seurat_object_l4_clean) <- resolution_wanted
+  p <- Seurat::DimPlot(seurat_object_l4_clean, reduction = "umap",  pt.size = pt_size/3, cols = palette, group.by = resolution_wanted)
+  list_plots[[index]] <- p
+}
+list_plots[[(length(resolution_vector) + 1)]] <- p1
+
+
+print(patchwork::wrap_plots(list_plots))
+dev.off()
+
+pdf(paste(figures_folder, "cleaned_level4/clusters_different_resolutions.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(seurat_object_l4_clean, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3") 
+print(p1)
+
+resolution_vector <- c(0.4, 0.45, 0.5)
+list_plots <- list()
+for (index in 1:length(resolution_vector)) {
+  resolution <- resolution_vector[index]
+  resolution_wanted <- paste0("RNA_snn_res.", resolution)
+  Idents(seurat_object_l4_clean) <- resolution_wanted
+  p <- Seurat::DimPlot(seurat_object_l4_clean, reduction = "umap",  pt.size = pt_size/3, cols = palette, group.by = resolution_wanted)
+  list_plots[[index]] <- p
+}
+list_plots[[(length(resolution_vector) + 1)]] <- p1
+
+
+print(patchwork::wrap_plots(list_plots))
+dev.off()
+
+```
+
+```{r}
+pdf(paste(figures_folder, "cleaned_level4/selected_resolution_correspondence_level_3.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(seurat_object_l4_clean, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "annotation_level_3", 
+        raster = FALSE) 
+print(p1)
+
+p2 <- Seurat::DimPlot(seurat_object_l4_clean, 
+        reduction = "umap",
+        pt.size = pt_size/3,  
+        cols= palette, 
+        group.by = "RNA_snn_res.0.45", 
+        raster = FALSE) 
+print(p2)
+
+print(patchwork::wrap_plots(p1, p2, ncol = 2))
+
+cell_type_pcts_df <- seurat_object_l4_clean@meta.data %>%
+  group_by(RNA_snn_res.0.45, annotation_level_3) %>%
+  summarise(n_cells_cell_type = n()) %>% 
+  group_by(RNA_snn_res.0.45) %>%
+  mutate(
+    total_cells = sum(n_cells_cell_type),
+    pct_cells = n_cells_cell_type / total_cells * 100
+  )
+
+cell_type_pcts_gg <- cell_type_pcts_df %>%
+  ggplot(aes(RNA_snn_res.0.45, pct_cells, fill = annotation_level_3)) +
+    geom_col() +
+    labs(x = "Cluster", y = "Percentage of cells (%)", fill = "") +
+    scale_fill_manual(values = palette) +
+    theme_classic()
+
+print(cell_type_pcts_gg)
+
+dev.off()
+
+pdf(paste(figures_folder, "cleaned_level4/selected_resolution_quality_analysis.pdf", sep=""),width=20,height=10,paper='special') 
+data_features_visualization(seurat_object = seurat_object_l4_clean, 
+                            group_variable_1 = "RNA_snn_res.0.45",  
+                            pt_size = pt_size) 
+dev.off()
+
+```
+
+```{r}
+pdf(paste(figures_folder, "cleaned_level4/comparison_with_annotation_level_3.pdf", sep=""),width=20,height=10,paper='special') 
+cell_type_pcts_df <- seurat_object_l4@meta.data %>%
+  group_by(RNA_snn_res.0.45, annotation_level_3) %>%
+  summarise(n_cells_cell_type = n()) %>% 
+  group_by(RNA_snn_res.0.45) %>%
+  mutate(
+    total_cells = sum(n_cells_cell_type),
+    pct_cells = n_cells_cell_type / total_cells * 100
+  )
+
+cell_type_pcts_gg <- cell_type_pcts_df %>%
+  ggplot(aes(RNA_snn_res.0.45, pct_cells, fill = annotation_level_3)) +
+    geom_col() +
+    labs(x = "Cluster", y = "Percentage of cells (%)", fill = "") +
+    scale_fill_manual(values = palette) +
+    theme_classic()
+
+print(cell_type_pcts_gg)
+dev.off()
+```
+
+## Find desired clusters after discussion with annotation team
+
+### Subcluster cluster 1  (CENPE, HELLS)
+```{r}
+cluster_name <- "1"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4) <- "RNA_snn_res.0.45"
+GCBC_seurat_object_level_4_to_l5 <- FindSubCluster(
+  GCBC_seurat_object_level_4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.5
+)
+table(GCBC_seurat_object_level_4_to_l5@meta.data[,subcluster_name])
+cluster_cells <- Cells(GCBC_seurat_object_level_4_to_l5)[which(GCBC_seurat_object_level_4_to_l5$RNA_snn_res.0.45 == cluster_name)]
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("CENPE", "HELLS"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+
+
+```{r}
+GCBC_seurat_object_level_4_to_l5$cluster1_subcluster <- ifelse(GCBC_seurat_object_level_4_to_l5$cluster1_subcluster %in% c("1_0", "1_1", "1_3", "1_6"), "1_0", 
+                                                               ifelse(GCBC_seurat_object_level_4_to_l5$cluster1_subcluster %in% c("1_2", "1_4", "1_5"), "1_1",
+                                                                      GCBC_seurat_object_level_4_to_l5$cluster1_subcluster)
+                                                               )
+
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering_changed.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("CENPE", "HELLS"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+
+
+
+### Subcluster cluster 2  (CCNB, STMN1, FOXP1)
+
+```{r}
+cluster_name <- "2"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4_to_l5) <- "cluster1_subcluster"
+GCBC_seurat_object_level_4_to_l5 <- FindSubCluster(
+  GCBC_seurat_object_level_4_to_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4_to_l5@meta.data[,subcluster_name])
+cluster_cells <- Cells(GCBC_seurat_object_level_4_to_l5)[which(GCBC_seurat_object_level_4_to_l5$RNA_snn_res.0.45 == cluster_name)]
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("CCNB2", "STMN1", "FOXP1"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+```{r}
+GCBC_seurat_object_level_4_to_l5$cluster2_subcluster <- ifelse(GCBC_seurat_object_level_4_to_l5$cluster2_subcluster %in% c("2_0","2_1"), "2_0", 
+                                                               ifelse(GCBC_seurat_object_level_4_to_l5$cluster2_subcluster %in% c("2_2"), "2_1",
+                                                                      GCBC_seurat_object_level_4_to_l5$cluster2_subcluster)
+                                                               )
+
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering_changed.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("CENPE", "HELLS"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+### Subcluster cluster 3  
+
+```{r}
+cluster_name <- "3"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4_to_l5) <- "cluster2_subcluster"
+GCBC_seurat_object_level_4_to_l5 <- FindSubCluster(
+  GCBC_seurat_object_level_4_to_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.25
+)
+table(GCBC_seurat_object_level_4_to_l5@meta.data[,subcluster_name])
+cluster_cells <- Cells(GCBC_seurat_object_level_4_to_l5)[which(GCBC_seurat_object_level_4_to_l5$RNA_snn_res.0.45 == cluster_name)]
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("MIR155HG", "MYC", "BCL2A1"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+### Subcluster cluster 5  
+
+```{r}
+cluster_name <- "5"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4_to_l5) <- "cluster3_subcluster"
+GCBC_seurat_object_level_4_to_l5 <- FindSubCluster(
+  GCBC_seurat_object_level_4_to_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4_to_l5@meta.data[,subcluster_name])
+cluster_cells <- Cells(GCBC_seurat_object_level_4_to_l5)[which(GCBC_seurat_object_level_4_to_l5$RNA_snn_res.0.45 == cluster_name)]
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("BCL2A1"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+```{r}
+cluster_name <- "5_0"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4_to_l5) <- "cluster5_subcluster"
+GCBC_seurat_object_level_4_to_l5 <- FindSubCluster(
+  GCBC_seurat_object_level_4_to_l5,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4_to_l5@meta.data[,subcluster_name])
+cluster_cells <- Cells(GCBC_seurat_object_level_4_to_l5)[which(GCBC_seurat_object_level_4_to_l5$RNA_snn_res.0.45 == cluster_name)]
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclusterin.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4_to_l5, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+p2 <- Seurat::FeaturePlot(GCBC_seurat_object_level_4_to_l5, 
+                    pt.size = pt_size/2,  
+                    features = c("BCL2A1"), 
+                    reduction="umap", 
+                    ncol = 1,
+                    #cells=cluster_cells, 
+                    raster = FALSE) 
+patchwork::wrap_plots(p1, p2, ncol = 2)
+
+dev.off()
+```
+
+
+
+### Subcluster cluster 2_1  
+```{r}
+cluster_name <- "2_1"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4) <- "cluster5_subcluster"
+GCBC_seurat_object_level_4 <- FindSubCluster(
+  GCBC_seurat_object_level_4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4@meta.data[,subcluster_name])
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+print(p1)
+dev.off()
+```
+
+### Subcluster cluster 7  
+```{r}
+cluster_name <- "7"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4) <- "cluster2_1_subcluster"
+GCBC_seurat_object_level_4 <- FindSubCluster(
+  GCBC_seurat_object_level_4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4@meta.data[,subcluster_name])
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+print(p1)
+dev.off()
+```
+
+### Subcluster cluster 8  
+```{r}
+cluster_name <- "8"
+subcluster_name <- paste0("cluster",cluster_name, "_subcluster")
+```
+
+```{r}
+Idents(GCBC_seurat_object_level_4) <- "cluster7_subcluster"
+GCBC_seurat_object_level_4 <- FindSubCluster(
+  GCBC_seurat_object_level_4,
+  cluster = cluster_name,
+  graph.name = "RNA_snn",
+  subcluster.name = subcluster_name,
+  resolution = 0.2
+)
+table(GCBC_seurat_object_level_4@meta.data[,subcluster_name])
+
+```
+
+```{r}
+pdf(paste(figures_folder, "subclustering_for_l5/",cluster_name,"_subclustering.pdf", sep=""),width=20,height=10,paper='special') 
+p1 <- Seurat::DimPlot(GCBC_seurat_object_level_4, 
+        reduction = "umap", 
+        pt.size = pt_size/2,  
+        cols= c(palette, palette),
+        group.by = subcluster_name, 
+        raster = FALSE) 
+print(p1)
+dev.off()
+```
+
+
+```{r}
+saveRDS(GCBC_seurat_object_level_4, paste0(data_folder, cell_type, "_clustered_clean_level_4_with_final_clusters.rds"))
+```
+
+## Annotate clusters: 
+
+### BETA 
+```{r}
+GCBCseurat_object_l5 <- GCBC_seurat_object_level_4
+```
+
+
+#### Cluster names
+```{r}
+library(plyr)
+GCBCseurat_object_l5$numbers_level_5_clusters_beta <- GCBCseurat_object_l5$cluster8_subcluster
+GCBCseurat_object_l5$names_level_5_clusters_beta <- revalue(GCBCseurat_object_l5$numbers_level_5_clusters_beta,
+                                      c("0"= "DZ/LZ",
+                                        "1_0"="DZ_Sphase_HistoneHigh",
+                                        "1_1"="DZ_G2M_HistoneHigh",
+                                        "2_0"="DZ-nonproliferative_FOXP1hi",
+                                        "2_1_0"="DZ-nonproliferative",
+                                        "2_1_1"="DZ-cell cycle exit",
+                                        "3_0"="LZ",
+                                        "3_1"="LZ-DZ-re-entry early commitment",
+                                        "3_2"="LZ-BCL2A1 neg",
+                                        "4"="DZ_Sphase",
+                                        "5_0"="LZ-proliferative_BCL2A1neg",
+                                        "5_1"="LZ-proliferative_BCL2A1pos",
+                                        "6"="DZ_G2M_CCNBHigh",
+                                        "7_0"="MBC-like_nonproli",
+                                        "7_1"="MBC-like_proli1",
+                                        "8_0"="MBC-like_FCRL4+",
+                                        "8_1"="MBC-like_proli2",
+                                        "8_2"="MBC-like_proli3",
+                                        "9"="PC-precursors"))
+```
+
+```{r}
+pdf(paste(figures_folder, "cluster_visualization/cluster_names.pdf", sep=""),width=20,height=10,paper='special') 
+Seurat::DimPlot(GCBCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        label = TRUE,
+        group.by = "names_level_5_clusters_beta", 
+        raster = FALSE) + NoLegend()
+
+Seurat::DimPlot(GCBCseurat_object_l5, 
+        reduction = "umap", 
+        pt.size = pt_size,  
+        cols= c(palette, palette), 
+        group.by = "names_level_5_clusters_beta", 
+        raster = FALSE) 
+dev.off()
+```
+
+### ETA 
+#### Cluster names
+```{r}
+GCBCseurat_object_l5@meta.data <- GCBCseurat_object_l5@meta.data %>% mutate(names_level_5_clusters_eta =
+  case_when(names_level_5_clusters_beta  == "DZ_Sphase" ~ "DZ early Sphase",
+  names_level_5_clusters_beta  == "DZ_Sphase_HistoneHigh" ~ "DZ late Sphase",
+  names_level_5_clusters_beta  == "DZ_G2M_HistoneHigh" ~ "DZ early G2Mphase",
+  names_level_5_clusters_beta  == "DZ_G2M_CCNBHigh"~ "DZ late G2Mphase",
+  
+  names_level_5_clusters_beta  == "DZ-cell cycle exit" ~ "DZ cell cycle exit",
+  names_level_5_clusters_beta  == "DZ-nonproliferative" ~ "DZ cell cycle exit",
+  names_level_5_clusters_beta  ==  "DZ-nonproliferative_FOXP1hi"~ "DZ non proliferative",
+  
+  names_level_5_clusters_beta  == "DZ/LZ" ~ "DZ_LZ transition", 
+  
+  names_level_5_clusters_beta  == "LZ" ~ "LZ", 
+  names_level_5_clusters_beta  == "LZ-BCL2A1 neg"~ "LZ",
+  names_level_5_clusters_beta  == "LZ-DZ-re-entry early commitment" ~ "LZ_DZ reentry commitment",
+  names_level_5_clusters_beta  ==  "LZ-proliferative_BCL2A1pos" ~ "LZ proliferative",
+  names_level_5_clusters_beta  == "LZ-proliferative_BCL2A1neg" ~ "LZ_DZ transition",
+  
+  names_level_5_clusters_beta  == "MBC-like_nonproli" ~ "Precursor MBCs",
+  names_level_5_clusters_beta  == "MBC-like_proli1" ~ "Precursor MBCs",
+  names_level_5_clusters_beta  == "MBC-like_proli2"~ "Reactivated proliferative MBCs",
+  names_level_5_clusters_beta  == "MBC-like_proli3" ~ "Reactivated proliferative MBCs",
+  names_level_5_clusters_beta  == "MBC-like_FCRL4+"~ "Reactivated proliferative MBCs",
+  
+  names_level_5_clusters_beta  == "PC-precursors" ~ "prePC"))
+```
+
+```{r}
+GCBCseurat_object_l5@meta.data <- GCBCseurat_object_l5@meta.data %>% mutate(names_level_5_clusters_eta_atac = 
+    case_when(names_level_5_clusters_eta  == "DZ early Sphase" ~ "DZ Sphase",
+              names_level_5_clusters_eta  == "DZ late Sphase" ~ "DZ Sphase",
+              names_level_5_clusters_eta  == "DZ early G2Mphase" ~ "DZ G2Mphase",
+              names_level_5_clusters_eta  == "DZ late G2Mphase" ~ "DZ G2Mphase",
+              names_level_5_clusters_eta  == "DZ cell cycle exit" ~ "DZ non proliferative",
+              names_level_5_clusters_eta  == "DZ non proliferative" ~ "DZ non proliferative",
+              names_level_5_clusters_eta  == "DZ_LZ transition" ~ "DZ_LZ transition",
+              names_level_5_clusters_eta  == "LZ" ~ "LZ",
+              names_level_5_clusters_eta  == "LZ_DZ reentry commitment" ~ "LZ-DZ-re-entry",
+              names_level_5_clusters_eta  == "LZ_DZ transition" ~ "LZ-DZ-re-entry",
+              names_level_5_clusters_eta  == "LZ proliferative" ~ "LZ-DZ-re-entry", 
+              names_level_5_clusters_eta  == "Precursor MBC" ~ "MBC",
+              names_level_5_clusters_eta  == "Reactivated proliferative MBCs" ~ "MBC",
+              names_level_5_clusters_eta  == "prePC" ~ "prePC"
+      ))
+```
+
+```{r}
+#saveRDS(GCBCseurat_object_l5, paste0(data_folder, cell_type, "_seu_obj_level_5_eta.rds"))
+```
+
+
+
+
