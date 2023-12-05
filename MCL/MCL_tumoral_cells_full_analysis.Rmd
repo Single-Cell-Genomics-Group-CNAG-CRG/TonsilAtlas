@@ -1,0 +1,777 @@
+---
+title: 'MCL: end-end analysis of tumoral cells'
+author: "Lucía Romero & Ramon Massoni-Badosa"
+date: "`r Sys.Date()`"
+output: 
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width = "100%", fig.align='center', 
+                      message=FALSE, warning = FALSE)
+options(width = 1200)
+```
+
+
+# Introduction
+
+The aims of this notebook are to (1) download and read the 10X Multiome data for two mantle cell lymphomas (MCL) presented in tonsils, (2) perform basic quality control to exclude cells and doublets, (3) reduce the dimensionality of the data (PCA, UMAP), (4) cluster cells into meaningful cell states, and (4) annotate these cell states based on their top marker genes.
+
+
+# Pre-processing
+
+## Load packages
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(scDblFinder)
+library(DT)
+library(ggpubr)
+library(here)
+library(glue)
+library(Polychrome)
+```
+
+
+## Define functions and parameters
+
+```{r}
+plot_histogram_qc <- function(df, x, x_lab) {
+  df %>%
+    ggplot(aes_string(x)) +
+    geom_histogram(bins = 100) +
+    labs(x = x_lab, y = "Number of Cells") +
+    theme_pubr()
+}
+process_seurat <- function(seurat_obj, dims = 1:30, reduction = "pca") {
+  seurat_obj <- seurat_obj %>%
+    NormalizeData() %>%
+    FindVariableFeatures() %>%
+    ScaleData() %>%
+    RunPCA() %>%
+    RunUMAP(dims = dims, reduction = reduction) %>%
+    FindNeighbors(dims = dims, reduction = reduction)
+  seurat_obj
+}
+
+# Thresholds
+min_lib_size <- 900
+min_n_genes <- 700
+max_pct_mt_102 <- 27.5
+max_pct_mt_413 <- 20
+chrY_cutoff_102 <- -0.32
+chrY_cutoff_413 <- -0.1
+```
+
+
+# Download and read data
+
+The expression and accessibility matrices for these two MCL patients are available in [this Zenodo respository](https://zenodo.org/record/6678331). We can download the data from the terminal using wget as follows:
+
+```{bash eval=FALSE}
+cd MCL
+mkdir -p data
+wget -P data https://zenodo.org/record/6678331/files/TonsilAtlasCellRangerOuts.zip
+cd data
+unzip TonsilAtlasCellRangerOuts.zip
+```
+
+
+Then, we can proceed to load the data into R. Note that in this project we only focus on the RNA matrices. The accessibility information will be used in another project. We will also proceed to read the metadata:
+
+```{r}
+# Read metadata
+metadata <- read_csv(
+  here("MCL/data/TonsilAtlasCellRangerOuts/MCL/metadata/cellranger_arc_metadata.csv"),
+  col_names = TRUE
+)
+metadata <- metadata[str_detect(metadata$library_name, "pos"), ]
+metadata <- metadata[metadata$type == "RNA", ]
+DT::datatable(metadata)
+gem_ids <- unique(metadata$gem_id)
+
+
+# Read expression matrices and convert them to Seurat objects
+path_to_mats <- here(glue("MCL/data/TonsilAtlasCellRangerOuts/MCL/BCLLATLAS_64_65/{gem_ids}/filtered_feature_bc_matrix"))
+names(path_to_mats) <- gem_ids
+se_l <- map(gem_ids, \(x) {
+  counts <- Read10X(path_to_mats[x])$`Gene Expression`
+  seurat_obj <- CreateSeuratObject(counts)
+  seurat_obj$gem_id <- x
+  new_metadata <- seurat_obj@meta.data %>%
+    rownames_to_column("barcode") %>%
+    left_join(metadata, by = "gem_id") %>%
+    as.data.frame()
+  rownames(new_metadata) <- new_metadata$barcode
+  seurat_obj@meta.data <- new_metadata
+  seurat_obj
+})
+metadata <- as.data.frame(metadata)
+rownames(metadata) <- metadata$gem_id
+names(se_l) <- metadata[gem_ids, "donor_id"]
+```
+
+
+
+# Quality control
+
+## Calculate QC metrics
+
+```{r}
+se_l <- map(se_l, \(seurat_obj) {
+  seurat_obj$pct_mt <- PercentageFeatureSet(seurat_obj, pattern = "^MT-")
+  seurat_obj$pct_ribo <- PercentageFeatureSet(seurat_obj, pattern = "^(RPS|RPL)")
+  seurat_obj
+})
+```
+
+
+## Visualize
+
+```{r}
+# QC metrics across samples
+qc_df <- map_df(se_l, \(seurat_obj) seurat_obj@meta.data)
+qc_metrics_rna <- c("nCount_RNA", "nFeature_RNA", "pct_mt")
+qc_ggs_rna <- map(qc_metrics_rna, \(x) {
+  p <- ggplot(qc_df, aes_string("library_name", x, fill = "donor_id")) +
+    geom_violin() +
+    xlab("") +
+    theme_classic() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+      legend.position = "none"
+    )
+  p
+})
+qc_ggs_rna[[1]] <- qc_ggs_rna[[1]] +
+  scale_y_log10() +
+  ylab("Library Size (total number of UMI)")
+qc_ggs_rna[[2]] <- qc_ggs_rna[[2]] +
+  ylab("Number of detected features")
+qc_ggs_rna[[3]] <- qc_ggs_rna[[3]] +
+  ylab("Percentage of mitochondrial expression (%)")
+qc_ggs_rna
+```
+
+
+We can clearly see that both samples have a different distribution of QC metrics. Following [the best practices](https://www.embopress.org/doi/full/10.15252/msb.20188746), we will determine the thresholds for both samples separately. In particular, we see that sample M102 has a higher mitochondrial expression that one would expect for a single-nuclei assay. According to [this technical note from Cellranger](https://kb.10xgenomics.com/hc/en-us/articles/360001086611-Why-do-I-see-a-high-level-of-mitochondrial-gene-expression-): **Even in 10x assays with single nuclei as input (for example, Multiome assay), an elevated level of mitochondrial genes would mean that mitochondrial RNA could remain “stuck” to nuclear membranes or may get partitioned into GEMs and be detected by the gene expression biochemistry.**
+
+## Determine thresholds
+
+```{r}
+# Library size
+(lib_size_hists <- map(se_l, \(seurat_obj) {
+  p <- plot_histogram_qc(
+    seurat_obj@meta.data,
+    x = "nCount_RNA",
+    x_lab = "Library Size (total number of UMI)"
+  )
+  p +
+    scale_x_log10() +
+    geom_vline(xintercept = min_lib_size, color = "red", linetype = "dashed")
+}))
+
+
+# Number of detected genes
+(n_genes_hists <- map(se_l, \(seurat_obj) {
+  p <- plot_histogram_qc(
+    seurat_obj@meta.data,
+    x = "nFeature_RNA",
+    x_lab = "Number of detected features"
+  )
+  p +
+    geom_vline(xintercept = min_n_genes, color = "red", linetype = "dashed")
+}))
+
+
+# Percentage of mitochondrial expresion
+pct_mt_hists <- map(se_l, \(seurat_obj) {
+  p <- plot_histogram_qc(
+    seurat_obj@meta.data,
+    x = "pct_mt",
+    x_lab = "Percentage of mitochondrial expression (%)"
+  )
+  p
+})
+pct_mt_hists[[1]] <- pct_mt_hists[[1]] +
+  geom_vline(xintercept = max_pct_mt_413, color = "red", linetype = "dashed")
+pct_mt_hists[[2]] <- pct_mt_hists[[2]] +
+  geom_vline(xintercept = max_pct_mt_102, color = "red", linetype = "dashed")
+pct_mt_hists
+```
+
+
+Let us visualize the QC metrics jointly:
+
+```{r}
+# Number of genes vs total UMI colored by pct_mt
+(joint_gg1 <- map(se_l, \(seurat_obj) {
+  p <- seurat_obj@meta.data %>%
+    ggplot(aes(nCount_RNA, nFeature_RNA, color = pct_mt)) +
+      geom_point() +
+      geom_vline(xintercept = min_lib_size, color = "red", linetype = "dashed") +
+      geom_hline(yintercept = min_n_genes, color = "red", linetype = "dashed") +
+      labs(
+        x = "Library Size (total number of UMI)",
+        y = "Number of detected features",
+        color = "Percentage of mitochondrial expression (%)"
+      ) +
+      scale_color_viridis_c(option = "magma") +
+      theme_pubr()
+  p
+}))
+
+
+# % mitochondrial expression vs number of detected genes
+joint_gg2 <- map(se_l, \(seurat_obj) {
+  p <- seurat_obj@meta.data %>%
+    ggplot(aes(nFeature_RNA, pct_mt)) +
+      geom_point(size = 0.25, alpha = 0.5) +
+      geom_vline(xintercept = min_n_genes, color = "red", linetype = "dashed") +
+      labs(
+        x = "Number of detected features",
+        y = "Percentage of mitochondrial expression (%)"
+      ) +
+      theme_pubr()
+  p
+})
+joint_gg2$M413 <- joint_gg2$M413 +
+  geom_hline(yintercept = max_pct_mt_413, color = "red", linetype = "dashed")
+joint_gg2$M102 <- joint_gg2$M102 +
+  geom_hline(yintercept = max_pct_mt_102, color = "red", linetype = "dashed")
+joint_gg2
+```
+
+
+## Subset
+
+```{r}
+# 102
+is_low_quality_102 <-
+  se_l$M102$nCount_RNA < min_lib_size |
+  se_l$M102$nFeature_RNA < min_n_genes |
+  se_l$M102$pct_mt > max_pct_mt_102
+table(is_low_quality_102)
+se_l$M102 <- se_l$M102[, !is_low_quality_102]
+
+
+# 413
+is_low_quality_413 <-
+  se_l$M413$nCount_RNA < min_lib_size |
+  se_l$M413$nFeature_RNA < min_n_genes |
+  se_l$M413$pct_mt > max_pct_mt_413
+table(is_low_quality_413)
+se_l$M413 <- se_l$M413[, !is_low_quality_413]
+```
+
+
+# Dimensionality reduction
+
+We follow the dimensionality reduction pipeline from [Seurat](https://satijalab.org/seurat/articles/pbmc3k_tutorial.html). This includes (1) finding highly variable genes, (2) scaling data, (3) running principal component analysis (PCA), (4) running UMAP based on PC coordinates, (5) embedding cells in a K-nearest neighbors graph (representing cells as principal components).
+
+```{r}
+se_l <- map(se_l, process_seurat)
+map(se_l, DimPlot, reduction = "umap")
+```
+
+
+## Doublets
+
+We follow the ["Doublet detection by simulation"](http://bioconductor.org/books/3.12/OSCA/doublet-detection.html) section from the book "Orchestrating Single-cell Analysis With Bioconductor":
+
+```{r}
+se_l <- map(se_l, \(seurat_obj) {
+  sce <- as.SingleCellExperiment(seurat_obj)
+  seurat_obj$doublet_score <- computeDoubletDensity(sce, dims = 30, k = 20)
+  seurat_obj
+})
+map(se_l, \(seurat_obj) {
+  p <- FeaturePlot(seurat_obj, "doublet_score") +
+    scale_color_viridis_c(option = "magma")
+  p
+})
+```
+
+
+# Cluster and annotate
+
+The first step will be to cluster cells and identify clusters of doublets using multiple sources of evidence (QC metrics, markers, scDblFinder). Second, we will cluster and annotate cells to a specific cell state.
+
+## M102
+
+```{r}
+se_l$M102 <- FindClusters(se_l$M102, resolution = 0.4)
+cols <- kelly.colors(length(levels(se_l$M102$seurat_clusters)) + 1)
+names(cols) <- NULL
+cols <- cols[2:length(cols)]
+DimPlot(se_l$M102, cols = cols)
+```
+
+We see that cluster 1 seems to correspond to the cluster that also has a high doublet score. Let us assess the distribution of QC metrics:
+
+```{r}
+vln_qc_clusters <- VlnPlot(
+  se_l$M102,
+  c("nCount_RNA", "nFeature_RNA", "pct_mt", "doublet_score"),
+  pt.size = 0,
+  ncol = 2,
+  cols = cols
+)
+vln_qc_clusters[[1]] <- vln_qc_clusters[[1]] +
+  scale_y_log10()
+vln_qc_clusters
+```
+
+In fact, we see that both cluster 1 and cluster 6 have a disproportionately high number of counts, detected genes, and doublet score. We proceed to find markers for these clusters:
+
+```{r}
+markers_1_6 <- map(c("1", "6"), \(x) {
+  df <- FindMarkers(
+    se_l$M102,
+    ident.1 = x,
+    only.pos = TRUE
+  )
+  head(df, 40)
+})
+markers_1_6
+```
+
+Cluster 1 does not have any specific marker (all markers have a very low log2 FC). Cluster 6, on the other hand, consists of proliferative cells, which is consistent with the high number of counts and features. Let us calculate a per-cell S phase and G2M phase score:
+
+```{r}
+se_l <- map(se_l, \(seurat_obj) {
+  seurat_obj <- CellCycleScoring(
+    seurat_obj,
+    s.features = cc.genes.updated.2019$s.genes,
+    g2m.features = cc.genes.updated.2019$g2m.genes
+  )
+  seurat_obj
+})
+map(se_l, FeaturePlot, features = c("S.Score", "G2M.Score"))
+```
+
+
+Finally, we run the findDoubletClusters from scDblFinder, which identifies clusters with an expression profile lying between two other clusters:
+
+```{r}
+sce_M102 <- as.SingleCellExperiment(se_l$M102)
+dbl_out <- findDoubletClusters(
+  sce_M102,
+  clusters = sce_M102$seurat_clusters
+)
+dbl_out
+```
+
+
+We see that cluster 8 consists of T-cells (contamination / doublets):
+
+```{r}
+FeaturePlot(se_l$M102, "CD3D")
+VlnPlot(se_l$M102, "CD3D", cols = cols) + NoLegend()
+markers_8 <- FindMarkers(
+  se_l$M102,
+  ident.1 = "8",
+  only.pos = TRUE,
+  logfc.threshold = 1
+)
+head(markers_8, 20)
+```
+
+
+With all the evidence gathered, we proceed to exclude cluster 1 and 8:
+
+```{r}
+se_l$M102 <- se_l$M102[, !(se_l$M102$seurat_clusters %in% c("1", "8"))]
+DimPlot(se_l$M102, cols = cols)
+```
+
+
+We now reprocess the dataset and cluster cells into meaningful cell states:
+
+```{r}
+se_l$M102 <- process_seurat(se_l$M102)
+DimPlot(se_l$M102, cols = cols)
+```
+
+We know from exploratory analysis that the main driver of intratumoral transcriptional heterogeneity in MCL are copy number alterations. In particular, we detected a loss of chromosome Y (among others) using [infercnv](https://github.com/broadinstitute/inferCNV/wiki). We visualize the expression of genes encoded in the Y chromosome, collapse their expression into a per cell score ("chr Y score") and classify them in chr Y+ or chr Y- using this score:
+
+```{r}
+# Visualize expression of genes encoded in chromosome Y
+goi_chrY <- c("UTY", "KDM5D", "DDX3Y", "USP9Y", "ZFY", "EIF1AY")
+FeaturePlot(se_l$M102, features = goi_chrY) &
+  scale_color_viridis_c(option = "magma") &
+  NoLegend()
+
+# Score cells based on chromosome Y expression
+se_l$M102 <- AddModuleScore(
+  se_l$M102,
+  features = list(goi_chrY),
+  name = "chrY_score"
+)
+FeaturePlot(se_l$M102, "chrY_score1") &
+  scale_color_viridis_c(option = "magma")
+
+# Classify cells in chr Y + and chr Y -
+(density_gg <- se_l$M102@meta.data %>%
+  ggplot(aes(chrY_score1)) +
+  geom_density() +
+  geom_vline(xintercept = chrY_cutoff_102, linetype = "dashed", color = "darkblue") +
+  theme_classic())
+se_l$M102$has_loss_chrY <- ifelse(
+  se_l$M102$chrY_score1 > chrY_cutoff_102,
+  "chrY+",
+  "chrY-"
+)
+DimPlot(se_l$M102, group.by = "has_loss_chrY")
+```
+
+
+Strategy: identify broad clusters (chrY+ and -), subcluster inside each of them with FindSubCluster:
+
+```{r}
+se_l$M102 <- FindClusters(se_l$M102, resolution = 0.05)
+DimPlot(se_l$M102)
+
+
+# Subcluster cluster 0 (chr Y+)
+se_l$M102 <- FindSubCluster(
+  se_l$M102,
+  graph.name = "RNA_snn",
+  resolution = 0.6,
+  cluster = "0",
+  subcluster.name = "subclusters_0"
+)
+DimPlot(se_l$M102, group.by = "subclusters_0")
+
+
+# Subcluster cluster 1 (chr Y-)
+se_l$M102$clusters_20230625 <- se_l$M102$subclusters_0
+Idents(se_l$M102) <- "clusters_20230625"
+se_l$M102 <- FindSubCluster(
+  se_l$M102,
+  graph.name = "RNA_snn",
+  resolution = 0.6,
+  cluster = "1",
+  subcluster.name = "clusters_20230625"
+)
+DimPlot(se_l$M102, group.by = "clusters_20230625")
+
+
+# Further subcluster to get non-tumoral cells
+Idents(se_l$M102) <- "clusters_20230625"
+se_l$M102 <- FindSubCluster(
+  se_l$M102,
+  graph.name = "RNA_snn",
+  resolution = 0.1,
+  cluster = "1_4",
+  subcluster.name = "clusters_20230625"
+)
+DimPlot(se_l$M102, group.by = "clusters_20230625")
+Idents(se_l$M102) <- "clusters_20230625"
+```
+
+
+## Markers and annotation
+
+```{r}
+# Markers subclusters cluster 0
+se_clus0 <- se_l$M102[, str_detect(se_l$M102$clusters_20230625, "^0")]
+DimPlot(se_clus0)
+markers_0 <- FindAllMarkers(se_clus0, only.pos = TRUE, logfc.threshold = 0.75)
+markers_0 <- markers_0[markers_0$p_val_adj < 0.001, ]
+DT::datatable(markers_0, options = list(scrollX = TRUE))
+
+
+# Markers subclusters cluster 1
+se_clus1 <- se_l$M102[, str_detect(se_l$M102$clusters_20230625, "^1")]
+Idents(se_clus1) <- "clusters_20230625"
+DimPlot(se_clus1)
+markers_1 <- FindAllMarkers(se_clus1, only.pos = TRUE, logfc.threshold = 0.75)
+markers_1 <- markers_1[markers_1$p_val_adj < 0.001, ]
+DT::datatable(markers_1, options = list(scrollX = TRUE))
+Idents(se_l$M102) <- "clusters_20230625"
+```
+
+
+Annotation:
+
+| Subcluster  | Markers                 | Annotation             |
+|-------------|-------------------------|------------------------|
+| 0_0         | TCF4, RGS12             | c1 TCF4Hi RGS12Hi      |
+| 0_1         | MT1G, MT1E, MT1X, MT2A  | c1 metallothionein     |
+| 0_2         | MT1G, MT1E, MT1X, MT2A  | c1 metallothionein     |
+| 0_3         | MYC, NFKB1, MIR155HG    | c1 MYC+NFKB1+MIR155HG+ |
+| 0_4         | CD69, JUN, FOS          | c1 CD69+AP1+           |
+| 0_5         | TUBB, CENPP             | c1 S phase             |
+| 0_6         | CCL22, NME1             | c1 CCL22+NME1+         |
+| 1_0         | MT1G, MT1E, MT1X, MT2A  | c2 metallothionein     |
+| 1_1         | CD69, JUN, FOS          | c2 CD69+AP1+           |
+| 1_2         | TCF4, RGS12             | c2 TCF4Hi RGS12Hi      |
+| 1_3         | MYC, NFKB1, MIR155HG    | c2 MYC+NFKB1+MIR155HG+ |
+| 1_4_0       | NR3C2                   | c2 NR3C2+              |
+| 1_4_1       | SOX11-, CCND1-          | c3 non-tumoral B-cells |
+| 2           | MKI67, CENPF            | c1 G2M Phase           |
+
+
+```{r}
+current_levels <- c("0_0", "0_1", "0_2", "0_3", "0_4", "0_5", "0_6", "1_0", "1_1",
+                    "1_2", "1_3", "1_4_0", "1_4_1", "2")
+new_levels <- c("c1 TCF4Hi RGS12Hi", "c1 metallothionein", "c1 metallothionein",
+                "c1 MYC+NFKB1+MIR155HG+", "c1 CD69+AP1+", "c1 S phase",
+                "c1 CCL22+NME1+", "c2 metallothionein", "c2 CD69+AP1+",
+                "c2 TCF4Hi RGS12Hi", "c2 MYC+NFKB1+MIR155HG+", "c2 NR3C2+",
+                "c3 non-tumoral B-cells", "c1 G2M Phase")
+names(new_levels) <- current_levels
+
+se_l$M102$annotation_20230625 <- new_levels[se_l$M102$clusters_20230625]
+Idents(se_l$M102) <- "annotation_20230625"
+cols <- kelly.colors(length(new_levels) + 1)
+names(cols) <- NULL
+cols <- cols[2:length(cols)]
+DimPlot(se_l$M102, pt.size = 0.85, cols = cols)
+```
+
+
+Plot markers
+
+```{r}
+goi <- c(goi_chrY, "TCF4", "RGS12", "MT1G", "MT1E", "MT1X", "MT2A", "MYC",
+         "NFKB1", "MIR155HG", "CD69", "JUN", "FOS", "TUBB", "CENPP", "CCL22",
+         "NME1", "NR3C2", "SOX11", "CCND1", "MKI67", "CENPF")
+dot_plot <- DotPlot(se_l$M102, features = rev(goi)) +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8),
+    legend.text = element_text(size = 7),
+    legend.title = element_text(size = 7),
+    axis.text.x = element_text(size = 8, angle = 90, hjust = 1, vjust = 1)
+  )
+dot_plot
+```
+
+
+## M413
+
+We follow the same process for the second donor (M413):
+
+```{r}
+se_l$M413 <- FindClusters(se_l$M413, resolution = 0.4)
+cols <- kelly.colors(length(levels(se_l$M413$seurat_clusters)) + 1)
+names(cols) <- NULL
+cols <- cols[2:length(cols)]
+
+vln_qc_clusters <- VlnPlot(
+  se_l$M413,
+  c("nCount_RNA", "nFeature_RNA", "pct_mt", "doublet_score"),
+  pt.size = 0,
+  ncol = 2,
+  cols = cols
+)
+vln_qc_clusters[[1]] <- vln_qc_clusters[[1]] +
+  scale_y_log10()
+vln_qc_clusters
+
+umap_dbl_score <- FeaturePlot(se_l$M413, "doublet_score") +
+  scale_color_viridis_c(option = "magma")
+umap_clusters <- DimPlot(se_l$M413, group.by = "seurat_clusters", cols = cols)
+umap_clusters | umap_dbl_score # cluster 4 seems to be composed of doublets
+FeaturePlot(se_l$M413, c("CD3E", "CD3D")) # cluster 9 might be T cells
+markers_4_9 <- map(c("4", "9"), \(x) {
+  df <- FindMarkers(
+    se_l$M413,
+    ident.1 = x,
+    only.pos = TRUE
+  )
+  head(df, 40)
+})
+map(markers_4_9, head, 30)
+
+
+# scDblFinder
+sce_M413 <- as.SingleCellExperiment(se_l$M413)
+dbl_out <- findDoubletClusters(
+  sce_M413,
+  clusters = sce_M413$seurat_clusters
+)
+dbl_out
+
+
+# Exclude cluster 4 (doublets) and 9 (T cells) and reprocess
+se_l$M413 <- se_l$M413[, !(se_l$M413$seurat_clusters %in% c("4", "9"))]
+DimPlot(se_l$M413, cols = cols)
+se_l$M413 <- process_seurat(se_l$M413)
+DimPlot(se_l$M413, cols = cols)
+```
+
+
+Similar as before, we classify cells into chrY+ and chrY-:
+
+```{r}
+# Visualize expression of genes encoded in chromosome Y
+FeaturePlot(se_l$M413, features = goi_chrY) &
+  scale_color_viridis_c(option = "magma") &
+  NoLegend()
+
+# Score cells based on chromosome Y expression
+se_l$M413 <- AddModuleScore(
+  se_l$M413,
+  features = list(goi_chrY),
+  name = "chrY_score"
+)
+FeaturePlot(se_l$M413, "chrY_score1") &
+  scale_color_viridis_c(option = "magma")
+
+# Classify cells in chr Y + and chr Y -
+(density_gg <- se_l$M413@meta.data %>%
+  ggplot(aes(chrY_score1)) +
+  geom_density() +
+  geom_vline(xintercept = chrY_cutoff_413, linetype = "dashed", color = "darkblue") +
+  theme_classic())
+se_l$M413$has_loss_chrY <- ifelse(
+  se_l$M413$chrY_score1 > chrY_cutoff_413,
+  "chrY+",
+  "chrY-"
+)
+DimPlot(se_l$M413, group.by = "has_loss_chrY")
+```
+
+Cluster:
+
+```{r}
+se_l$M413 <- FindClusters(se_l$M413, resolution = 0.05)
+DimPlot(se_l$M413)
+
+
+# Subcluster cluster 0 (chr Y+)
+se_l$M413 <- FindSubCluster(
+  se_l$M413,
+  graph.name = "RNA_snn",
+  resolution = 0.5,
+  cluster = "0",
+  subcluster.name = "subclusters_0"
+)
+DimPlot(se_l$M413, group.by = "subclusters_0")
+
+
+# Further subcluster cluster 0_2
+Idents(se_l$M413) <- "subclusters_0"
+se_l$M413 <- FindSubCluster(
+  se_l$M413,
+  graph.name = "RNA_snn",
+  resolution = 0.2,
+  cluster = "0_2",
+  subcluster.name = "clusters_20230625"
+)
+DimPlot(se_l$M413, group.by = "clusters_20230625")
+Idents(se_l$M413) <- "clusters_20230625"
+
+
+# Finally, let us further subcluster cluster 3, which contains normal GCBC
+se_l$M413 <- FindSubCluster(
+  se_l$M413,
+  graph.name = "RNA_snn",
+  resolution = 0.1,
+  cluster = "2",
+  subcluster.name = "clusters_20230625"
+)
+cols <- kelly.colors(length(unique(se_l$M413$clusters_20230625)) + 1)
+names(cols) <- NULL
+cols <- cols[2:length(cols)]
+DimPlot(se_l$M413, group.by = "clusters_20230625", cols = cols)
+Idents(se_l$M413) <- "clusters_20230625"
+```
+
+
+## Markers and annotation
+
+```{r}
+markers_413 <- FindAllMarkers(se_l$M413, only.pos = TRUE, logfc.threshold = 0.75)
+markers_413 <- markers_413[markers_413$p_val_adj < 0.001, ]
+DT::datatable(markers_413, options = list(scrollX = TRUE))
+```
+
+
+Annotation:
+
+| Subcluster  | Markers                          | Annotation                         |
+|-------------|----------------------------------|------------------------------------|
+| 0_0         | chrY-, CD69lo, CXCR4lo, JUNB-    | c1 chrY-CD69LoCXCR4LoJUNB-         |
+| 0_1         | chrY+, CD69lo, CXCR4lo, JUNB-    | c1 chrY+CD69LoCXCR4LoJUNB-         |
+| 0_2_0       | CD69, CXCR4, JUNB                | c1 CD69Hi CXCR4HiJUNB+             |
+| 0_2_1       | CD69, CXCR4, JUNB, TSHZ2, MECOM  | c1 CD69Hi CXCR4HiJUNB+TSHZ2+MECOM+ |
+| 0_3         | TSHZ2, MECOM                     | c1 TSHZ2+MECOM+                    |
+| 0_4         | CENPK, POLQ                      | c1 S phase                         |
+| 0_5         | MYC, MIR155HG, NFKB1             | c1 MYC+MIR155HG+NFKB1Hi            |
+| 0_6         | MT-ND2, MT-ND3, MT-ATP8          | poor-quality                       |
+| 0_7         | HSPD1, HSP90AB1, HSPA1A          | poor-quality                       |
+| 1           | PCDH9                            | c2 PCDH9 Hi                        |
+| 2_0         | MEF2B, RGS13                     | GCBC                               |
+| 2_1         | CENPF, CENPE                     | c1 G2M phase                       |
+| 3           | CD96, TOX, SOX5                  | NBC/MBC                            |
+| 4           | XBP1, PRDM1                      | PC                                 |
+ 
+```{r}
+current_levels <- c("0_0", "0_1", "0_2_0", "0_2_1", "0_3", "0_4", "0_5", "0_6",
+                    "0_7", "1", "2_0", "2_1", "3", "4")
+new_levels <- c("c1 chrY-CD69LoCXCR4LoJUNB-", "c1 chrY+CD69LoCXCR4LoJUNB-",
+                "c1 CD69Hi CXCR4HiJUNB+", "c1 CD69Hi CXCR4HiJUNB+TSHZ2+MECOM+",
+                "c1 TSHZ2+MECOM+", "c1 S phase", "c1 MYC+MIR155HG+NFKB1Hi",
+                "poor-quality", "poor-quality", "c2 PCDH9 Hi", "GCBC", "c1 G2M phase",
+                "NBC/MBC", "PC")
+names(new_levels) <- current_levels
+se_l$M413$annotation_20230625 <- new_levels[se_l$M413$clusters_20230625]
+Idents(se_l$M413) <- "annotation_20230625"
+cols <- kelly.colors(length(new_levels) + 1)
+names(cols) <- NULL
+cols <- cols[2:length(cols)]
+DimPlot(se_l$M413, pt.size = 0.85, cols = cols)
+
+
+# Remove cluster 6 and reprocess
+se_l$M413 <- se_l$M413[, se_l$M413$annotation_20230625 != "poor-quality"]
+se_l$M413 <- process_seurat(se_l$M413)
+DimPlot(se_l$M413, pt.size = 0.85, cols = cols)
+```
+
+
+Plot markers
+
+```{r}
+goi_413 <- c("CCND1", "SOX11", "CD69", "FOS", "ZNF331", "RGS2" , "MECOM",
+             "TSHZ2", "JUNB", "CXCR4", "CCL3", "PCDH9", "MIR155HG", "NFKB1",
+             "PCNA", "TOP2A", "MCM6", "MKI67", "MYC", "IRF4", "PRDM1", "BCL6",
+             "MEF2B", "PLAC8", "SOX5")
+dot_plot <- DotPlot(se_l$M413, features = rev(goi_413)) +
+  scale_color_distiller(palette = "Blues", direction = 1) +
+  theme(
+    axis.title = element_blank(),
+    axis.text.y = element_text(size = 8),
+    legend.text = element_text(size = 7),
+    legend.title = element_text(size = 7),
+    axis.text.x = element_text(size = 8, angle = 90, hjust = 1, vjust = 1)
+  )
+dot_plot
+```
+
+
+# Save
+
+```{r}
+dir.create(here("MCL/results/R_objects"), recursive = TRUE)
+saveRDS(se_l, here("MCL/results/R_objects/20230625_seurat_list_MCL_M102_M413_tumoral_cells_annotated.rds"))
+```
+
+
+# Session Information
+
+```{r}
+sessionInfo()
+```
+
