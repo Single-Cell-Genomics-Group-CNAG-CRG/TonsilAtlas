@@ -1,4 +1,4 @@
-# A periodic table of human tonsillar cells
+# An Atlas of Cells in the Human Tonsil 
 
 Palatine tonsils are secondary lymphoid organs (SLO) representing the first line of immunological defense
 against inhaled or ingested pathogens. Here, we provide a comprehensive census of cell types forming the
