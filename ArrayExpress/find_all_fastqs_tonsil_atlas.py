@@ -141,6 +141,49 @@ fastqs_spatial = fastqs_spatial[ordered_cols]
 fastqs_spatial.rename(columns = {"type_x": "type"}, inplace = True)
 
 
-# Concat all and save
+# Concat all
 fastq_all = pd.concat([fastqs_rna, fastqs_atac, fastqs_multiome, fastqs_cite, fastqs_spatial, fastqs_mcl])
+
+
+# Specify flowcell, lane and index
+flowcell = []
+lane = []
+index = []
+file_paths = fastq_all["fastq_path"]
+for path in file_paths:
+    parts = path.split('/')
+    file_name = parts[-1]
+    file_parts = file_name.split('_')
+    flowcell.append(file_parts[0])
+    lane.append(file_parts[1].split('-')[0])
+    index.append(file_parts[2])
+
+fastq_all["flowcell"] = flowcell
+fastq_all["lane"] = lane
+fastq_all["index"] = index
+
+
+# Include name to upload to ArrayExpress
+scRNAseq.BCLL-2-T.BCLLATLAS_05.jb6vuao4_g4vi9ur0.130339.NotHashed.P1.R1.fastq.gz
+fastq_name_array_express = []
+for i in range(fastq_all.shape[0]):
+    dataset = fastq_all["dataset"].values[i]
+    donor_id = fastq_all["donor_id"].values[i]
+    subproject = fastq_all["subproject"].values[i]
+    gem_id = fastq_all["gem_id"].values[i]
+    library_id = fastq_all["library_id"].values[i]
+    lib_type = fastq_all["type"].values[i]
+    pair_id = fastq_all["pair_id"].values[i]
+    read = fastq_all["read"].values[i]
+    tmp = f"{dataset}.{donor_id}.{subproject}.{gem_id}.{library_id}.{lib_type}.{pair_id}.{read}.fastq.gz"
+    fastq_name_array_express.append(tmp)
+
+fastq_all["fastq_name_array_express"] = fastq_name_array_express
+
+
+# Rename read 1 and 2 from spatial transcriptomics
+fastq_all.read[fastq_all.read == 1] = "R1"
+fastq_all.read[fastq_all.read == 2] = "R2"
+
+# Save
 fastq_all.to_csv(f"{repo_dir}/fastq_paths_all.csv", index = False)
