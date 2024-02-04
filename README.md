@@ -32,7 +32,7 @@ The data has been deposited in five levels of organization, from raw to processe
 
 We refer to the READMEs in the Zenodo repositories for an explanation of how to access the matrices and Seurat objects. Users can follow these steps to download the fastq files:
 
-1. Download a tsv file that lists all the fastq files available in the repository and filter them to the modality of choice. We will exemplify it here with scRNA-seq. Note: the URL was copied from the section "Download report" from secondary seccion id [ERP156759](https://www.ebi.ac.uk/ena/browser/view/PRJEB71973) of ArrayExpress.
+1. Download a tsv file that lists all the fastq files available in the repository and filter them to the modality of choice. We will exemplify it here with scRNA-seq. Note: the URL was copied from the section "Download report" from secondary section id [ERP156759](https://www.ebi.ac.uk/ena/browser/view/PRJEB71973) of ArrayExpress.
 
 ```{bash}
 PATH_TSV="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=PRJEB71973&result=read_run&fields=study_accession,sample_accession,experiment_accession,run_accession,tax_id,scientific_name,fastq_ftp,submitted_ftp,sra_ftp,bam_ftp&format=tsv&download=true&limit=0"
@@ -49,7 +49,7 @@ Here's a more detailed description of each field:
 * TECHNOLOGY: scRNA-seq, scATAC-seq, Multiome, CITE-seq+scVDJ-seq, and spatial transcriptomics (Visium). We also include the fastq files associated with the multiome experiments performed on two mantle cell lymphoma patients (MCL).
 * DONOR_ID: identifier for each of the 17 patients included in the cohort. We provide the donor-level metadata in the file "tonsil_atlas_donor_metadata.csv", including the hospital, sex, age, age group, cause for tonsillectomy and cohort type for every donor.
 * SUBPROJECT: each subproject corresponds to one run of the 10x Genomics Chromium™ Chip.
-* GEM_ID: each run of the 10x Genomics Chromium™ Chip consists of up to 8 "GEM wells" (see https://www.10xgenomics.com/support/software/cell-ranger/getting-started/cr-glossary): a set of partitioned cells (Gel Beads-in-emulsion) from a single 10x Genomics Chromium™ Chip channel. We give a unique identifier to each of these channels.
+* GEM_ID: each run of the 10x Genomics Chromium™ Chip consists of up to 8 "GEM wells" (see [10X documentation](https://www.10xgenomics.com/support/software/cell-ranger/getting-started/cr-glossary)): a set of partitioned cells (Gel Beads-in-emulsion) from a single 10x Genomics Chromium™ Chip channel. We give a unique identifier to each of these channels.
 * LIBRARY_ID: one or more sequencing libraries can be derived from a GEM well. For instance, multiome yields two libraries (ATAC and RNA) and CITE-seq+scVDJ yields 4 libraries (RNA, ADT, BCR, TCR).
 * LIBRARY_TYPE: the type of library for each library_id. Note that we used cell hashing () for a subset of the scRNA-seq libraries, and thus the library_type can be "not_hashed", "hashed_cdna" (RNA expression) or "hashed_hto" (the hashtag oligonucleotides).
 * LANE: to increase sequencing depth, each library was sequenced in more than one lane. Important: all lanes corresponding to the same sequencing library need to be inputed together to cellranger, because they come from the same set of cells.
