@@ -1,22 +1,20 @@
 # An Atlas of Cells in the Human Tonsil 
 
-Palatine tonsils are secondary lymphoid organs (SLO) representing the first line of immunological defense
-against inhaled or ingested pathogens. Here, we provide a comprehensive census of cell types forming the
-human tonsil by applying single-cell transcriptome, epigenome, proteome and adaptive immune repertoire
-sequencing as well as spatial transcriptomics, resulting in an atlas of >556,000 cells. We provide a glossary
-of 121 annotated cell types and states and disentangle gene regulatory mechanisms that drive cells through
-specialized lineage trajectories. Exemplarily, we stratify multiple tonsil-resident myeloid slan-like subtypes,
-establish a BCL6 distal enhancer as locally active in both follicle-associated T and B cells, and describe
-SIX5 as a potentially novel transcriptional regulator of plasma cell maturation. Further, we demonstrate the
-value of the atlas as a reference to annotate cells from normal or pathological SLO. Therefore, we develop
-HCATonsilData and SLOcatoR, a computational framework that provides easy data access and enables
-future annotation of single-cell profiles from SLO. The integration of a validation cohort confirms the
-presence, annotation and markers of tonsillar cell types and provides evidence of age-related compositional
-shifts. Finally, we apply our reference atlas to characterize neoplastic cell states of B cell-derived
-lymphomas, linking transcriptional heterogeneity in mantle cell lymphoma (MCL) to normal B cell
-differentiation states of the human tonsil.
+Palatine tonsils are secondary lymphoid organs (SLOs) representing the first line of immunological defense
+against inhaled or ingested pathogens. We generated an atlas of the human tonsil composed of >556,000 cells
+profiled across five different data modalities, including single-cell transcriptome, epigenome, proteome, and
+immune repertoire sequencing, as well as spatial transcriptomics. This census identified 121 cell types and states,
+defined developmental trajectories, and enabled an understanding of the functional units of the tonsil. Exemplarily,
+we stratified myeloid slan-like subtypes, established a BCL6 enhancer as locally active in follicle-associated T
+and B cells, and identified SIX5 as putative transcriptional regulator of plasma cell maturation. Analyses of a
+validation cohort confirmed the presence, annotation, and markers of tonsillar cell types and provided evidence
+of age-related compositional shifts. We demonstrate the value of this resource by annotating cells from B cell-derived
+mantle cell lymphomas, linking transcriptional heterogeneity to normal B cell differentiation states of the human tonsil.
 
-This repository contains all the scripts, notebooks and reports to reproduce all analysis from our recent preprint titled "An Atlas of Cells in the Human Tonsil", published in Immunity in 2024. Here, we describe how to access the data, document the most important packages and versions used, and explain how to navigate the directories and files in this repository.
+This repository contains all the scripts, notebooks and reports to reproduce all analysis from our manuscript
+entitled [_An Atlas of Cells in the Human Tonsil_](https://www.cell.com/immunity/fulltext/S1074-7613(24)00031-1), published in Immunity in 2024.
+Here, we describe how to access the data, document the most important packages and versions used, and explain how
+to navigate the directories and files in this repository.
 
 ![](data/TonsilAtlasPic.png)
 
@@ -26,14 +24,43 @@ This repository contains all the scripts, notebooks and reports to reproduce all
 The data has been deposited in five levels of organization, from raw to processed data:
 
 
-* Level 1: raw data. All fastq files for all data modalities have been deposited at the European Genome Archive (EGA) under accession id XXX.
-* Level 2: matrices. All data modalities correspond to different technologies from 10X Genomics. As such, they were mapped with different flavors of CellRanger (CR). The most important files in the “outs” folder of every CR run (including all matrices) have been deposited in [Zenodo](https://zenodo.org/records/6678331).
+* Level 1: raw data. All fastq files for all data modalities have been deposited at ArrayExpress under accession id [E-MTAB-13687](https://www.ebi.ac.uk/biostudies/arrayexpress/studies/E-MTAB-13687).
+* Level 2: matrices. All data modalities correspond to different technologies from 10X Genomics. As such, they were mapped with different flavors of CellRanger (CR). The most important files in the ‘‘outs’’ folder of every CR run (including all matrices) have been deposited in [Zenodo](https://zenodo.org/records/10373041).
 * Level 3: Seurat Objects. All data was analyzed within the Seurat ecosystem. We have archived in [Zenodo](https://zenodo.org/records/8373756) all Seurat Objects that contain the raw and processed counts, dimensionality reductions (PCA, Harmony, UMAP), and metadata needed to reproduce all figures from this manuscript.
-* Level 4: to allow for programmatic and modular access to the whole tonsil atlas dataset, we developed HCATonsilData, available on [GitHub](https://github.com/massonix/HCATonsilData) and [BioConductor](https://bioconductor.org/packages/release/data/experiment/html/HCATonsilData.html). HCATonsilData provides a vignette which documents how to navigate and understand the data. In addition, we will periodically update the annotations as we refine it with suggestions from the  community.
-* Level 5: interactive mode. We provide different iSEE instances to browse the data interactively: [http://shiny.imbei.uni-mainz.de:3838/iSEE_TonsilDataAtlas/](http://shiny.imbei.uni-mainz.de:3838/iSEE_TonsilDataAtlas/).
+* Level 4: to allow for programmatic and modular access to the whole tonsil atlas dataset, we developed [HCATonsilData](https://bioconductor.org/packages/release/data/experiment/html/HCATonsilData.html), available on BioConductor. HCATonsilData provides a vignette which documents how to navigate and understand the data. It also provides access to the glossary to traceback all annotations in the atlas. In addition, we will periodically update the annotations as we refine it with suggestions from the community.
+* Level 5: interactive mode. Our tonsil atlas has been included as a reference in [Azimuth](https://azimuth.hubmapconsortium.org/references/#Human%20-%20Tonsil%20v2), which allows interactive exploration of cell type markers on the web.
+
+We refer to the READMEs in the Zenodo repositories for an explanation of how to access the matrices and Seurat objects. Users can follow these steps to download the fastq files:
+
+1. Download a tsv file that lists all the fastq files available in the repository and filter them to the modality of choice. We will exemplify it here with scRNA-seq. Note: the URL was copied from the section "Download report" from secondary seccion id [ERP156759](https://www.ebi.ac.uk/ena/browser/view/PRJEB71973) of ArrayExpress.
+
+```{bash}
+PATH_TSV="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=PRJEB71973&result=read_run&fields=study_accession,sample_accession,experiment_accession,run_accession,tax_id,scientific_name,fastq_ftp,submitted_ftp,sra_ftp,bam_ftp&format=tsv&download=true&limit=0"
+wget -O fastq_list_tonsil_atlas.tsv "$PATH_TSV"
+grep "scRNA-seq" fastq_list_tonsil_atlas.tsv > fastq_list_tonsil_atlas_scRNA.tsv
+```
+
+2. Create metadata using the names of the fastq files. Inspired by [The Cancer Genome Atlas (TCGA)](https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/), we have encoded all the metadata for a single fastq file in the name itself:
+
+[TECHNOLOGY].[DONOR_ID].[SUBPROJECT].[GEM_ID].[LIBRARY_ID].[LIBRARY_TYPE].[LANE].[READ].fastq.gz
+
+Here's a more detailed description of each field:
+
+* TECHNOLOGY: scRNA-seq, scATAC-seq, Multiome, CITE-seq+scVDJ-seq, and spatial transcriptomics (Visium). We also include the fastq files associated with the multiome experiments performed on two mantle cell lymphoma patients (MCL).
+* DONOR_ID: identifier for each of the 17 patients included in the cohort. We provide the donor-level metadata in the file "tonsil_atlas_donor_metadata.csv", including the hospital, sex, age, age group, cause for tonsillectomy and cohort type for every donor.
+* SUBPROJECT: each subproject corresponds to one run of the 10x Genomics Chromium™ Chip.
+* GEM_ID: each run of the 10x Genomics Chromium™ Chip consists of up to 8 "GEM wells" (see https://www.10xgenomics.com/support/software/cell-ranger/getting-started/cr-glossary): a set of partitioned cells (Gel Beads-in-emulsion) from a single 10x Genomics Chromium™ Chip channel. We give a unique identifier to each of these channels.
+* LIBRARY_ID: one or more sequencing libraries can be derived from a GEM well. For instance, multiome yields two libraries (ATAC and RNA) and CITE-seq+scVDJ yields 4 libraries (RNA, ADT, BCR, TCR).
+* LIBRARY_TYPE: the type of library for each library_id. Note that we used cell hashing () for a subset of the scRNA-seq libraries, and thus the library_type can be "not_hashed", "hashed_cdna" (RNA expression) or "hashed_hto" (the hashtag oligonucleotides).
+* LANE: to increase sequencing depth, each library was sequenced in more than one lane. Important: all lanes corresponding to the same sequencing library need to be inputed together to cellranger, because they come from the same set of cells.
+* READ: for scATAC-seq we have three reads (R1, R2 or R3), see cellranger-atac's documentation. While we find these names to be the most useful, they need to be changed to follow cellranger's conventions.
 
 
-We refer to the READMEs in these repositories for a full explanation of the dataset.
+```{bash}
+cut -f8 fastq_list_tonsil_atlas_scRNA.tsv | cut -d'/' -f6 | cut -d';' -f1 > fastq_names_scRNA.txt
+echo "technology,donor_id,subproject,gem_id,library_id,library_type,lane,read" > tonsil_atlas_fastq_metadata.csv
+sed 's/\.fastq\.gz//g' fastq_names_scRNA.txt | sed 's/\./,/g' >> tonsil_atlas_fastq_metadata.csv
+```
 
 
 ## Package versions
