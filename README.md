@@ -98,48 +98,42 @@ do
     wget -P $gem_id/fastqs $url_fastq1
     url_fastq2=$(echo $url | cut -d';' -f2)
     echo $url_fastq2
-    wget -P $gem_id/fastqs$url_fastq2
+    wget -P $gem_id/fastqs $url_fastq2
 done
 ```
 
 3.2. Rename fastq files following [cellranger conventions](https://www.10xgenomics.com/support/software/cell-ranger/latest/analysis/inputs/cr-specifying-fastqs).
 
 ```{bash}
-# Create an associative array to hold the mapping from pair_i Px to lane L00x
-declare -A lane_map
+# Create an associative array to hold the mapping from pair_id to lane_id
+declare -A lane_dict
 counter=1
-
-# First, extract all unique Px values and sort them
-for file in *.fastq.gz; do
-    px=$(echo "$file" | grep -oP '\.P\K[0-9]+')
-    if [[ ! -v lane_map[$px] ]]; then
-        lane_map[$px]=$counter
-        ((counter++))
-    fi
+pair_ids=$(ls $gem_id/fastqs | cut -d'.' -f7 | sort | uniq)
+for pair_id in $pair_ids; do
+    echo $pair_id
+    lane_dict[$pair_id]=$counter
+    ((counter++))
 done
 
-# Now, rename the files based on the Px to L00x mapping
-for file in *.fastq.gz; do
-    id=$(echo "$file" | awk -F. '{print $5}')
-    px=$(echo "$file" | grep -oP '\.P\K[0-9]+')
-    read_dir=$(echo "$file" | grep -oP '\.R[12]')
-    lane_num=$(printf "L%03d" ${lane_map[$px]})
 
-    new_name="${id}_S1_${lane_num}_${read_dir}_001.fastq.gz"
-    echo "Renaming $file to $new_name"
-    mv "$file" "$new_name"
+# Change fastq names to cellranger-friendly
+for fastq in $(ls $gem_id/fastqs); do
+    read=$(echo $fastq | cut -d'.' -f8)
+    pair_id=$(echo $fastq | cut -d'.' -f7)
+    lane=${lane_dict[$pair_id]}
+    new_name="${gem_id}_S1_L00${lane}_${read}_001.fastq.gz"
+    echo "Creating symbolic link for $fastq as $new_name"
+    ln -s "$fastq" "$gem_id/fastqs/$new_name"
 done
-
-"${gem_id}_S1_L00{$lane}_R{$read}_001.fastq.gz"
 ```
 
 3.3. Run [cellranger count](https://www.10xgenomics.com/support/software/cell-ranger/latest/tutorials/cr-tutorial-ct):
 
 ```{bash}
-cellranger count --id=run_count_1kpbmcs \
-   --fastqs=/mnt/home/user.name/yard/run_cellranger_count/pbmc_1k_v3_fastqs \
-   --sample=pbmc_1k_v3 \
-   --transcriptome=/mnt/home/user.name/yard/run_cellranger_count/refdata-gex-GRCh38-2020-A
+cellranger-7.2.0/cellranger count --id="run_count_${gem_id}" \
+   --fastqs=$gem_id/fastqs \
+   --sample=$gem_id \
+   --transcriptome=refdata-gex-GRCh38-2020-A
 ```
 
 ## Package versions
