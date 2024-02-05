@@ -42,7 +42,7 @@ grep "scRNA-seq" fastq_list_tonsil_atlas.tsv > fastq_list_tonsil_atlas_scRNA.tsv
 
 2. Create metadata using the names of the fastq files. Inspired by [The Cancer Genome Atlas (TCGA)](https://docs.gdc.cancer.gov/Encyclopedia/pages/TCGA_Barcode/), we have encoded all the metadata for a single fastq file in the name itself:
 
-[TECHNOLOGY].[DONOR_ID].[SUBPROJECT].[GEM_ID].[LIBRARY_ID].[LIBRARY_TYPE].[LANE].[READ].fastq.gz
+[TECHNOLOGY].[DONOR_ID].[SUBPROJECT].[GEM_ID].[LIBRARY_ID].[LIBRARY_TYPE].[PAIR_ID].[READ].fastq.gz
 
 Here's a more detailed description of each field:
 
@@ -52,7 +52,7 @@ Here's a more detailed description of each field:
 * GEM_ID: each run of the 10x Genomics Chromium™ Chip consists of up to 8 "GEM wells" (see [10X documentation](https://www.10xgenomics.com/support/software/cell-ranger/getting-started/cr-glossary)): a set of partitioned cells (Gel Beads-in-emulsion) from a single 10x Genomics Chromium™ Chip channel. We give a unique identifier to each of these channels.
 * LIBRARY_ID: one or more sequencing libraries can be derived from a GEM well. For instance, multiome yields two libraries (ATAC and RNA) and CITE-seq+scVDJ yields 4 libraries (RNA, ADT, BCR, TCR).
 * LIBRARY_TYPE: the type of library for each library_id. Note that we used cell hashing () for a subset of the scRNA-seq libraries, and thus the library_type can be "not_hashed", "hashed_cdna" (RNA expression) or "hashed_hto" (the hashtag oligonucleotides).
-* LANE: to increase sequencing depth, each library was sequenced in more than one lane. Important: all lanes corresponding to the same sequencing library need to be inputed together to cellranger, because they come from the same set of cells.
+* PAIR_ID: to increase sequencing depth, each library was sequenced in more than one lane. This id identifies the pairs of fastq files (R1, R2) for a given subproject. It is used in the scripts below to assign the lane (e.g. L001).
 * READ: for scATAC-seq we have three reads (R1, R2 or R3), see cellranger-atac's documentation. While we find these names to be the most useful, they need to be changed to follow cellranger's conventions.
 
 
@@ -62,6 +62,85 @@ echo "technology,donor_id,subproject,gem_id,library_id,library_type,lane,read" >
 sed 's/\.fastq\.gz//g' fastq_names_scRNA.txt | sed 's/\./,/g' >> tonsil_atlas_fastq_metadata.csv
 ```
 
+Each line of "fastq_list_tonsil_atlas_scRNA.tsv" contains both read 1 (R1) and read 2 (R2). With the code above we are subsetting R1.
+
+*IMPORTANT NOTE*: all fastq files derived from a single GEM well need to be mapped together because they correspond to the same set of cells and hence are given the same set of cell barcodes.
+
+We will exemplify the following steps with both kind of libraries (hashed and not_hashed), whichg will ensure that we understand the intricacies of both types. We will focus on two GEM_IDs (one of each type), but users should be able to parallelize the same procedure across all gem_ids using different jobs in a high performance computer (HPC, aka cluster).
+
+
+3. Download cellranger. As of 4/2/2024, the most recent version is [v7.2.0](https://www.10xgenomics.com/support/software/cell-ranger/downloads):
+
+```{bash}
+# Download cellranger 7.2.0
+curl -o cellranger-7.2.0.tar.gz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-7.2.0.tar.gz?Expires=1707140304&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=PGlaWX3hp28M3LlIwTrq880Rl3WjOwpBS-qNynL5zz-z6iLl-8ZpO~oK038dsvTk920KKIPMGzvBcqp~LUddLYQav82XBEgGc20QZUlvtv5t0bYr-eBSzHQCv20U95528H4feUABmE~rzuG~uvlz6-04D-iqmab5kset7kLwkmtY3ijnbRmRGXmCtfwWg~fQIJS8tGDJGS9JfVsTz2gsxaHL5J8GW4UQ8XqdszB4Dv~14c9uByThoIJCsU~CC7YFPtg~UoACnRzuT6DzyJzF0vvwRQ3pX0z6aLbHUkPnlQej3D9oiH~ZxXQjL3lTxaRaberv9rShjDY89Ta6YtPt4A__"
+tar -xzf cellranger-7.2.0.tar.gz
+
+
+# Download human reference
+curl -O "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz"
+tar -xzf refdata-gex-GRCh38-2020-A.tar.gz
+```
+
+
+## Not hashed
+
+3.1. Download fastqs for gem_id y7qn780g_p6jkgk63:
+
+```{bash}
+gem_id="y7qn780g_p6jkgk63"
+fastqs_urls=$(grep $gem_id fastq_list_tonsil_atlas_scRNA.tsv | cut -f8)
+mkdir -p $gem_id/fastqs
+for url in $fastqs_urls;
+do
+    url_fastq1=$(echo $url | cut -d';' -f1)
+    echo $url_fastq1
+    wget -P $gem_id/fastqs $url_fastq1
+    url_fastq2=$(echo $url | cut -d';' -f2)
+    echo $url_fastq2
+    wget -P $gem_id/fastqs$url_fastq2
+done
+```
+
+3.2. Rename fastq files following [cellranger conventions](https://www.10xgenomics.com/support/software/cell-ranger/latest/analysis/inputs/cr-specifying-fastqs).
+
+```{bash}
+# Create an associative array to hold the mapping from pair_i Px to lane L00x
+declare -A lane_map
+counter=1
+
+# First, extract all unique Px values and sort them
+for file in *.fastq.gz; do
+    px=$(echo "$file" | grep -oP '\.P\K[0-9]+')
+    if [[ ! -v lane_map[$px] ]]; then
+        lane_map[$px]=$counter
+        ((counter++))
+    fi
+done
+
+# Now, rename the files based on the Px to L00x mapping
+for file in *.fastq.gz; do
+    id=$(echo "$file" | awk -F. '{print $5}')
+    px=$(echo "$file" | grep -oP '\.P\K[0-9]+')
+    read_dir=$(echo "$file" | grep -oP '\.R[12]')
+    lane_num=$(printf "L%03d" ${lane_map[$px]})
+
+    new_name="${id}_S1_${lane_num}_${read_dir}_001.fastq.gz"
+    echo "Renaming $file to $new_name"
+    mv "$file" "$new_name"
+done
+
+"${gem_id}_S1_L00{$lane}_R{$read}_001.fastq.gz"
+```
+
+3.3. Run [cellranger count](https://www.10xgenomics.com/support/software/cell-ranger/latest/tutorials/cr-tutorial-ct):
+
+```{bash}
+cellranger count --id=run_count_1kpbmcs \
+   --fastqs=/mnt/home/user.name/yard/run_cellranger_count/pbmc_1k_v3_fastqs \
+   --sample=pbmc_1k_v3 \
+   --transcriptome=/mnt/home/user.name/yard/run_cellranger_count/refdata-gex-GRCh38-2020-A
+```
 
 ## Package versions
 
