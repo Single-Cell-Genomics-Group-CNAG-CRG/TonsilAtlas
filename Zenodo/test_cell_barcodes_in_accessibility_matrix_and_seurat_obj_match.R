@@ -12,17 +12,19 @@ options(timeout = 10000)
 url_cellranger <- "https://zenodo.org/records/11355186/files/scATAC-seq.zip?download=1"
 destfile_cellranger <- "scATAC-seq.zip"
 download.file(url_cellranger, destfile_cellranger)
-unzip(destfile_cellranger)
+unzip(destfile_cellranger, exdir = "./cellranger_outs_atac")
+
 
 # Download Seurat objects for scATAC-seq and unzip
 url_seurat <- "https://zenodo.org/records/8373756/files/TonsilAtlasSeuratATAC.tar.gz?download=1"
 destfile_seurat <- "TonsilAtlasSeuratATAC.tar.gz"
-download.file(url_cellranger, destfile_seurat)
-unzip(destfile_seurat)
+download.file(url_seurat, destfile_seurat)
+untar(destfile_seurat, exdir = "./seurat_objects_atac")
+
 
 # Read object and metadata
-metadata <- read_csv("~/Desktop/zenodo_20240525/scATAC-seq/metadata/cellranger_atac_metadata.csv")
-se <- readRDS("~/Downloads/scATAC-seq 3/20230911_tonsil_atlas_atac_seurat_obj.rds")
+metadata <- read_csv("cellranger_outs_atac/scATAC-seq/metadata/cellranger_atac_metadata.csv")
+se <- readRDS("seurat_objects_atac/scATAC-seq/20230911_tonsil_atlas_atac_seurat_obj.rds")
 
 
 # Read barcodes for each gem_id and check that they match
@@ -31,7 +33,7 @@ all_tests <- map_lgl(gem_ids, \(x) {
   print(x)
   subproject <- metadata$subproject[metadata$gem_id == x]
   barcodes <- read_tsv(
-    glue("~/Desktop/zenodo_20240525/scATAC-seq/{subproject}/{x}/filtered_peak_bc_matrix/barcodes.tsv"),
+    glue("cellranger_outs_atac/scATAC-seq/{subproject}/{x}/filtered_peak_bc_matrix/barcodes.tsv"),
     col_names = "barcode"
   )
   barcodes$barcode <- glue("{x}_{barcodes$barcode}")
