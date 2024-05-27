@@ -4,6 +4,22 @@ library(Signac)
 library(tidyverse)
 library(glue)
 
+# Set options
+options(timeout = 10000)
+
+
+# Download cellranger outs for scATAC-seq (version 3) and unzip
+url_cellranger <- "https://zenodo.org/records/11355186/files/scATAC-seq.zip?download=1"
+destfile_cellranger <- "scATAC-seq.zip"
+download.file(url_cellranger, destfile_cellranger)
+unzip(destfile_cellranger)
+
+# Download Seurat objects for scATAC-seq and unzip
+url_seurat <- "https://zenodo.org/records/8373756/files/TonsilAtlasSeuratATAC.tar.gz?download=1"
+destfile_seurat <- "TonsilAtlasSeuratATAC.tar.gz"
+download.file(url_cellranger, destfile_seurat)
+unzip(destfile_seurat)
+
 # Read object and metadata
 metadata <- read_csv("~/Desktop/zenodo_20240525/scATAC-seq/metadata/cellranger_atac_metadata.csv")
 se <- readRDS("~/Downloads/scATAC-seq 3/20230911_tonsil_atlas_atac_seurat_obj.rds")
