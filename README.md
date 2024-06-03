@@ -35,7 +35,7 @@ We refer to the READMEs in the Zenodo repositories for an explanation of how to 
 1. Download a tsv file that lists all the fastq files available in the repository and filter them to the modality of choice. We will exemplify it here with scRNA-seq. Note: the URL was copied from the section "Download report" from secondary section id [ERP156759](https://www.ebi.ac.uk/ena/browser/view/PRJEB71973) of ArrayExpress.
 
 ```{bash}
-PATH_TSV="[https://www.ebi.ac.uk/ena/portal/api/filereport?accession=PRJEB71973&result=read_run&fields=study_accession,sample_accession,experiment_accession,run_accession,tax_id,scientific_name,fastq_ftp,submitted_ftp,sra_ftp,bam_ftp&format=tsv&download=true&limit=0](https://www.ebi.ac.uk/ena/portal/api/filereport?accession=PRJEB75429&result=read_run&fields=study_accession,sample_accession,experiment_accession,run_accession,tax_id,scientific_name,fastq_ftp,submitted_ftp,sra_ftp,bam_ftp&format=tsv&download=true&limit=0)"
+PATH_TSV="https://www.ebi.ac.uk/ena/portal/api/filereport?accession=PRJEB75429&result=read_run&fields=study_accession,sample_accession,experiment_accession,run_accession,tax_id,scientific_name,fastq_ftp,submitted_ftp,sra_ftp,bam_ftp&format=tsv&download=true&limit=0"
 wget -O fastq_list_tonsil_atlas.tsv "$PATH_TSV"
 grep "scRNA-seq" fastq_list_tonsil_atlas.tsv > fastq_list_tonsil_atlas_scRNA.tsv
 ```
