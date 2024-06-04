@@ -73,8 +73,8 @@ We will exemplify the following steps with both kind of libraries (hashed and no
 
 ```{bash}
 # Download cellranger 7.2.0
-curl -o cellranger-8.0.1.tar.xz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-8.0.1.tar.xz?Expires=1717561298&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=Hzgt8mPIUR6K7xh2ob561bZwDGnR-T5vG2q~zspu5ydQKZjHYJXYk1sAbXy80FkyY2A6VvQPfvvzYi9~w-qYq~Ux7KFKoQgMl3UJl30Yln8tDPjmJXY7hDtzISVzAW4UyJx2BLaGCCmnlYw0t1DO2iDZGplRG-7QgCYJFfkgBqoDwnwnpMOeBEJJj6gklyH0vkw8isFk~qe~lEWr1K5FL99zTLoxXMnkoRPE8TEFD2sKUZIaHgMA3J71MG1QVmT33mgaU2GDAyIRSAzLr5XF6p-BqhnY~NvNcWfJRxpcEQusxhdOL~YFJ2OcXFORfV6PXJfyvqyY21uBhLcLJk22tQ__"
-tar -xzf cellranger-8.0.1.tar.xz
+curl -o cellranger-8.0.1.tar.gz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-8.0.1.tar.gz?Expires=1717561298&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=iZkk2k4-4RDbLSuDzbjBzW4C71N2TvyPy0NTYq1l9T2SxqMNeGtLiNuVE9O12OY72G~DStTUjQwB4oa1sawTbO0eOoiXK0SpM8lNuHJYdhhsP~sgmLfSVDJHfMNm0gyWBTx0sjv~A22sHtZ1Tdpp369z9vnbzZbvpLmrP7XYPvfyGMa98DWsRXSABVHAFMrJiuuyWU2JmooG-fbNA4Gs6BhLy9YbFqm-bhcR6znfKtQm76PqmB0M1Y22BioPgh1UHCp85Q1uDN5Pel73zhgDuac0Xz7Ri~AkLD1Tz3Z0ZX37gIFajH5-nCyLpak83UF9ViMfnb3~mo8lDQ4aMkLlbw__"
+tar -xzf cellranger-8.0.1.tar.gz
 
 
 # Download human reference
