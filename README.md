@@ -130,10 +130,11 @@ done
 3.3. Run [cellranger count](https://www.10xgenomics.com/support/software/cell-ranger/latest/tutorials/cr-tutorial-ct):
 
 ```{bash}
-cellranger-7.2.0/cellranger count --id="run_count_${gem_id}" \
+cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
    --fastqs=$gem_id/fastqs \
    --sample=$gem_id \
-   --transcriptome=refdata-gex-GRCh38-2020-A
+   --transcriptome=refdata-gex-GRCh38-2024-A
+   --include-introns
 ```
 
 ## Package versions
