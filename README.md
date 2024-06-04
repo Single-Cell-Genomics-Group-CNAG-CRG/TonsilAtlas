@@ -69,12 +69,12 @@ Each line of "fastq_list_tonsil_atlas_scRNA.tsv" contains both read 1 (R1) and r
 We will exemplify the following steps with both kind of libraries (hashed and not_hashed), whichg will ensure that we understand the intricacies of both types. We will focus on two GEM_IDs (one of each type), but users should be able to parallelize the same procedure across all gem_ids using different jobs in a high performance computer (HPC, aka cluster).
 
 
-3. Download cellranger. As of 4/2/2024, the most recent version is [v7.2.0](https://www.10xgenomics.com/support/software/cell-ranger/downloads):
+3. Download cellranger. As of 4/2/2024, the most recent version is [v8.0.1](https://www.10xgenomics.com/support/software/cell-ranger/downloads):
 
 ```{bash}
 # Download cellranger 7.2.0
-curl -o cellranger-7.2.0.tar.gz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-7.2.0.tar.gz?Expires=1707140304&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=PGlaWX3hp28M3LlIwTrq880Rl3WjOwpBS-qNynL5zz-z6iLl-8ZpO~oK038dsvTk920KKIPMGzvBcqp~LUddLYQav82XBEgGc20QZUlvtv5t0bYr-eBSzHQCv20U95528H4feUABmE~rzuG~uvlz6-04D-iqmab5kset7kLwkmtY3ijnbRmRGXmCtfwWg~fQIJS8tGDJGS9JfVsTz2gsxaHL5J8GW4UQ8XqdszB4Dv~14c9uByThoIJCsU~CC7YFPtg~UoACnRzuT6DzyJzF0vvwRQ3pX0z6aLbHUkPnlQej3D9oiH~ZxXQjL3lTxaRaberv9rShjDY89Ta6YtPt4A__"
-tar -xzf cellranger-7.2.0.tar.gz
+curl -o cellranger-8.0.1.tar.xz "https://cf.10xgenomics.com/releases/cell-exp/cellranger-8.0.1.tar.xz?Expires=1717561298&Key-Pair-Id=APKAI7S6A5RYOXBWRPDA&Signature=Hzgt8mPIUR6K7xh2ob561bZwDGnR-T5vG2q~zspu5ydQKZjHYJXYk1sAbXy80FkyY2A6VvQPfvvzYi9~w-qYq~Ux7KFKoQgMl3UJl30Yln8tDPjmJXY7hDtzISVzAW4UyJx2BLaGCCmnlYw0t1DO2iDZGplRG-7QgCYJFfkgBqoDwnwnpMOeBEJJj6gklyH0vkw8isFk~qe~lEWr1K5FL99zTLoxXMnkoRPE8TEFD2sKUZIaHgMA3J71MG1QVmT33mgaU2GDAyIRSAzLr5XF6p-BqhnY~NvNcWfJRxpcEQusxhdOL~YFJ2OcXFORfV6PXJfyvqyY21uBhLcLJk22tQ__"
+tar -xzf cellranger-8.0.1.tar.xz
 
 
 # Download human reference
