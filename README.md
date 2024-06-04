@@ -78,8 +78,8 @@ tar -xzf cellranger-8.0.1.tar.gz
 
 
 # Download human reference
-curl -O "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz"
-tar -xzf refdata-gex-GRCh38-2020-A.tar.gz
+curl -O "https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2024-A.tar.gz"
+tar -xzf refdata-gex-GRCh38-2024-A.tar.gz
 ```
 
 
