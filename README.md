@@ -135,7 +135,8 @@ cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
    --sample=$gem_id \
    --transcriptome=refdata-gex-GRCh38-2024-A \
    --include-introns false \
-   --create-bam false
+   --create-bam false \
+   --output-dir=$gem_id
 ```
 
 ## Package versions
