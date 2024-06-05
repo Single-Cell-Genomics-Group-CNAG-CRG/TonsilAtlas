@@ -139,6 +139,20 @@ cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
    --output-dir=$gem_id
 ```
 
+### Hashed
+
+Steps 3.1 and 3.2 are common for cell-hashed and not hashed samples, but step 3.3 is different. In particular, we need to specify the arguments --feature-ref and --libraries arguments (see cellranger count --help for more info).
+
+```{bash}
+cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
+   --libraries= \
+   --feature-ref= \
+   --sample=$gem_id \
+   --transcriptome=refdata-gex-GRCh38-2024-A \
+   --include-introns false \
+   --create-bam false \
+   --output-dir=$gem_id
+```
 ## Package versions
 
 * [Seurat 3.2.0 and 4.1.0](https://satijalab.org/seurat/)
