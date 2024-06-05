@@ -141,9 +141,13 @@ cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
 
 ### Hashed
 
-Steps 3.1 and 3.2 are common for cell-hashed and not hashed samples, but step 3.3 is different. In particular, we need to specify the arguments --feature-ref and --libraries arguments (see cellranger count --help for more info).
+Steps 3.1 and 3.2 are common for cell-hashed and not hashed samples, but step 3.3 is different. In particular, we need to specify the arguments --feature-ref and --libraries arguments (see cellranger count --help for more info). In addition, we need to download the feature-barcoding metadata to specify the --feature-ref argument. Let us exemplify it with gem_id dvdzq8et_eot75su8
 
 ```{bash}
+# Download feature barcoding
+URL_HASHING_METADATA=https://www.ebi.ac.uk/biostudies/files/E-MTAB-13687/cell_hashing_metadata.csv
+wget -O cell_hashing_metadata.csv "$URL_HASHING_METADATA"
+
 cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
    --libraries= \
    --feature-ref= \
