@@ -135,23 +135,79 @@ cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
    --sample=$gem_id \
    --transcriptome=refdata-gex-GRCh38-2024-A \
    --include-introns false \
-   --create-bam false \
-   --output-dir=$gem_id
+   --create-bam false
 ```
 
 ### Hashed
 
-Steps 3.1 and 3.2 are common for cell-hashed and not hashed samples, but step 3.3 is different. In particular, we need to specify the arguments --feature-ref and --libraries arguments (see cellranger count --help for more info). In addition, we need to download the feature-barcoding metadata to specify the --feature-ref argument. Let us exemplify it with gem_id dvdzq8et_eot75su8
+Step 3.1 is common for cell-hashed and not hashed samples, but steps 3.2 and 3.3 is different. For step 3.2 we need to declare which fastqs are cDNA and which are hashtag oligonucleotides (HTO). For step 3.3, we need to specify the arguments --feature-ref and --libraries arguments (see cellranger count --help for more info). In addition, we need to download the feature-barcoding metadata to specify the --feature-ref argument. Let us exemplify it with gem_id dvdzq8et_eot75su8
 
 ```{bash}
+gem_id="dvdzq8et_eot75su8"
+working_dir=$(pwd)
+
 # Download feature barcoding
 URL_HASHING_METADATA=https://www.ebi.ac.uk/biostudies/files/E-MTAB-13687/cell_hashing_metadata.csv
 wget -O cell_hashing_metadata.csv "$URL_HASHING_METADATA"
 
+
+# Rename fastqs cDNA
+mkdir -p $gem_id/fastqs/cDNA
+fastqs_dna=$(ls -ath ${gem_id}/fastqs | grep ".fastq.gz" | grep cdna)
+declare -A lane_dict_cdna
+counter=1
+pair_ids_cdna=$(ls $gem_id/fastqs | grep ".fastq.gz" | grep cdna | cut -d'.' -f7 | sort | uniq)
+for pair_id in $pair_ids_cdna; do
+    echo $pair_id
+    lane_dict_cdna[$pair_id]=$counter
+    ((counter++))
+done
+for fastq in $fastqs_dna; do
+    read=$(echo $fastq | cut -d'.' -f8)
+    pair_id=$(echo $fastq | cut -d'.' -f7)
+    lane=${lane_dict_cdna[$pair_id]}
+    new_name="${gem_id}_S1_L00${lane}_${read}_001.fastq.gz"
+    echo "Creating symbolic link for $fastq as $new_name"
+    ln -s "$working_dir/$gem_id/fastqs/$fastq" "$working_dir/$gem_id/fastqs/cDNA/$new_name"
+done
+
+
+# Rename fastqs HTO
+mkdir -p $gem_id/fastqs/hto
+fastqs_hto=$(ls -ath ${gem_id}/fastqs | grep ".fastq.gz" | grep hto)
+declare -A lane_dict_hto
+counter=1
+pair_ids_hto=$(ls $gem_id/fastqs | grep ".fastq.gz" | grep hto | cut -d'.' -f7 | sort | uniq)
+for pair_id in $pair_ids_hto; do
+    echo $pair_id
+    lane_dict_hto[$pair_id]=$counter
+    ((counter++))
+done
+for fastq in $fastqs_hto; do
+    read=$(echo $fastq | cut -d'.' -f8)
+    pair_id=$(echo $fastq | cut -d'.' -f7)
+    lane=${lane_dict_hto[$pair_id]}
+    new_name="${gem_id}_S1_L00${lane}_${read}_001.fastq.gz"
+    echo "Creating symbolic link for $fastq as $new_name"
+    ln -s "$working_dir/$gem_id/fastqs/$fastq" "$working_dir/$gem_id/fastqs/hto/$new_name"
+done
+
+
+# Rename fastqs and create libraries.csv file
+echo "fastqs,sample,library_type" > $working_dir/$gem_id/libraries.csv
+echo "${working_dir}/${gem_id}/fastqs/cDNA/,${gem_id},Gene Expression" >> $working_dir/$gem_id/libraries.csv
+echo "${working_dir}/${gem_id}/fastqs/hto/,${gem_id},Antibody Capture" >> $working_dir/$gem_id/libraries.csv
+
+
+# Create feature_reference.csv
+head -n1 cell_hashing_metadata.csv | cut -d, -f3-8 > $working_dir/$gem_id/feature_reference.csv
+grep $gem_id cell_hashing_metadata.csv | cut -d, -f3-8 >> $working_dir/$gem_id/feature_reference.csv
+
+
+# Run cellranger
 cellranger-8.0.1/cellranger count --id="run_count_${gem_id}" \
-   --libraries= \
-   --feature-ref= \
-   --sample=$gem_id \
+   --libraries=$working_dir/$gem_id/libraries.csv \
+   --feature-ref=$working_dir/$gem_id/feature_reference.csv \
    --transcriptome=refdata-gex-GRCh38-2024-A \
    --include-introns false \
    --create-bam false \
